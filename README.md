@@ -15,6 +15,16 @@
 pip install ezscreen
 ```
 
+### Optional: Install scrubber for enhanced ligand prep
+
+[forlilab/scrubber](https://github.com/forlilab/scrubber) provides tautomer enumeration and pH-driven protonation. It is not on PyPI, so install it separately:
+
+```bash
+pip install git+https://github.com/forlilab/scrubber.git
+```
+
+Without it, `ezscreen` falls back to RDKit-only preparation (still fully functional for most use cases).
+
 ## Setup
 
 First, configure your credentials:
