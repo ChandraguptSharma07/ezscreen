@@ -1,4 +1,4 @@
-from __future__ import annotations
+ï»¿from __future__ import annotations
 
 import json
 import threading
@@ -64,14 +64,14 @@ def start() -> None:
 def banner() -> str | None:
     """
     Return a Rich-formatted banner if a newer version is available.
-    Non-blocking — returns None immediately if the check is still running.
+    Non-blocking -- returns None immediately if the check is still running.
     """
     if not _done_evt.is_set():
         return None
     if not _latest or _latest == __version__:
         return None
     return (
-        f"[yellow bold]?  ezscreen {_latest} available[/yellow bold]  "
+        f"[yellow bold]>> ezscreen {_latest} available[/yellow bold]  "
         f"[dim](you have {__version__})[/dim]  "
         f"[cyan]pip install -U ezscreen[/cyan]"
     )

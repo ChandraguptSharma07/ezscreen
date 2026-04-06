@@ -1,4 +1,4 @@
-from __future__ import annotations
+ï»¿from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
@@ -68,21 +68,21 @@ def invoke(live: bool = False) -> None:
     runs = checkpoint.list_runs()
 
     if not runs:
-        console.print("[dim]No runs yet — start one with [bold]ezscreen run[/bold][/dim]")
+        console.print("[dim]No runs yet â€” start one with [bold]ezscreen run[/bold][/dim]")
         return
 
     if not live:
         console.print(_make_table(runs))
         console.print(
-            f"[dim]  {len(runs)} run(s)  ·  "
-            "resume: [bold]ezscreen resume <id>[/bold]  ·  "
-            "clean:  [bold]ezscreen clean <id>[/bold]  ·  "
+            f"[dim]  {len(runs)} run(s)  Â·  "
+            "resume: [bold]ezscreen resume <id>[/bold]  Â·  "
+            "clean:  [bold]ezscreen clean <id>[/bold]  Â·  "
             "live:   [bold]ezscreen status --live[/bold][/dim]"
         )
         return
 
-    # Live auto-refresh every 30 s — Ctrl-C to exit
-    console.print("[dim]Live mode — refreshes every 30 s  ·  Ctrl-C to exit[/dim]")
+    # Live auto-refresh every 30 s â€” Ctrl-C to exit
+    console.print("[dim]Live mode â€” refreshes every 30 s  Â·  Ctrl-C to exit[/dim]")
     last_refresh = 0.0
     with Live(console=console, refresh_per_second=1, screen=False) as live_obj:
         try:

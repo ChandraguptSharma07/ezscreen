@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -101,7 +101,7 @@ def print_summary(paths: dict[str, Path], report: dict[str, Any]) -> None:
     text.append(
         f"{bs.get('method')}  "
         f"center {bs.get('box_center')}  "
-        f"volume {bs.get('box_volume_angstrom3')} ų\n"
+        f"volume {bs.get('box_volume_angstrom3')} Å³\n"
     )
     text.append("Ligands      ", style="bold dim")
     text.append(f"{lig.get('total_input', 0):,} input ? {lig.get('prep_passed', 0):,} prepared")
