@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ezscreen"
-version = "0.1.0"
+version = "0.1.1"
 description = "GPU-accelerated virtual screening CLI — powered by Kaggle T4 GPUs"
 readme = "README.md"
 requires-python = ">=3.11"
