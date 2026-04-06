@@ -5,6 +5,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from ezscreen import version_check
+
 app = typer.Typer(
     name="ezscreen",
     help="GPU-accelerated virtual screening — powered by Kaggle T4 GPUs.",
@@ -13,6 +15,21 @@ app = typer.Typer(
 )
 
 console = Console()
+
+@app.callback(invoke_without_command=True)
+def main_callback(ctx: typer.Context) -> None:
+    """Run before every command to start the async version check."""
+    version_check.start()
+    # The banner will be printed by the atexit handler or when commands finish,
+    # but we can also use rich console directly. An atexit handler or just 
+    # relying on the end of the script works well. Let's register an atexit.
+    import atexit
+    
+    @atexit.register
+    def _print_version_banner() -> None:
+        banner = version_check.banner()
+        if banner:
+            console.print(f"\n{banner}")
 
 
 @app.command()
