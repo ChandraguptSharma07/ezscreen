@@ -34,7 +34,7 @@ Thumbs.db
 *.swp
 *.swo
 
-# ezscreen run artifacts (local work dirs)
-results/
-work/
+# ezscreen run artifacts (local work dirs — top-level only)
+/results/
+/work/
 *.log
