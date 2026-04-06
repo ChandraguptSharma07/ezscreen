@@ -81,6 +81,8 @@ def _warn_env_overrides() -> None:
 
 
 def _check_json_permissions(path: Path) -> None:
+    if os.name == "nt":
+        return
     try:
         mode = stat.S_IMODE(os.stat(path).st_mode)
         if mode & 0o177:
