@@ -63,10 +63,12 @@ def view(
 
 
 @app.command()
-def status() -> None:
+def status(
+    live: bool = typer.Option(False, "--live", "-l", help="Auto-refresh every 30 s."),
+) -> None:
     """Show all recent runs with live status."""
     from ezscreen.commands import status as _status
-    _status.invoke()
+    _status.invoke(live=live)
 
 
 @app.command()
