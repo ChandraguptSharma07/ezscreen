@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 from rich.console import Console
 
@@ -16,46 +18,103 @@ console = Console()
 @app.command()
 def run() -> None:
     """Run an interactive virtual screening job."""
-    raise NotImplementedError
+    from ezscreen.commands import run as _run
+    _run.invoke()
 
 
 @app.command()
-def auth() -> None:
+def auth(
+    update: str = typer.Option(None, "--update", "-u", help="Update a specific key: 'Kaggle credentials' | 'NIM API key' | 'Both'"),
+) -> None:
     """Set up or update Kaggle and NIM credentials."""
-    raise NotImplementedError
+    from ezscreen.commands import auth as _auth
+    _auth.invoke(update=update)
 
 
 @app.command()
-def validate() -> None:
+def validate(
+    receptor: Path = typer.Argument(..., help="Path to receptor PDB file"),
+    hits:     Path = typer.Argument(..., help="Path to hits SDF or CSV file"),
+    output:   Path = typer.Option(Path("validation_out"), "--output", "-o", help="Output directory"),
+) -> None:
     """Run Stage 2 hit validation with DiffDock-L via NVIDIA NIM."""
-    raise NotImplementedError
+    from ezscreen.commands import validate as _validate
+    _validate.invoke(receptor_path=receptor, hits_path=hits, output_dir=output)
 
 
 @app.command()
-def admet() -> None:
-    """Run standalone ADMET filtering on a CSV or SDF file."""
-    raise NotImplementedError
+def admet(
+    input_file:  Path = typer.Argument(..., help="Input SDF file"),
+    output_file: Path = typer.Option(None, "--output", "-o", help="Output SDF (default: <input>_admet.sdf)"),
+) -> None:
+    """Run standalone ADMET filtering on an SDF file."""
+    from ezscreen.commands import admet as _admet
+    _admet.invoke(input_path=input_file, output_path=output_file)
 
 
 @app.command()
-def view() -> None:
+def view(
+    results_dir: Path = typer.Argument(..., help="Results directory from a completed run"),
+    top:         int  = typer.Option(25, "--top", "-n", help="Number of top hits to show"),
+) -> None:
     """Open the results viewer for a completed run."""
-    raise NotImplementedError
+    from ezscreen.commands import view as _view
+    _view.invoke(results_dir=results_dir, top_n=top)
 
 
 @app.command()
 def status() -> None:
-    """Show all recent Kaggle jobs with live status."""
-    raise NotImplementedError
+    """Show all recent runs with live status."""
+    from ezscreen.commands import status as _status
+    _status.invoke()
 
 
 @app.command()
-def resume(run_id: str = typer.Argument(..., help="Run ID to resume (e.g. ezs-4f2a8c).")) -> None:
+def resume(
+    run_id: str = typer.Argument(..., help="Run ID to resume (e.g. ezs-4f2a8c)"),
+) -> None:
     """Resume an interrupted screening run."""
-    raise NotImplementedError
+    from ezscreen import checkpoint
+    from rich.panel import Panel
+
+    checkpoint.init_db()
+    run = checkpoint.get_run(run_id)
+    if not run:
+        console.print(f"[red]Run '{run_id}' not found in local database.[/red]")
+        raise typer.Exit(1)
+
+    incomplete = checkpoint.get_incomplete_shards(run_id)
+    if not incomplete:
+        console.print(f"[dim]Run {run_id} has no incomplete shards — already done.[/dim]")
+        return
+
+    console.print(Panel(
+        f"[bold]{run_id}[/bold]  status: {run['status']}\n"
+        f"{len(incomplete)} shard(s) still incomplete",
+        title="[bold]Resume[/bold]",
+    ))
+    console.print("[dim]Re-submit functionality uses the same run.py flow with resume context.[/dim]")
+    console.print("[yellow]Full resume is planned for v1.1 — run ezscreen run to start fresh.[/yellow]")
 
 
 @app.command()
-def clean(run_id: str = typer.Argument(..., help="Run ID to clean up (e.g. ezs-4f2a8c).")) -> None:
+def clean(
+    run_id: str = typer.Argument(..., help="Run ID to clean (e.g. ezs-4f2a8c)"),
+) -> None:
     """Delete Kaggle dataset and kernel artifacts for a run."""
-    raise NotImplementedError
+    from ezscreen import auth as _auth
+    from ezscreen.backends.kaggle import runner as kaggle_runner
+    import questionary
+
+    creds    = _auth.load_credentials()
+    username = Path(creds.get("kaggle_json_path", "")).stem or "user"
+
+    confirmed = questionary.confirm(
+        f"Delete all Kaggle artifacts for {run_id}?", default=False
+    ).ask()
+    if not confirmed:
+        return
+
+    kaggle_runner.clean_run(run_id, username)
+    console.print(f"  [green]✓ Cleaned {run_id}[/green]")
+
