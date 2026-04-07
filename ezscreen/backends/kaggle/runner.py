@@ -38,10 +38,9 @@ def _wait_for_dataset(dataset_ref: str) -> None:
 def _download_output(kernel_ref: str, work_dir: Path) -> Path:
     import kaggle
     kaggle.api.authenticate()
-    username, slug = kernel_ref.split("/", 1)
     out = work_dir / "output"
     out.mkdir(parents=True, exist_ok=True)
-    kaggle.api.kernel_output(username, slug, path=str(out))
+    kaggle.api.kernels_output(kernel_ref, path=str(out))
     return out
 
 
