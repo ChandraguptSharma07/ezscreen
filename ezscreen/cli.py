@@ -102,6 +102,10 @@ def resume(
         console.print(f"[red]Run '{run_id}' not found in local database.[/red]")
         raise typer.Exit(1)
 
+    if run["status"] == "failed":
+        console.print(f"[red]Run {run_id} failed — start a fresh run with: ezscreen run[/red]")
+        raise typer.Exit(1)
+
     incomplete = checkpoint.get_incomplete_shards(run_id)
     if not incomplete:
         console.print(f"[dim]Run {run_id} has no incomplete shards — already done.[/dim]")

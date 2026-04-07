@@ -86,14 +86,12 @@ def upload_run_dataset(
     dataset_dir = work_dir / f"dataset_{run_id}"
     dataset_dir.mkdir(parents=True, exist_ok=True)
 
-    # Receptor — dedup
+    # Receptor — dedup; always uploaded as "receptor.pdbqt" so the notebook
+    # template can reference a stable, predictable filename
     receptor_hash = sha256(receptor_pdbqt)
     cache_key = str(receptor_pdbqt.resolve())
-    if manifest.get(cache_key) != receptor_hash:
-        shutil.copy2(receptor_pdbqt, dataset_dir / receptor_pdbqt.name)
-        manifest[cache_key] = receptor_hash
-    else:
-        shutil.copy2(receptor_pdbqt, dataset_dir / receptor_pdbqt.name)  # still needed in pkg
+    manifest[cache_key] = receptor_hash
+    shutil.copy2(receptor_pdbqt, dataset_dir / "receptor.pdbqt")
 
     # Shards — always fresh
     for sp in shard_paths:

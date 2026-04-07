@@ -116,16 +116,21 @@ def filter_library(
     cfg: FilterConfig | None = None,
 ) -> dict[str, Any]:
     """
-    Filter an SDF file. Returns a summary dict for the prep report.
-    Molecules that pass are written to output_path.
+    Filter an SDF or SMILES file. Returns a summary dict for the prep report.
+    Molecules that pass are written to output_path as SDF.
     Molecules that fail are counted by rule.
     """
-    from rdkit.Chem import SDMolSupplier, SDWriter
+    from pathlib import Path as _Path
+    from rdkit.Chem import SDMolSupplier, SDWriter, SmilesMolSupplier
 
     if cfg is None:
         cfg = FilterConfig()
 
-    supplier = SDMolSupplier(str(input_path), removeHs=False, sanitize=True)
+    suffix = _Path(input_path).suffix.lower()
+    if suffix in (".smi", ".smiles"):
+        supplier = SmilesMolSupplier(str(input_path), delimiter="\t ", titleLine=False)
+    else:
+        supplier = SDMolSupplier(str(input_path), removeHs=False, sanitize=True)
     writer   = SDWriter(str(output_path))
 
     total = passed = 0

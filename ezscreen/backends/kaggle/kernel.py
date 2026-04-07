@@ -7,16 +7,13 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ezscreen.errors import (
-    KaggleForbiddenError,
-    KaggleRateLimitError,
-    KaggleServerError,
-    KaggleUnauthorizedError,
-)
+from ezscreen.errors import KaggleForbiddenError, KaggleUnauthorizedError
 
 console = Console()
-_MAX_RETRIES = 3
+_MAX_RETRIES = 5
 _BACKOFF_BASE = 2
+# 409 = kernel version currently queued/saving — transient lock, safe to retry
+_TRANSIENT_CODES = ("409", "429", "500", "502", "503", "504", "rate")
 
 
 def _api():
@@ -34,7 +31,7 @@ def _with_backoff(fn, *args, **kwargs):
             raise
         except Exception as exc:
             msg = str(exc).lower()
-            is_transient = any(c in msg for c in ("429", "500", "502", "503", "504", "rate"))
+            is_transient = any(c in msg for c in _TRANSIENT_CODES)
             if not is_transient or attempt == _MAX_RETRIES - 1:
                 raise
             wait = _BACKOFF_BASE ** (attempt + 1)
@@ -56,10 +53,14 @@ def push_kernel(
     kernel_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(notebook_path, kernel_dir / "notebook.ipynb")
 
-    slug = f"ezs-{run_id}"
+    # run_id already carries the "ezs-" prefix — use it directly as the slug
+    slug = run_id
+    # title must slugify to exactly the slug — replace hyphens with spaces so
+    # Kaggle's slug derivation round-trips back to the same value
+    title = slug.replace("-", " ")
     meta = {
         "id": f"{username}/{slug}",
-        "title": f"ezscreen {run_id}",
+        "title": title,
         "code_file": "notebook.ipynb",
         "language": "python",
         "kernel_type": "notebook",

@@ -23,8 +23,8 @@ def _get_scrubber():
     except ImportError:
         pass
     try:
-        from ezscreen.vendor.scrubber import Scrubber
-        return Scrubber
+        from ezscreen.vendor.scrubber import SCRUBBER_AVAILABLE, Scrubber
+        return Scrubber if SCRUBBER_AVAILABLE else None
     except ImportError:
         return None
 

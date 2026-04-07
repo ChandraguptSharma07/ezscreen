@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,28 @@ from ezscreen.backends.kaggle.kernel import push_kernel, delete_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
 
 console = Console()
+_DATASET_POLL_INTERVAL = 10   # seconds
+_DATASET_TIMEOUT = 300        # 5 minutes
+
+
+def _wait_for_dataset(dataset_ref: str) -> None:
+    """Block until the Kaggle dataset status is 'ready'."""
+    import kaggle
+    kaggle.api.authenticate()
+    elapsed = 0
+    console.print("  [dim]Waiting for dataset to be ready...[/dim]", end="")
+    while elapsed < _DATASET_TIMEOUT:
+        try:
+            status = kaggle.api.dataset_status(dataset_ref)
+            if status == "ready":
+                console.print(f" ready ({elapsed}s)")
+                return
+        except Exception:
+            pass
+        time.sleep(_DATASET_POLL_INTERVAL)
+        elapsed += _DATASET_POLL_INTERVAL
+        console.print(".", end="")
+    console.print(f" [yellow]timed out after {elapsed}s — proceeding anyway[/yellow]")
 
 
 def _download_output(kernel_ref: str, work_dir: Path) -> Path:
@@ -46,6 +69,13 @@ def run_screening_job(
         work_dir=work_dir,
     )
     console.print(f"  [dim]Dataset: {dataset_ref}[/dim]")
+
+    # dataset_status() returns "ready" as soon as metadata is saved, but files
+    # take ~60s to propagate to compute nodes.  Pushing the kernel too early
+    # causes Cell 4's path assertions to fail with FileNotFoundError.
+    _wait_for_dataset(dataset_ref)
+    console.print("  [dim]Waiting 90s for dataset files to sync to compute nodes...[/dim]")
+    time.sleep(90)
 
     console.print("  [dim]Submitting notebook to Kaggle...[/dim]")
     kernel_ref = push_kernel(

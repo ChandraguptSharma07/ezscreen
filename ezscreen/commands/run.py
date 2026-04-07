@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import secrets
-import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +10,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from ezscreen import auth, checkpoint, config
-from ezscreen.admet.filter import FilterConfig, filter_library
+from ezscreen.admet.filter import filter_library
 from ezscreen.backends.kaggle import runner as kaggle_runner
 from ezscreen.pocket import detect as pocket
 from ezscreen.prep import ligands as ligand_prep
@@ -377,7 +376,12 @@ def _run_prep_and_submit(ctx: dict) -> None:
     run_id   = ctx["run_id"]
     work_dir = ctx["work_dir"]
     cfg      = config.load()
-    kaggle_username = auth.load_credentials().get("kaggle_json_path", "").split("/")[-2] or "user"
+    try:
+        import json
+        with open(auth.load_credentials().get("kaggle_json_path", "")) as f:
+            kaggle_username = json.load(f).get("username", "user")
+    except Exception:
+        kaggle_username = "user"
 
     # Receptor prep
     console.print("\n[bold]Prepping receptor...[/bold]")
@@ -394,7 +398,19 @@ def _run_prep_and_submit(ctx: dict) -> None:
     if ctx["admet_pre_filter"]:
         console.print("[bold]Running ADMET pre-filter...[/bold]")
         admet_out = work_dir / "admet_filtered.sdf"
-        filter_library(str(ligand_input), str(admet_out))
+        admet_summary = filter_library(str(ligand_input), str(admet_out))
+        if admet_summary["total_input"] == 0:
+            from ezscreen.errors import LigandPrepError
+            raise LigandPrepError(
+                "ADMET filter could not parse any molecules from the input file — "
+                "check that the file is valid SDF or SMILES."
+            )
+        if admet_summary["admet_removed"] == admet_summary["total_input"]:
+            from ezscreen.errors import LigandPrepError
+            raise LigandPrepError(
+                f"ADMET filter removed all {admet_summary['total_input']} molecules — "
+                "no compounds passed. Relax filter settings or check your library."
+            )
         ligand_input = admet_out
 
     # Ligand prep
@@ -405,6 +421,14 @@ def _run_prep_and_submit(ctx: dict) -> None:
         ph=cfg["run"].get("default_ph", 7.4),
     )
     shard_paths = lig_result["shard_paths"]
+    if not shard_paths:
+        from ezscreen.errors import LigandPrepError
+        report = lig_result["report"]
+        raise LigandPrepError(
+            f"Ligand prep produced 0 dockable compounds "
+            f"({report['prep_failed']} failed: {report['prep_failures']}). "
+            "Check your library or lower ADMET filter stringency."
+        )
 
     # Checkpoint
     checkpoint.init_db()
@@ -427,7 +451,7 @@ def _run_prep_and_submit(ctx: dict) -> None:
     notebook_src = tmpl.render(
         ezscreen_version=__version__,
         run_id=run_id,
-        engine="unidock-pro",
+        engine="unidock",
         mode="hybrid",
         box_center=box["center"],
         box_size=box["size"],
@@ -439,11 +463,10 @@ def _run_prep_and_submit(ctx: dict) -> None:
         refine_step=ctx["search_params"]["refine_step"],
         max_step=ctx["search_params"]["max_step"],
         enumerate_tautomers=False,
-        receptor_dataset_path=f"/kaggle/input/ezscreen-{run_id}/receptor.pdbqt",
-        ligand_dataset_path=f"/kaggle/input/ezscreen-{run_id}/shard_000.pdbqt",
+        shard_filename=shard_paths[0].name,
     )
     notebook_path = work_dir / "notebook.ipynb"
-    notebook_path.write_text(notebook_src)
+    notebook_path.write_text(notebook_src, encoding="utf-8")
 
     # Submit
     console.print("[bold]Submitting to Kaggle...[/bold]")
@@ -467,7 +490,7 @@ def _run_prep_and_submit(ctx: dict) -> None:
         console.print(f"  Resume with: [bold]ezscreen resume {run_id}[/bold]")
 
 
-def _post_completion(run_id: str, output_dir: Path, ctx: dict) -> None:
+def _post_completion(_run_id: str, output_dir: Path, ctx: dict) -> None:
     choice = questionary.select(
         "What next?",
         choices=[

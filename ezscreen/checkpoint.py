@@ -56,6 +56,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+class _PathEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if isinstance(o, Path):
+            return str(o)
+        return super().default(o)
+
+
 # ---------------------------------------------------------------------------
 # Schema init
 # ---------------------------------------------------------------------------
@@ -74,7 +81,7 @@ def create_run(run_id: str, config: dict[str, Any], total_compounds: int) -> Non
         conn.execute(
             "INSERT INTO runs (run_id, created_at, config_json, total_compounds) "
             "VALUES (?, ?, ?, ?)",
-            (run_id, _now(), json.dumps(config), total_compounds),
+            (run_id, _now(), json.dumps(config, cls=_PathEncoder), total_compounds),
         )
 
 

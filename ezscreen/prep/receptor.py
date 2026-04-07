@@ -90,12 +90,15 @@ def _strip_alt_conformations(src: Path, dst: Path) -> int:
 
 def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
     chain_set = set(chains)
-    keep_records = {"TER", "MODEL", "ENDMDL", "END", "CRYST1", "REMARK", "HEADER", "TITLE", "SEQRES"}
+    keep_records = {"TER", "MODEL", "ENDMDL", "END", "CRYST1", "REMARK", "HEADER", "TITLE"}
     lines = []
     for line in src.read_text(errors="ignore").splitlines():
         record = line[:6].rstrip()
         if record in ("ATOM", "HETATM"):
             if line[21:22] in chain_set:
+                lines.append(line)
+        elif record == "SEQRES":
+            if line[11:12] in chain_set:
                 lines.append(line)
         elif record in keep_records:
             lines.append(line)
@@ -168,10 +171,17 @@ def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[st
     fixer = PDBFixer(filename=str(src))
     fixer.findMissingResidues()
     n_missing = sum(len(v) for v in fixer.missingResidues.values())
+    # Clear missing residues so PDBFixer doesn't blindly model missing loops
+    # Loop modeling often causes atomic clashes resulting in RDKit valency errors
+    fixer.missingResidues = {}
+    
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
     fixer.removeHeterogens(keepWater=keep_waters)
     fixer.findMissingAtoms()
+    # Clear terminal atoms (OXT etc.) — pdbfixer adds these to carbonyl C atoms
+    # that already have 4 bonds, producing a C with valence 5 that RDKit rejects
+    fixer.missingTerminals = {}
     fixer.addMissingAtoms()
     fixer.addMissingHydrogens(ph)
     residue_count = fixer.topology.getNumResidues()
@@ -190,7 +200,7 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     if exe is None:
         raise ReceptorPrepError("mk_prepare_receptor not found — pip install meeko")
     pdbqt = output_dir / (src.stem + ".pdbqt")
-    result = subprocess.run([exe, "-i", str(src), "-o", str(pdbqt)], capture_output=True, text=True)
+    result = subprocess.run([exe, "-i", str(src), "-p", str(pdbqt)], capture_output=True, text=True)
     if result.returncode != 0:
         raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{result.stderr.strip()}")
     try:
