@@ -35,12 +35,53 @@ def _wait_for_dataset(dataset_ref: str) -> None:
     console.print(f" [yellow]timed out after {elapsed}s — proceeding anyway[/yellow]")
 
 
+def _recover_scores(output_dir: Path) -> None:
+    """Parse docked PDBQT files locally to regenerate scores.csv if missing.
+
+    Kaggle's kernels_output API downloads subdirectories but not all flat files,
+    so scores.csv written by Cell 8 may not be downloaded even when docking succeeds.
+    """
+    import csv, re
+    scores_csv = output_dir / "scores.csv"
+    if scores_csv.exists():
+        return
+    docked_dir = output_dir / "docked"
+    if not docked_dir.exists():
+        return
+    out_files = sorted(docked_dir.glob("*_out.pdbqt"))
+    if not out_files:
+        return
+
+    rows = []
+    for p in out_files:
+        if p.stem.startswith("lig_pad_"):
+            continue
+        text = p.read_text(errors="replace")
+        m = re.search(r"REMARK VINA RESULT:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", text)
+        if not m:
+            continue
+        rows.append({
+            "ligand":  p.stem.removesuffix("_out"),
+            "score":   float(m.group(1)),
+            "rmsd_lb": float(m.group(2)),
+            "rmsd_ub": float(m.group(3)),
+        })
+
+    rows.sort(key=lambda r: r["score"])
+    with scores_csv.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["ligand", "score", "rmsd_lb", "rmsd_ub"])
+        w.writeheader()
+        w.writerows(rows)
+    console.print(f"  [dim]Recovered scores.csv locally ({len(rows)} poses)[/dim]")
+
+
 def _download_output(kernel_ref: str, work_dir: Path) -> Path:
     import kaggle
     kaggle.api.authenticate()
     out = work_dir / "output"
     out.mkdir(parents=True, exist_ok=True)
     kaggle.api.kernels_output(kernel_ref, path=str(out))
+    _recover_scores(out)
     return out
 
 

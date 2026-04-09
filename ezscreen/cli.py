@@ -71,12 +71,17 @@ def admet(
 
 @app.command()
 def view(
-    results_dir: Path = typer.Argument(..., help="Results directory from a completed run"),
+    results_dir: str = typer.Argument(..., help="Run ID (e.g. ezs-4f2a8c) or results directory path"),
     top:         int  = typer.Option(25, "--top", "-n", help="Number of top hits to show"),
 ) -> None:
     """Open the results viewer for a completed run."""
+    import os
     from ezscreen.commands import view as _view
-    _view.invoke(results_dir=results_dir, top_n=top)
+    p = Path(results_dir)
+    # If it looks like a run ID and doesn't exist as a path, resolve via ~/.ezscreen/runs
+    if not p.exists() and results_dir.startswith("ezs-"):
+        p = Path.home() / ".ezscreen" / "runs" / results_dir / "output"
+    _view.invoke(results_dir=p, top_n=top)
 
 
 @app.command()
