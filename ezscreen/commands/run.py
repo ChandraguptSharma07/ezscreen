@@ -25,13 +25,11 @@ console = Console()
 
 _PRESETS = {
     "Fast       · triage only · misses ~25% best poses":
-        {"exhaustiveness": 4,  "num_modes": 1, "refine_step": 3, "max_step": 0},
+        {"search_mode": "fast"},
     "Balanced ★ · standard VS · good for rigid pockets":
-        {"exhaustiveness": 8,  "num_modes": 3, "refine_step": 5, "max_step": 0},
+        {"search_mode": "balance"},
     "Thorough   · flexible ligands · induced-fit targets":
-        {"exhaustiveness": 16, "num_modes": 5, "refine_step": 5, "max_step": 0},
-    "Exhaustive · allosteric/cryptic pockets · pub quality":
-        {"exhaustiveness": 32, "num_modes": 9, "refine_step": 5, "max_step": 0},
+        {"search_mode": "detail"},
     "Expert     · set all parameters manually": None,
 }
 
@@ -315,12 +313,10 @@ def _step_search_depth(ctx: dict) -> dict | object:
             v = questionary.text(prompt, default=str(default)).ask()
             return int(v) if v and v.isdigit() else default
 
-        params = {
-            "exhaustiveness": _ask_int("exhaustiveness  · breadth of search  (range 4–512):", 8),
-            "num_modes":      _ask_int("num_modes       · poses per ligand   (range 1–20):",   3),
-            "refine_step":    _ask_int("refine_step     · local polish       (range 0–20):",   5),
-            "max_step":       _ask_int("max_step        · MC step cap (0=auto):",              0),
-        }
+        mode_pick = questionary.select(
+            "Base search mode:", choices=["fast", "balance", "detail"]
+        ).ask() or "balance"
+        params = {"search_mode": mode_pick}
 
     ctx["search_params"] = params
     ctx["search_label"]  = pick.split("·")[0].strip()
@@ -347,7 +343,9 @@ def _step_confirm(ctx: dict) -> dict | object:
     summary.append("Search depth ", style="bold dim")
     summary.append(
         f"{ctx['search_label']}  "
-        f"exh {p['exhaustiveness']} · modes {p['num_modes']} · refine {p['refine_step']} · max_step {p['max_step'] or 'auto'}\n"
+        f"mode {p.get('search_mode') or 'expert'}"
+        + (f" · exh {p['exhaustiveness']} · modes {p['num_modes']}" if 'exhaustiveness' in p else "")
+        + "\n"
     )
 
     if ctx.get("is_alphafold"):
@@ -458,10 +456,7 @@ def _run_prep_and_submit(ctx: dict) -> None:
         shard_index=0,
         total_shards=len(shard_paths),
         ph=config.get("run.default_ph"),
-        exhaustiveness=ctx["search_params"]["exhaustiveness"],
-        num_modes=ctx["search_params"]["num_modes"],
-        refine_step=ctx["search_params"]["refine_step"],
-        max_step=ctx["search_params"]["max_step"],
+        search_mode=ctx["search_params"].get("search_mode", "balance"),
         enumerate_tautomers=False,
         shard_filename=shard_paths[0].name,
     )

@@ -35,6 +35,25 @@ def _wait_for_dataset(dataset_ref: str) -> None:
     console.print(f" [yellow]timed out after {elapsed}s — proceeding anyway[/yellow]")
 
 
+def _load_index(output_dir: Path) -> dict[str, dict]:
+    """Load ligand index.csv (ligand → {name, smiles}) if present.
+
+    index.csv is written by ligand prep next to the shard files at
+    <work_dir>/shards/index.csv.  output_dir is <work_dir>/output/.
+    """
+    import csv
+    candidates = [
+        output_dir / "index.csv",                      # flat download
+        output_dir.parent / "shards" / "index.csv",   # normal run layout
+        output_dir.parent / "index.csv",               # fallback
+    ]
+    for index_path in candidates:
+        if index_path.exists():
+            with index_path.open() as f:
+                return {row["ligand"]: row for row in csv.DictReader(f)}
+    return {}
+
+
 def _recover_scores(output_dir: Path) -> None:
     """Parse docked PDBQT files locally to regenerate scores.csv if missing.
 
@@ -52,6 +71,8 @@ def _recover_scores(output_dir: Path) -> None:
     if not out_files:
         return
 
+    index = _load_index(output_dir)
+
     rows = []
     for p in out_files:
         if p.stem.startswith("lig_pad_"):
@@ -60,27 +81,58 @@ def _recover_scores(output_dir: Path) -> None:
         m = re.search(r"REMARK VINA RESULT:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", text)
         if not m:
             continue
-        rows.append({
-            "ligand":  p.stem.removesuffix("_out"),
+        lig_id = p.stem.removesuffix("_out")
+        row: dict = {
+            "ligand":  lig_id,
             "score":   float(m.group(1)),
             "rmsd_lb": float(m.group(2)),
             "rmsd_ub": float(m.group(3)),
-        })
+        }
+        if lig_id in index:
+            row["name"]   = index[lig_id]["name"]
+            row["smiles"] = index[lig_id]["smiles"]
+        rows.append(row)
 
     rows.sort(key=lambda r: r["score"])
+
+    # Filter unphysical scores — UniDock GPU produces nonsensical values (<-15)
+    # for very small/flexible molecules due to GPU scoring artifacts.
+    # AutoDock Vina-family scores never go below -15 for real binding events.
+    _SCORE_FLOOR = -15.0
+    filtered = [r for r in rows if r["score"] >= _SCORE_FLOOR]
+    n_artifacts = len(rows) - len(filtered)
+    if n_artifacts:
+        console.print(f"  [dim]Filtered {n_artifacts} artifact score(s) below {_SCORE_FLOOR} kcal/mol[/dim]")
+    rows = filtered
+
+    # Include name/smiles columns only if any row has them
+    has_identity = any("smiles" in r for r in rows)
+    fieldnames = ["ligand", "score", "rmsd_lb", "rmsd_ub"]
+    if has_identity:
+        fieldnames += ["name", "smiles"]
+
     with scores_csv.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["ligand", "score", "rmsd_lb", "rmsd_ub"])
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
     console.print(f"  [dim]Recovered scores.csv locally ({len(rows)} poses)[/dim]")
 
 
-def _download_output(kernel_ref: str, work_dir: Path) -> Path:
+def _download_output(kernel_ref: str, work_dir: Path, retries: int = 5) -> Path:
     import kaggle
     kaggle.api.authenticate()
     out = work_dir / "output"
     out.mkdir(parents=True, exist_ok=True)
-    kaggle.api.kernels_output(kernel_ref, path=str(out))
+    for attempt in range(retries):
+        try:
+            kaggle.api.kernels_output(kernel_ref, path=str(out))
+            break
+        except Exception as exc:
+            if attempt == retries - 1:
+                raise
+            wait = 2 ** (attempt + 1)
+            console.print(f"  [yellow]Download error (attempt {attempt + 1}/{retries}), retrying in {wait}s: {exc}[/yellow]")
+            time.sleep(wait)
     _recover_scores(out)
     return out
 

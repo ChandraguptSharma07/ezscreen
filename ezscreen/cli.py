@@ -126,6 +126,31 @@ def resume(
 
 
 @app.command()
+def download(
+    run_id: str = typer.Argument(..., help="Run ID to download results for (e.g. ezs-4f2a8c)"),
+) -> None:
+    """Download results for a completed Kaggle run (use if download failed after a run)."""
+    from ezscreen import auth as _auth
+    from ezscreen.backends.kaggle import runner as kaggle_runner
+    from ezscreen.commands import view as _view
+
+    creds    = _auth.load_credentials()
+    kaggle_path = _auth.get_kaggle_json_path(creds)
+    import json
+    username = json.loads(kaggle_path.read_text())["username"] if kaggle_path and kaggle_path.exists() else None
+    if not username:
+        console.print("[red]Kaggle credentials not found — run: ezscreen auth[/red]")
+        raise typer.Exit(1)
+    kernel_ref = f"{username}/{run_id}"
+    work_dir   = Path.home() / ".ezscreen" / "runs" / run_id
+
+    console.print(f"  [dim]Downloading results for {kernel_ref}...[/dim]")
+    output_dir = kaggle_runner._download_output(kernel_ref, work_dir)
+    console.print(f"  [green]✓ Results → {output_dir}[/green]")
+    _view.invoke(results_dir=output_dir)
+
+
+@app.command()
 def clean(
     run_id: str = typer.Argument(..., help="Run ID to clean (e.g. ezs-4f2a8c)"),
 ) -> None:

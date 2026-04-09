@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -161,6 +162,7 @@ def prep_ligands(
     failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0}
     shard_buf: list[str] = []
     shard_paths: list[Path] = []
+    index_rows: list[dict] = []   # ligand id → name + smiles
     shard_idx = total = prep_passed = prep_failed = 0
 
     def _flush() -> None:
@@ -173,6 +175,7 @@ def prep_ligands(
         shard_buf.clear()
         shard_idx += 1
 
+    from rdkit.Chem import MolToSmiles
     with Progress(SpinnerColumn(), "[progress.description]{task.description}",
                   BarColumn(), TaskProgressColumn(), console=console) as prog:
         task = prog.add_task("Prepping ligands...", total=None)
@@ -185,6 +188,10 @@ def prep_ligands(
                 total += 1
                 pdbqt, reason = _prep_one(mol, Scrubber, ph)
                 if pdbqt:
+                    lig_id = f"lig_{prep_passed:05d}"
+                    mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
+                    smiles = MolToSmiles(mol)
+                    index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles})
                     shard_buf.append(pdbqt)
                     prep_passed += 1
                     if len(shard_buf) >= shard_size:
@@ -195,6 +202,12 @@ def prep_ligands(
                     failed_writer.write(mol)
                 prog.advance(task)
         _flush()
+
+    index_path = output_dir / "index.csv"
+    with index_path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles"])
+        w.writeheader()
+        w.writerows(index_rows)
 
     failed_writer.close()
 

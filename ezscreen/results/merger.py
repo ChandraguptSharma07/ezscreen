@@ -5,11 +5,25 @@ from pathlib import Path
 from typing import Any
 
 
+def _load_index(shard_dirs: list[Path]) -> dict[str, dict]:
+    """Collect ligand identity (name, smiles) from index.csv files next to shards."""
+    index: dict[str, dict] = {}
+    for d in shard_dirs:
+        idx_path = d / "index.csv"
+        if not idx_path.exists():
+            continue
+        with idx_path.open() as f:
+            for row in csv.DictReader(f):
+                index[row["ligand"]] = row
+    return index
+
+
 def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     all_rows: list[dict] = []
     fieldnames: list[str] = []
+    index = _load_index(shard_dirs)
 
     for d in shard_dirs:
         sf = d / "scores.csv"
@@ -20,6 +34,16 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             if not fieldnames and reader.fieldnames:
                 fieldnames = list(reader.fieldnames)
             all_rows.extend(reader)
+
+    # Attach name/smiles from index if not already in scores.csv
+    if index:
+        for row in all_rows:
+            lig_id = row.get("ligand", "")
+            if lig_id in index and "smiles" not in row:
+                row["name"]   = index[lig_id]["name"]
+                row["smiles"] = index[lig_id]["smiles"]
+        if all_rows and "smiles" in all_rows[0] and "name" not in fieldnames:
+            fieldnames += ["name", "smiles"]
 
     id_col = fieldnames[0] if fieldnames else None
     score_col = next(
@@ -33,6 +57,9 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
         except (ValueError, TypeError):
             return 0.0
 
+    _SCORE_FLOOR = -15.0
+    all_rows = [r for r in all_rows if _score(r) >= _SCORE_FLOOR]
+
     best: dict[str, dict] = {}
     for row in all_rows:
         key = row.get(id_col, "") if id_col else str(id(row))
@@ -44,7 +71,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
     scores_out = output_dir / "scores.csv"
     if deduped and fieldnames:
         with scores_out.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=fieldnames)
+            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             w.writeheader()
             w.writerows(deduped)
 
