@@ -88,12 +88,40 @@ def _to_pdbqt(mol) -> str | None:
         return None
 
 
+# Atomic numbers AutoDock4 / UniDock can handle.
+# Elements outside this set produce atom-type parse errors at docking time.
+_AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
+    1,   # H
+    6,   # C
+    7,   # N
+    8,   # O
+    9,   # F
+    12,  # Mg
+    15,  # P
+    16,  # S
+    17,  # Cl
+    20,  # Ca
+    25,  # Mn
+    26,  # Fe
+    30,  # Zn
+    35,  # Br
+    53,  # I
+})
+
+
 def _prep_one(mol, Scrubber, ph: float) -> tuple[str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
         SanitizeMol(mol)
     except Exception:
         return None, "sanitization"
+
+    # Reject molecules with elements AutoDock/UniDock can't handle.
+    # Meeko writes these as bare element symbols (e.g. "B" for Boron) which
+    # UniDock rejects at runtime with "Atom type B is not a valid AutoDock type".
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() not in _AUTODOCK_SUPPORTED_ATOMIC_NUMS:
+            return None, "unsupported_atoms"
 
     scrubbed = _scrub(mol, Scrubber, ph)
     if scrubbed is None:

@@ -66,6 +66,7 @@ def push_kernel(
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": True,
+        "accelerator": "nvidiaTeslaT4",
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],
