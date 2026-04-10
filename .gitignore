@@ -38,3 +38,13 @@ Thumbs.db
 /results/
 /work/
 *.log
+
+# Claude Code memory and session files
+.claude/
+
+# Ad-hoc test inputs / handoff docs
+*.smi
+*.uri
+ezscreen_handoff.*
+test_out/
+tmp_logs*/

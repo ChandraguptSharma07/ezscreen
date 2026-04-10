@@ -78,15 +78,13 @@ def _recover_scores(output_dir: Path) -> None:
         if p.stem.startswith("lig_pad_"):
             continue
         text = p.read_text(errors="replace")
-        m = re.search(r"REMARK VINA RESULT:\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)", text)
+        m = re.search(r"REMARK VINA RESULT:\s+([-\d.]+)", text)
         if not m:
             continue
         lig_id = p.stem.removesuffix("_out")
         row: dict = {
-            "ligand":  lig_id,
-            "score":   float(m.group(1)),
-            "rmsd_lb": float(m.group(2)),
-            "rmsd_ub": float(m.group(3)),
+            "ligand": lig_id,
+            "score":  float(m.group(1)),
         }
         if lig_id in index:
             row["name"]   = index[lig_id]["name"]
@@ -107,7 +105,7 @@ def _recover_scores(output_dir: Path) -> None:
 
     # Include name/smiles columns only if any row has them
     has_identity = any("smiles" in r for r in rows)
-    fieldnames = ["ligand", "score", "rmsd_lb", "rmsd_ub"]
+    fieldnames = ["ligand", "score"]
     if has_identity:
         fieldnames += ["name", "smiles"]
 
@@ -116,6 +114,54 @@ def _recover_scores(output_dir: Path) -> None:
         w.writeheader()
         w.writerows(rows)
     console.print(f"  [dim]Recovered scores.csv locally ({len(rows)} poses)[/dim]")
+
+
+def _enrich_scores_with_identity(output_dir: Path) -> None:
+    """Add name/smiles columns to an existing scores.csv if index.csv is available.
+
+    Kaggle's Cell 8 writes scores.csv without identity columns.  This runs
+    after download (whether scores.csv came from Kaggle or was recovered locally)
+    and patches in name/smiles from the local index.csv when available.
+    """
+    import csv
+    scores_csv = output_dir / "scores.csv"
+    if not scores_csv.exists():
+        return
+    index = _load_index(output_dir)
+    if not index:
+        return
+
+    with scores_csv.open(newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = list(reader.fieldnames or [])
+
+    if not rows or "smiles" in fieldnames:
+        return  # nothing to enrich
+
+    # Drop legacy rmsd columns while we're here
+    fieldnames = [c for c in fieldnames if c not in ("rmsd_lb", "rmsd_ub")]
+
+    enriched = 0
+    for row in rows:
+        lig_id = row.get("ligand", "")
+        if lig_id in index:
+            row["name"]   = index[lig_id]["name"]
+            row["smiles"] = index[lig_id]["smiles"]
+            enriched += 1
+        # remove rmsd keys from row dict too
+        row.pop("rmsd_lb", None)
+        row.pop("rmsd_ub", None)
+
+    if not enriched:
+        return
+
+    fieldnames += ["name", "smiles"]
+    with scores_csv.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    console.print(f"  [dim]Enriched scores.csv with compound identity ({enriched} rows)[/dim]")
 
 
 def _download_output(kernel_ref: str, work_dir: Path, retries: int = 5) -> Path:
@@ -134,6 +180,7 @@ def _download_output(kernel_ref: str, work_dir: Path, retries: int = 5) -> Path:
             console.print(f"  [yellow]Download error (attempt {attempt + 1}/{retries}), retrying in {wait}s: {exc}[/yellow]")
             time.sleep(wait)
     _recover_scores(out)
+    _enrich_scores_with_identity(out)
     return out
 
 
