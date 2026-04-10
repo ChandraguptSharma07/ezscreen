@@ -200,9 +200,34 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     if exe is None:
         raise ReceptorPrepError("mk_prepare_receptor not found — pip install meeko")
     pdbqt = output_dir / (src.stem + ".pdbqt")
-    result = subprocess.run([exe, "-i", str(src), "-p", str(pdbqt)], capture_output=True, text=True)
+
+    # OpenBLAS (used by meeko internally) tries to spawn many threads and can
+    # exhaust memory on Windows if thread count is not capped. Limit to 1 thread
+    # via env vars before launching the subprocess.
+    import os
+    env = os.environ.copy()
+    env.update({
+        "OMP_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    })
+
+    console.print("  [dim]meeko: converting receptor to PDBQT...[/dim]")
+    try:
+        result = subprocess.run(
+            [exe, "-i", str(src), "-p", str(pdbqt)],
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            env=env,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ReceptorPrepError("mk_prepare_receptor timed out after 180 s") from exc
+
     if result.returncode != 0:
-        raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{result.stderr.strip()}")
+        stderr = result.stderr.decode("utf-8", errors="replace").strip() if isinstance(result.stderr, bytes) else result.stderr.strip()
+        raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{stderr}")
     try:
         import meeko
         mv = meeko.__version__

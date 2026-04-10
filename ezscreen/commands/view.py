@@ -26,9 +26,10 @@ def invoke(results_dir: Path, top_n: int = 25) -> None:
         console.print("[dim]No results in scores.csv[/dim]")
         return
 
-    # Detect which column is the score
-    headers    = list(rows[0].keys())
-    score_col  = next((h for h in headers if "score" in h.lower() or "affinity" in h.lower()), headers[-1])
+    # Detect which column is the score; drop uninformative rmsd columns
+    all_headers = list(rows[0].keys())
+    headers     = [h for h in all_headers if h not in ("rmsd_lb", "rmsd_ub")]
+    score_col   = next((h for h in headers if "score" in h.lower() or "affinity" in h.lower()), headers[-1])
 
     # Rich table
     t = Table(title=f"Top {min(top_n, len(rows))} docking hits", show_lines=False, expand=False)
@@ -43,12 +44,20 @@ def invoke(results_dir: Path, top_n: int = 25) -> None:
     console.print(t)
     console.print(f"\n  [dim]{len(rows)} total poses  ·  sorted by {score_col}[/dim]")
 
-    # 3D HTML viewer
-    if poses_sdf.exists():
+    if "smiles" not in headers:
+        console.print(
+            "  [dim]Compound names and SMILES not available — "
+            "index.csv is only present on the machine that ran ezscreen run.[/dim]"
+        )
+
+    # 3D HTML viewer — only if poses.sdf has actual content
+    if poses_sdf.exists() and poses_sdf.stat().st_size > 0:
         html_path = results_dir / "viewer.html"
         _write_viewer(poses_sdf, rows[:top_n], html_path, score_col, headers)
         console.print(f"  3D viewer → [bold]{html_path}[/bold]")
         webbrowser.open(html_path.as_uri())
+    else:
+        console.print("  [dim]3D viewer not available — SDF conversion skipped on Kaggle (meeko/RDKit output empty)[/dim]")
 
 
 def _write_viewer(
