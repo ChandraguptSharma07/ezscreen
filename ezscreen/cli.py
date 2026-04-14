@@ -9,7 +9,7 @@ from ezscreen import version_check
 
 app = typer.Typer(
     name="ezscreen",
-    help="GPU-accelerated virtual screening — powered by Kaggle T4 GPUs.",
+    help="GPU-accelerated virtual screening — powered by Kaggle GPUs.",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -64,7 +64,7 @@ def admet(
     input_file:  Path = typer.Argument(..., help="Input SDF file"),
     output_file: Path = typer.Option(None, "--output", "-o", help="Output SDF (default: <input>_admet.sdf)"),
 ) -> None:
-    """Run standalone ADMET filtering on an SDF file."""
+    """Run standalone ADMET filtering on an SDF or SMILES file."""
     from ezscreen.commands import admet as _admet
     _admet.invoke(input_path=input_file, output_path=output_file)
 

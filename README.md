@@ -82,4 +82,4 @@ ezscreen view ezs-<run_id>
 
 ## License
 
-MIT
+Apache-2.0
