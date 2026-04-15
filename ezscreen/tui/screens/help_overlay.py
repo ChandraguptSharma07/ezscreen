@@ -12,8 +12,9 @@ _HELP_TEXT = """\
   [#79c0ff]?[/#79c0ff]          Show this help
   [#79c0ff]q[/#79c0ff]          Quit
   [#79c0ff]Escape[/#79c0ff]     Go back / close overlay
-  [#79c0ff]Tab[/#79c0ff]        Focus next widget
-  [#79c0ff]Shift+Tab[/#79c0ff]  Focus previous widget
+  [#79c0ff]Tab[/#79c0ff]            Focus next widget
+  [#79c0ff]Shift+Tab[/#79c0ff]      Focus previous widget
+  [#79c0ff]Ctrl+Shift+V[/#79c0ff]   Paste from clipboard into focused field
 
 [bold #f0f6fc]Home Dashboard[/bold #f0f6fc]
   [#79c0ff]n[/#79c0ff]          New Run wizard
