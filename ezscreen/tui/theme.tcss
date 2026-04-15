@@ -205,6 +205,118 @@ Button:hover {
     background: $dim;
 }
 
+/* ── Form screens (Auth, Settings, ADMET, Validate) ─────────────────── */
+#admet-form,
+#auth-form,
+#settings-form,
+#validate-form {
+    padding: 1 2;
+    height: 1fr;
+    overflow-y: auto;
+}
+
+.form-section {
+    color: $primary;
+    text-style: bold;
+    margin-top: 1;
+    margin-bottom: 0;
+}
+
+.form-label {
+    color: $muted;
+    margin-top: 1;
+    margin-bottom: 0;
+}
+
+.form-row {
+    height: auto;
+    margin-top: 1;
+}
+
+.form-row > Input {
+    width: 1fr;
+}
+
+.form-row > Button {
+    width: auto;
+    margin-left: 1;
+}
+
+.form-actions {
+    margin-top: 2;
+}
+
+.form-actions > Button {
+    margin-right: 1;
+}
+
+.form-status {
+    color: $muted;
+    margin-left: 1;
+    height: 3;
+    content-align: left middle;
+}
+
+Input {
+    background: $surface;
+    color: $text;
+    border: tall $border;
+}
+
+Input:focus {
+    border: tall $primary;
+}
+
+Switch {
+    background: $bg;
+}
+
+Checkbox {
+    background: $bg;
+    color: $text;
+    margin-top: 0;
+}
+
+Checkbox:focus {
+    color: $primary;
+}
+
+Select {
+    background: $surface;
+    color: $text;
+    border: tall $border;
+}
+
+Select:focus {
+    border: tall $primary;
+}
+
+/* ADMET results panel */
+.results-panel {
+    margin-top: 1;
+    padding: 1;
+    background: $surface;
+    border: tall $border;
+    height: auto;
+    min-height: 5;
+}
+
+/* Validate log */
+#val-log {
+    background: $surface;
+    border: tall $border;
+    margin-top: 1;
+    height: 1fr;
+    min-height: 10;
+}
+
+#val-status {
+    color: $muted;
+    margin-left: 1;
+    height: 3;
+    content-align: left middle;
+}
+
 /* ── Placeholder screen ──────────────────────────────────────────────── */
 .placeholder-msg {
     content-align: center middle;
