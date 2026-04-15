@@ -10,7 +10,7 @@ from ezscreen import version_check
 app = typer.Typer(
     name="ezscreen",
     help="GPU-accelerated virtual screening — powered by Kaggle GPUs.",
-    no_args_is_help=True,
+    no_args_is_help=False,
     rich_markup_mode="rich",
 )
 
@@ -18,25 +18,26 @@ console = Console()
 
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
-    """Run before every command to start the async version check."""
+    """Start version check, then launch the TUI if no subcommand was given."""
     version_check.start()
-    # The banner will be printed by the atexit handler or when commands finish,
-    # but we can also use rich console directly. An atexit handler or just 
-    # relying on the end of the script works well. Let's register an atexit.
     import atexit
-    
+
     @atexit.register
     def _print_version_banner() -> None:
         banner = version_check.banner()
         if banner:
             console.print(f"\n{banner}")
 
+    if ctx.invoked_subcommand is None:
+        from ezscreen.tui import launch_tui
+        launch_tui()
+
 
 @app.command()
-def run() -> None:
-    """Run an interactive virtual screening job."""
-    from ezscreen.commands import run as _run
-    _run.invoke()
+def tui() -> None:
+    """Open the full-screen interactive TUI."""
+    from ezscreen.tui import launch_tui
+    launch_tui()
 
 
 @app.command()
