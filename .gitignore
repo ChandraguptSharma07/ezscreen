@@ -47,6 +47,7 @@ ezscreen/dists/
 
 # Ad-hoc test inputs / handoff docs
 *.smi
+!examples/*.smi
 *.uri
 ezscreen_handoff.*
 test_out/

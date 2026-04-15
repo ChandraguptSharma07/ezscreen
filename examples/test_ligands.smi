@@ -1,0 +1,8 @@
+CC(C)(C)NC(=O)[C@@H]1CN(Cc2cccnc2)CCN1C[C@@H](O)C[C@@H](Cc3ccccc3)C(=O)N[C@@H]4[C@H](O)Cc5ccccc45	Indinavir
+CC(C)CN(C[C@H]([C@H](CC1=CC=CC=C1)NC(=O)O[C@H]2CO[C@@H]3[C@H]2CCO3)O)S(=O)(=O)C4=CC=C(C=C4)N	Darunavir
+O=C(OCC1=CN=CS1)N[C@H]([C@@H](O)C[C@@H](NC([C@@H](NC(N(C)CC2=CSC(C(C)C)=N2)=O)C(C)C)=O)CC3=CC=CC=C3)CC4=CC=CC=C4	Ritonavir
+CC(C)(C)NC(=O)[C@@H]1C[C@@H]2CCCC[C@@H]2CN1C[C@H]([C@H](CC3=CC=CC=C3)NC(=O)[C@H](CC(=O)N)NC(=O)C4=NC5=CC=CC=C5C=C4)O	Saquinavir
+CC1=C(C=CC=C1O)C(=O)N[C@@H](CSC2=CC=CC=C2)C(=O)N3C[C@H](C[C@H]3C(=O)N[C@@H](CC4=CC=CC=C4)[C@H](CN(C)C(C)(C)C)O)O	Nelfinavir
+CC(C)CC1=CC=C(C=C1)C(C)C(=O)O	Ibuprofen
+CC(=O)NC1=CC=C(C=C1)O	Acetaminophen
+CC1=C(C=CC(=C1)NC(=O)C2=CC=C(C=C2)CN3CCN(CC3)C)NC4=NC=CC(=N4)C5=CC=CN=C5	Imatinib
