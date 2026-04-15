@@ -124,7 +124,8 @@ class HomeScreen(Screen):
         run_id = str(event.row_key.value) if event.row_key else None
         if run_id and run_id != "—":
             self.app.nav.selected_run_id = run_id
-            self._placeholder(f"Results — {run_id}")  # Phase 10.2
+            from ezscreen.tui.screens.results_viewer import ResultsScreen
+            self.app.push_screen(ResultsScreen(run_id))
 
     # ------------------------------------------------------------------
     # Actions
@@ -134,7 +135,8 @@ class HomeScreen(Screen):
         self._placeholder("New Run")  # Phase 10.4
 
     def action_open_status(self) -> None:
-        self._placeholder("Status Monitor")  # Phase 10.2
+        from ezscreen.tui.screens.status_monitor import StatusScreen
+        self.app.push_screen(StatusScreen())
 
     def _placeholder(self, title: str) -> None:
         from ezscreen.tui.screens._placeholder import PlaceholderScreen
