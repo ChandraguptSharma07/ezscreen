@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import csv
+import webbrowser
+from pathlib import Path
+
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, DataTable, Footer, Header, Label, Static
+
+from ezscreen.tui.widgets.breadcrumb import Breadcrumb
+
+_SKIP_COLS = {"rmsd_lb", "rmsd_ub"}
+
+
+class ResultsScreen(Screen):
+    """Top hits table with compound detail panel and 3D viewer launch."""
+
+    BINDINGS = [
+        Binding("escape", "app.pop_screen", "Back"),
+        Binding("o", "open_viewer", "Open 3D Viewer"),
+    ]
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__()
+        self._run_id    = run_id
+        self._output    = Path.home() / ".ezscreen" / "runs" / run_id / "output"
+        self._rows:  list[dict] = []
+        self._headers: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Breadcrumb(["Home", f"Results — {self._run_id}"])
+        with Horizontal(id="results-main"):
+            with Vertical(id="hits-panel"):
+                yield Label(f"Top Hits  ({self._run_id})", classes="section-title")
+                yield DataTable(id="hits-table", cursor_type="row")
+            with Vertical(id="compound-detail"):
+                yield Label("Selected Compound", classes="section-title")
+                yield Static(
+                    "[#6e7681]Select a hit to see details.[/#6e7681]",
+                    id="compound-info",
+                )
+                yield Button("Open 3D Viewer", id="btn-3d", variant="default")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#btn-3d").display = False
+        self._load_hits()
+
+    # ------------------------------------------------------------------
+    # Data
+    # ------------------------------------------------------------------
+
+    def _load_hits(self) -> None:
+        table      = self.query_one("#hits-table", DataTable)
+        scores_csv = self._output / "scores.csv"
+
+        if not scores_csv.exists():
+            table.add_columns("Info")
+            table.add_row(f"No results found in {self._output}")
+            return
+
+        with scores_csv.open(newline="") as f:
+            self._rows = list(csv.DictReader(f))
+
+        if not self._rows:
+            table.add_columns("Info")
+            table.add_row("scores.csv is empty")
+            return
+
+        all_cols      = list(self._rows[0].keys())
+        self._headers = [h for h in all_cols if h not in _SKIP_COLS]
+        score_col     = next(
+            (h for h in self._headers if "score" in h.lower() or "affinity" in h.lower()),
+            self._headers[-1],
+        )
+
+        table.add_column("#", width=4)
+        for h in self._headers:
+            table.add_column(h.replace("_", " ").title())
+
+        for i, row in enumerate(self._rows[:200], 1):
+            cells: list = [str(i)]
+            for h in self._headers:
+                val = row.get(h, "")
+                if h == score_col:
+                    cells.append(Text(val, style="bold #79c0ff"))
+                elif i <= 3:
+                    cells.append(Text(val, style="#3fb950"))
+                else:
+                    cells.append(val)
+            table.add_row(*cells, key=str(i - 1))
+
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        idx = int(event.row_key.value) if event.row_key else None
+        if idx is None or idx >= len(self._rows):
+            return
+
+        row   = self._rows[idx]
+        name  = row.get("name", "—")
+        score = row.get("docking_score", "—")
+        smiles = row.get("smiles", "")
+
+        lines = [
+            f"[bold #f0f6fc]{name}[/bold #f0f6fc]",
+            "",
+            f"[#6e7681]Score:[/#6e7681]  [bold #79c0ff]{score} kcal/mol[/bold #79c0ff]",
+        ]
+        if smiles:
+            truncated = smiles if len(smiles) <= 38 else smiles[:35] + "..."
+            lines += ["", "[#6e7681]SMILES:[/#6e7681]", f"[#8b949e]{truncated}[/#8b949e]"]
+
+        self.query_one("#compound-info", Static).update("\n".join(lines))
+        self.query_one("#btn-3d").display = self._viewer_html() is not None
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-3d":
+            self.action_open_viewer()
+
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def action_open_viewer(self) -> None:
+        html = self._viewer_html()
+        if html:
+            webbrowser.open(html.as_uri())
+            self.app.notify("Opened 3D viewer in browser.", timeout=3)
+        else:
+            self.app.notify("No 3D viewer HTML found for this run.", timeout=4)
+
+    def _viewer_html(self) -> Path | None:
+        p = self._output / "viewer.html"
+        return p if p.exists() and p.stat().st_size > 0 else None
