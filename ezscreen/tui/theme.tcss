@@ -121,6 +121,90 @@ DataTable > .datatable--header-cursor {
     color: $text;
 }
 
+/* ── Status Monitor ─────────────────────────────────────────────────── */
+#status-main {
+    height: 1fr;
+}
+
+#runs-list {
+    width: 1fr;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#status-table {
+    height: 1fr;
+    background: $bg;
+}
+
+#run-detail {
+    width: 36;
+    padding: 1 1;
+}
+
+#run-card {
+    height: auto;
+    padding: 0 0 1 0;
+}
+
+#detail-actions {
+    height: auto;
+    margin-top: 1;
+}
+
+#detail-actions > Button {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+/* ── Results Viewer ──────────────────────────────────────────────────── */
+#results-main {
+    height: 1fr;
+}
+
+#hits-panel {
+    width: 1fr;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#hits-table {
+    height: 1fr;
+    background: $bg;
+}
+
+#compound-detail {
+    width: 36;
+    padding: 1 1;
+}
+
+#compound-info {
+    height: auto;
+    padding: 0 0 1 0;
+}
+
+#btn-3d {
+    width: 100%;
+    margin-top: 1;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+Button {
+    background: $surface;
+    color: $text;
+    border: tall $border;
+    height: 3;
+}
+
+Button:focus {
+    background: $dim;
+    border: tall $primary;
+}
+
+Button:hover {
+    background: $dim;
+}
+
 /* ── Placeholder screen ──────────────────────────────────────────────── */
 .placeholder-msg {
     content-align: center middle;
