@@ -317,6 +317,76 @@ Select:focus {
     content-align: left middle;
 }
 
+/* ── Run Wizard ──────────────────────────────────────────────────────── */
+#wizard-body {
+    height: 1fr;
+    padding: 1 2;
+}
+
+#step-indicator {
+    height: 1;
+    color: $muted;
+    margin-bottom: 1;
+}
+
+#wizard-switcher {
+    height: 1fr;
+}
+
+.wizard-step {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+#wizard-nav {
+    height: auto;
+    margin-top: 1;
+    padding-top: 1;
+    border-top: tall $border;
+}
+
+#wizard-nav > Button {
+    margin-right: 1;
+}
+
+.site-sub {
+    margin-top: 1;
+    padding: 1;
+    background: $surface;
+    border: tall $border;
+    height: auto;
+}
+
+#af-warning-box {
+    height: auto;
+    margin-top: 1;
+}
+
+#chain-section {
+    margin-top: 1;
+}
+
+#chain-list {
+    height: auto;
+}
+
+#p2rank-picks {
+    height: auto;
+    margin-top: 1;
+}
+
+.confirm-summary {
+    padding: 1;
+    background: $surface;
+    border: tall $border;
+    height: auto;
+    margin-bottom: 1;
+}
+
+#blind-warning {
+    color: $warning;
+}
+
 /* ── Placeholder screen ──────────────────────────────────────────────── */
 .placeholder-msg {
     content-align: center middle;

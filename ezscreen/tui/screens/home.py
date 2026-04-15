@@ -132,7 +132,8 @@ class HomeScreen(Screen):
     # ------------------------------------------------------------------
 
     def action_new_run(self) -> None:
-        self._placeholder("New Run")  # Phase 10.4
+        from ezscreen.tui.screens.run_wizard import RunWizardScreen
+        self.app.push_screen(RunWizardScreen())
 
     def action_open_status(self) -> None:
         from ezscreen.tui.screens.status_monitor import StatusScreen
