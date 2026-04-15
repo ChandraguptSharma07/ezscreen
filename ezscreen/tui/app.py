@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import subprocess
+
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.widgets import Input
 from textual.worker import WorkerState
 
 from ezscreen.tui.nav import NavState
@@ -17,8 +20,9 @@ class EzscreenApp(App):
     SUB_TITLE = "GPU-accelerated virtual screening"
 
     BINDINGS = [
-        Binding("q",             "quit",        "Quit",    priority=True),
-        Binding("question_mark", "show_help",   "Help"),
+        Binding("q",             "quit",           "Quit",    priority=True),
+        Binding("question_mark", "show_help",      "Help"),
+        Binding("ctrl+shift+v",  "paste_clipboard", "Paste",  priority=True),
     ]
 
     def __init__(self) -> None:
@@ -28,6 +32,30 @@ class EzscreenApp(App):
     def on_mount(self) -> None:
         from ezscreen.tui.screens.home import HomeScreen
         self.push_screen(HomeScreen())
+
+    # ------------------------------------------------------------------
+    # Clipboard paste — Ctrl+Shift+V into focused Input
+    # ------------------------------------------------------------------
+
+    def action_paste_clipboard(self) -> None:
+        focused = self.focused
+        if not isinstance(focused, Input):
+            return
+        try:
+            result = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-Clipboard"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+            text = result.stdout.strip()
+        except Exception:
+            self.notify("Could not read clipboard.", severity="warning", timeout=3)
+            return
+        if text:
+            pos = focused.cursor_position
+            focused.value = focused.value[:pos] + text + focused.value[pos:]
+            focused.cursor_position = pos + len(text)
 
     # ------------------------------------------------------------------
     # Help overlay
