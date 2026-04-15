@@ -37,7 +37,7 @@ class ValidateScreen(Screen):
                 yield Static("", id="val-status", classes="form-status")
 
             yield Label("Progress", classes="form-section")
-            yield RichLog(id="val-log", highlight=True, markup=True, min_height=10)
+            yield RichLog(id="val-log", highlight=True, markup=True)
         yield Footer()
 
     def on_mount(self) -> None:
