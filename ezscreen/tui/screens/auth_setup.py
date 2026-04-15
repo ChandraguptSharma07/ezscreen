@@ -88,7 +88,7 @@ class AuthScreen(Screen):
             msg = f"[#3fb950]Valid — logged in as {data['username']}[/#3fb950]"
         except Exception as exc:
             msg = f"[#f85149]{exc}[/#f85149]"
-        self.call_from_thread(self.query_one("#kaggle-status", Static).update, msg)
+        self.app.call_from_thread(self.query_one("#kaggle-status", Static).update, msg)
 
     # ------------------------------------------------------------------
     # NIM validation (thread worker)
@@ -113,7 +113,7 @@ class AuthScreen(Screen):
             msg = "[#3fb950]Valid.[/#3fb950]"
         except Exception as exc:
             msg = f"[#f85149]{exc}[/#f85149]"
-        self.call_from_thread(self.query_one("#nim-status", Static).update, msg)
+        self.app.call_from_thread(self.query_one("#nim-status", Static).update, msg)
 
     # ------------------------------------------------------------------
     # Save

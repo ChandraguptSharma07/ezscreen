@@ -106,17 +106,17 @@ class ValidateScreen(Screen):
 
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            self.call_from_thread(self._log, "[#79c0ff]Connecting to NIM DiffDock-L...[/#79c0ff]")
+            self.app.call_from_thread(self._log, "[#79c0ff]Connecting to NIM DiffDock-L...[/#79c0ff]")
             result = run_diffdock_l(
                 receptor_path=str(receptor),
                 ligand_path=str(hits),
                 output_dir=str(out_dir),
                 nim_key=nim_key,
-                progress_cb=lambda msg: self.call_from_thread(self._log, msg),
+                progress_cb=lambda msg: self.app.call_from_thread(self._log, msg),
             )
-            self.call_from_thread(self._finish, result, out_dir)
+            self.app.call_from_thread(self._finish, result, out_dir)
         except Exception as exc:
-            self.call_from_thread(self._error, str(exc))
+            self.app.call_from_thread(self._error, str(exc))
 
     def _log(self, msg: str) -> None:
         self.query_one("#val-log", RichLog).write(msg)

@@ -76,7 +76,7 @@ class AdmetScreen(Screen):
         except Exception as exc:
             msg = f"[#f85149]Error: {exc}[/#f85149]"
 
-        self.call_from_thread(self._show_result, msg)
+        self.app.call_from_thread(self._show_result, msg)
 
     def _format_result(self, result: dict, output_path: Path) -> str:
         total    = result["total_input"]

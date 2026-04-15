@@ -272,11 +272,11 @@ class RunWizardScreen(Screen):
             self._cocrystal_ligands        = cocrystal
             self._ctx["cocrystal_ligands"] = cocrystal
 
-            self.call_from_thread(
+            self.app.call_from_thread(
                 self._show_rec_result, chains, is_af, af_ver, cocrystal
             )
         except Exception as exc:
-            self.call_from_thread(self._show_rec_error, str(exc))
+            self.app.call_from_thread(self._show_rec_error, str(exc))
 
     def _show_rec_result(
         self,
@@ -341,9 +341,9 @@ class RunWizardScreen(Screen):
             work_dir = Path.home() / ".ezscreen" / "tmp" / "wizard" / "p2rank"
             pockets  = pocket.run_p2rank(pdb_path, work_dir, alphafold=is_af)
             self._pockets = pockets
-            self.call_from_thread(self._show_p2rank_results, pockets)
+            self.app.call_from_thread(self._show_p2rank_results, pockets)
         except Exception as exc:
-            self.call_from_thread(
+            self.app.call_from_thread(
                 self.query_one("#p2rank-status", Static).update,
                 f"[#f85149]P2Rank failed: {exc}[/#f85149]",
             )
@@ -508,7 +508,7 @@ class RunWizardScreen(Screen):
         from ezscreen.prep import receptor as rec_prep
 
         def log(msg: str) -> None:
-            self.call_from_thread(self.query_one("#run-log", RichLog).write, msg)
+            self.app.call_from_thread(self.query_one("#run-log", RichLog).write, msg)
 
         try:
             run_id   = "ezs-" + secrets.token_hex(3)
@@ -631,19 +631,19 @@ class RunWizardScreen(Screen):
             if result["status"] == "complete":
                 checkpoint.mark_run_complete(run_id)
                 log(f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]")
-                self.call_from_thread(self._on_complete, run_id)
+                self.app.call_from_thread(self._on_complete, run_id)
             else:
                 checkpoint.mark_run_failed(run_id)
                 log(f"[#f85149]\u2717 Run {result['status']}: {result.get('error_type', '')}[/#f85149]")
                 log(f"[#6e7681]Resume with: ezscreen resume {run_id}[/#6e7681]")
-                self.call_from_thread(self._on_done)
+                self.app.call_from_thread(self._on_done)
 
         except Exception as exc:
-            self.call_from_thread(
+            self.app.call_from_thread(
                 self.query_one("#run-log", RichLog).write,
                 f"[#f85149]Error: {exc}[/#f85149]",
             )
-            self.call_from_thread(self._on_done)
+            self.app.call_from_thread(self._on_done)
 
     def _on_complete(self, run_id: str) -> None:
         from ezscreen.tui.screens.results_viewer import ResultsScreen
