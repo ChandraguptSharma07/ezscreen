@@ -1,0 +1,130 @@
+/* ezscreen TUI Theme
+   Color palette from project design spec (01_TECH_ARCHITECTURE.md) */
+
+/* ── Variables ─────────────────────────────────────────────────────── */
+$primary:   #79c0ff;   /* Cyan   — prompts, highlights             */
+$warning:   #e3b341;   /* Amber  — warnings, ETA                   */
+$success:   #3fb950;   /* Green  — success states                  */
+$error:     #f85149;   /* Red    — errors, failures                */
+$secondary: #8b949e;   /* Gray   — secondary text                  */
+$text:      #f0f6fc;   /* White  — primary text                    */
+$muted:     #6e7681;   /* Muted  — descriptions, hints             */
+$dim:       #484f58;   /* Dim    — dividers, chrome                */
+$bg:        #0d1117;   /* Background                               */
+$surface:   #161b22;   /* Surface / panels                         */
+$border:    #30363d;   /* Borders                                  */
+
+/* ── Global ──────────────────────────────────────────────────────────── */
+Screen {
+    background: $bg;
+    color: $text;
+}
+
+/* ── Header & Footer ─────────────────────────────────────────────────── */
+Header {
+    background: $surface;
+    color: $primary;
+    border-bottom: tall $border;
+}
+
+Footer {
+    background: $surface;
+    color: $muted;
+    border-top: tall $border;
+}
+
+Footer > .footer--key {
+    background: $dim;
+    color: $text;
+}
+
+/* ── Breadcrumb bar ──────────────────────────────────────────────────── */
+.breadcrumb {
+    height: 1;
+    background: $surface;
+    color: $muted;
+    padding: 0 1;
+    border-bottom: tall $border;
+}
+
+/* ── Home screen layout ──────────────────────────────────────────────── */
+#main {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 26;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#runs-panel {
+    width: 1fr;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#status-panel {
+    width: 30;
+    padding: 1 1;
+}
+
+/* ── Section titles ──────────────────────────────────────────────────── */
+.section-title {
+    color: $primary;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* ── Quick Actions list ──────────────────────────────────────────────── */
+#quick-actions {
+    height: 1fr;
+    border: none;
+    background: $bg;
+}
+
+#quick-actions > ListItem {
+    padding: 0 1;
+    color: $text;
+    background: $bg;
+}
+
+#quick-actions > ListItem.--highlight {
+    background: $dim;
+    color: $primary;
+}
+
+/* ── Runs DataTable ──────────────────────────────────────────────────── */
+#runs-table {
+    height: 1fr;
+    background: $bg;
+}
+
+DataTable > .datatable--header {
+    background: $surface;
+    color: $primary;
+    text-style: bold;
+}
+
+DataTable > .datatable--cursor {
+    background: $dim;
+    color: $text;
+}
+
+DataTable > .datatable--header-cursor {
+    background: $dim;
+    color: $primary;
+}
+
+/* ── Status panel ────────────────────────────────────────────────────── */
+#system-status {
+    color: $text;
+}
+
+/* ── Placeholder screen ──────────────────────────────────────────────── */
+.placeholder-msg {
+    content-align: center middle;
+    width: 100%;
+    height: 1fr;
+    color: $muted;
+}
