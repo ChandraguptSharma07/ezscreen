@@ -387,6 +387,21 @@ Select:focus {
     color: $warning;
 }
 
+/* ── Help overlay (ModalScreen) ─────────────────────────────────────── */
+HelpScreen {
+    align: center middle;
+}
+
+#help-content {
+    width: 70;
+    height: auto;
+    max-height: 80vh;
+    padding: 2 3;
+    background: $surface;
+    border: tall $border;
+    overflow-y: auto;
+}
+
 /* ── Placeholder screen ──────────────────────────────────────────────── */
 .placeholder-msg {
     content-align: center middle;
