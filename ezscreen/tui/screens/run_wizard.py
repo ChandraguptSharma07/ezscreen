@@ -149,12 +149,7 @@ class RunWizardScreen(Screen):
                     yield Label("Ready to submit", classes="form-section")
                     yield Static("", id="confirm-summary", classes="confirm-summary")
                     yield Label("Output", classes="form-section")
-                    yield RichLog(
-                        id="run-log",
-                        highlight=True,
-                        markup=True,
-                        min_height=10,
-                    )
+                    yield RichLog(id="run-log", highlight=True, markup=True)
 
             with Horizontal(id="wizard-nav"):
                 yield Button("\u2190 Back", id="btn-back")
