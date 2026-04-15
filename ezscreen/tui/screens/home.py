@@ -111,10 +111,10 @@ class HomeScreen(Screen):
         actions = {
             "action-run":      self.action_new_run,
             "action-status":   self.action_open_status,
-            "action-admet":    lambda: self._placeholder("ADMET Filter"),
-            "action-validate": lambda: self._placeholder("Validate"),
-            "action-auth":     lambda: self._placeholder("Auth Setup"),
-            "action-settings": lambda: self._placeholder("Settings"),
+            "action-admet":    self.action_open_admet,
+            "action-validate": self.action_open_validate,
+            "action-auth":     self.action_open_auth,
+            "action-settings": self.action_open_settings,
         }
         fn = actions.get(event.item.id)
         if fn:
@@ -137,6 +137,22 @@ class HomeScreen(Screen):
     def action_open_status(self) -> None:
         from ezscreen.tui.screens.status_monitor import StatusScreen
         self.app.push_screen(StatusScreen())
+
+    def action_open_admet(self) -> None:
+        from ezscreen.tui.screens.admet_filter import AdmetScreen
+        self.app.push_screen(AdmetScreen())
+
+    def action_open_validate(self) -> None:
+        from ezscreen.tui.screens.validate_screen import ValidateScreen
+        self.app.push_screen(ValidateScreen())
+
+    def action_open_auth(self) -> None:
+        from ezscreen.tui.screens.auth_setup import AuthScreen
+        self.app.push_screen(AuthScreen())
+
+    def action_open_settings(self) -> None:
+        from ezscreen.tui.screens.settings import SettingsScreen
+        self.app.push_screen(SettingsScreen())
 
     def _placeholder(self, title: str) -> None:
         from ezscreen.tui.screens._placeholder import PlaceholderScreen
