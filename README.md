@@ -98,7 +98,11 @@ See `examples/1hsg_quickstart.md` for a full end-to-end walkthrough against HIV-
 
 ## Screenshots
 
-Screenshots are in `docs/screenshots/`. See the `examples/` directory for annotated quickstart guides.
+![Home Dashboard](docs/screenshots/Home_Dashboard.png)
+
+![Status Monitor](docs/screenshots/Status_Monitor.png)
+
+![Results Viewer](docs/screenshots/Result_Viewer.png)
 
 ## License
 
