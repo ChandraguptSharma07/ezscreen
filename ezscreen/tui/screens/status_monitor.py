@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -37,6 +39,7 @@ class StatusScreen(Screen):
                     yield Button("View Results", id="btn-view",     variant="default")
                     yield Button("Download",     id="btn-download", variant="default")
                     yield Button("Clean",        id="btn-clean",    variant="default")
+                    yield Button("Resume Failed Shards", id="btn-resume", variant="warning")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -102,6 +105,13 @@ class StatusScreen(Screen):
         self.query_one("#detail-actions").display = True
         self.app.nav.selected_run_id = run_id
 
+        from ezscreen import checkpoint
+        try:
+            has_failed = bool(checkpoint.get_failed_shards(run_id))
+        except Exception:
+            has_failed = False
+        self.query_one("#btn-resume").display = has_failed
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         run_id = self.app.nav.selected_run_id
         if not run_id:
@@ -113,6 +123,46 @@ class StatusScreen(Screen):
             self.app.notify(f"Run:  ezscreen download {run_id}", timeout=6)
         elif event.button.id == "btn-clean":
             self.app.notify(f"Run:  ezscreen clean {run_id}", timeout=6)
+        elif event.button.id == "btn-resume":
+            self._run_resume(run_id)
+
+    def _run_resume(self, run_id: str) -> None:
+        work_dir = Path.home() / ".ezscreen" / "runs" / run_id
+        self.query_one("#btn-resume").disabled = True
+        self.app.notify(f"Resuming failed shards for {run_id}...", timeout=4)
+
+        def _worker() -> None:
+            from ezscreen.backends.kaggle.runner import resume_failed_shards
+            try:
+                result = resume_failed_shards(run_id, work_dir)
+                self.app.call_from_thread(self._on_resume_done, result)
+            except Exception as exc:
+                self.app.call_from_thread(
+                    self.app.notify,
+                    f"Resume failed: {exc}",
+                    severity="error",
+                    timeout=8,
+                )
+                self.app.call_from_thread(
+                    setattr, self.query_one("#btn-resume"), "disabled", False
+                )
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_resume_done(self, result: dict) -> None:
+        self.query_one("#btn-resume").disabled = False
+        status = result.get("status", "unknown")
+        n      = result.get("n_shards", 0)
+        ok     = result.get("n_succeeded", 0)
+        if status == "nothing_to_resume":
+            self.app.notify("No failed shards to resume.", timeout=4)
+        elif status == "failed" and "error" in result:
+            self.app.notify(result["error"], severity="error", timeout=8)
+        else:
+            msg = f"Resume done — {ok}/{n} shard(s) succeeded."
+            self.app.notify(msg, severity="information" if ok == n else "warning", timeout=6)
+        self._populate_table()
 
     # ------------------------------------------------------------------
     # Actions

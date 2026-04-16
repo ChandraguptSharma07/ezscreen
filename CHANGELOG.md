@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.6.0 — 2026-04-16
+
+### Added
+
+- **Shard resume** — `resume_failed_shards(run_id, work_dir)` in `ezscreen/backends/kaggle/runner.py`; reads `work_dir/resume.json` (written at submission time) to locate receptor, shard files, and notebook; resubmits failed shards with up to 2 kernels running in parallel via `ThreadPoolExecutor`; uses a `threading.Lock` for all checkpoint writes during concurrent execution; merges new partial results back into the main `output/scores.csv` via `merge_shard_results`
+- **Resume button in status monitor** — appears next to View/Download/Clean only when the selected run has at least one shard in `status = 'failed'`; runs resume in a background thread and refreshes the run table on completion
+
+---
+
 ## v1.5.0 — 2026-04-16
 
 ### Added
