@@ -22,6 +22,7 @@ def _write_kaggle_json(path: Path, content: dict | str | None) -> Path:
         kj.write_text(json.dumps(content))
     else:
         kj.write_text(content)
+    kj.chmod(0o600)
     return kj
 
 
