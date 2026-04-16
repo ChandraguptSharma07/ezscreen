@@ -221,11 +221,13 @@ def prep_ligands(
         })
 
     try:
-        import rdkit; rv = rdkit.__version__
+        import rdkit
+        rv = rdkit.__version__
     except Exception:
         rv = "unknown"
     try:
-        import meeko; mv = meeko.__version__
+        import meeko
+        mv = meeko.__version__
     except Exception:
         mv = "unknown"
     sv = "vendor" if (Scrubber and "vendor" in getattr(Scrubber, "__module__", "")) else "git+"

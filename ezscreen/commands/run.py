@@ -150,7 +150,7 @@ def _step_binding_site(ctx: dict) -> dict | object:
     # Co-crystal: only if not AF
     cocrystal_ligands = [] if is_af else pocket.find_cocrystal_ligands(pdb_path)
     co_label = (
-        f"Co-crystal ligand ({', '.join(l['resname'] for l in cocrystal_ligands)})"
+        f"Co-crystal ligand ({', '.join(lig['resname'] for lig in cocrystal_ligands)})"
         if cocrystal_ligands else None
     )
 
@@ -176,9 +176,9 @@ def _step_binding_site(ctx: dict) -> dict | object:
         else:
             pick = questionary.select(
                 "Multiple ligands found — which to use as reference?",
-                choices=[f"{l['resname']} (chain {l['chain']})" for l in cocrystal_ligands],
+                choices=[f"{lig['resname']} (chain {lig['chain']})" for lig in cocrystal_ligands],
             ).ask()
-            idx = [f"{l['resname']} (chain {l['chain']})" for l in cocrystal_ligands].index(pick)
+            idx = [f"{lig['resname']} (chain {lig['chain']})" for lig in cocrystal_ligands].index(pick)
             lig = cocrystal_ligands[idx]
         box = pocket.box_from_cocrystal(lig)
 

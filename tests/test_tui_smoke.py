@@ -1,16 +1,14 @@
 """Smoke tests for the TUI application."""
 from __future__ import annotations
 
-import pytest
-
 from ezscreen.tui.app import EzscreenApp
-from ezscreen.tui.screens.home import HomeScreen
 from ezscreen.tui.screens._placeholder import PlaceholderScreen
+from ezscreen.tui.screens.home import HomeScreen
 
 
 async def test_app_title() -> None:
     app = EzscreenApp()
-    async with app.run_test() as pilot:
+    async with app.run_test():
         assert app.title == "ezscreen"
 
 

@@ -29,10 +29,15 @@ def invoke(results_dir: Path, top_n: int = 25) -> None:
     # Detect which column is the score; drop uninformative rmsd columns
     all_headers = list(rows[0].keys())
     headers     = [h for h in all_headers if h not in ("rmsd_lb", "rmsd_ub")]
-    score_col   = next((h for h in headers if "score" in h.lower() or "affinity" in h.lower()), headers[-1])
+    score_col = next(
+        (h for h in headers if "score" in h.lower() or "affinity" in h.lower()),
+        headers[-1],
+    )
 
     # Rich table
-    t = Table(title=f"Top {min(top_n, len(rows))} docking hits", show_lines=False, expand=False)
+    t = Table(
+        title=f"Top {min(top_n, len(rows))} docking hits", show_lines=False, expand=False
+    )
     t.add_column("Rank", justify="right", style="dim", no_wrap=True)
     for h in headers:
         t.add_column(h, no_wrap=True)
@@ -57,7 +62,10 @@ def invoke(results_dir: Path, top_n: int = 25) -> None:
         console.print(f"  3D viewer → [bold]{html_path}[/bold]")
         webbrowser.open(html_path.as_uri())
     else:
-        console.print("  [dim]3D viewer not available — SDF conversion skipped on Kaggle (meeko/RDKit output empty)[/dim]")
+        console.print(
+            "  [dim]3D viewer not available — "
+            "SDF conversion skipped on Kaggle (meeko/RDKit output empty)[/dim]"
+        )
 
 
 def _write_viewer(

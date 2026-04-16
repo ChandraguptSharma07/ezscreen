@@ -24,11 +24,11 @@ class AdmetScreen(Screen):
             yield Input(placeholder="/path/to/library.sdf", id="admet-input")
 
             yield Label("Filters", classes="form-section")
-            yield Checkbox("Lipinski Rule of Five",       id="f-lipinski",     value=True)
-            yield Checkbox("PAINS alerts",                id="f-pains",        value=True)
-            yield Checkbox("Brenk toxicophores",          id="f-toxicophores", value=True)
-            yield Checkbox("Veber oral bioavailability",  id="f-veber",        value=True)
-            yield Checkbox("Egan BBB permeability",       id="f-egan",         value=False)
+            yield Checkbox("Lipinski Rule of Five",     id="f-lipinski",     value=True)
+            yield Checkbox("PAINS alerts",              id="f-pains",        value=True)
+            yield Checkbox("Brenk toxicophores",        id="f-toxicophores", value=True)
+            yield Checkbox("Veber oral bioavailability", id="f-veber",       value=True)
+            yield Checkbox("Egan BBB permeability",     id="f-egan",         value=False)
 
             yield Button("Run Filter", id="btn-run", variant="primary")
             yield Static("", id="admet-results", classes="results-panel")
@@ -83,12 +83,14 @@ class AdmetScreen(Screen):
         removed  = result["admet_removed"]
         passed   = total - removed
         lines = [
-            f"[#3fb950]Done.[/#3fb950]  {passed:,} passed  /  {removed:,} removed  /  {total:,} total",
+            f"[#3fb950]Done.[/#3fb950]  "
+            f"{passed:,} passed  /  {removed:,} removed  /  {total:,} total",
         ]
         breakdown = result.get("admet_breakdown", {})
         for rule, count in breakdown.items():
             if count:
-                lines.append(f"  [#6e7681]{rule.replace('_', ' ')}: {count:,}[/#6e7681]")
+                label = rule.replace('_', ' ')
+                lines.append(f"  [#6e7681]{label}: {count:,}[/#6e7681]")
         lines.append(f"\n[#6e7681]Output → {output_path}[/#6e7681]")
         return "\n".join(lines)
 

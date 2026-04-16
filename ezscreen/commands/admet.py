@@ -6,7 +6,7 @@ import questionary
 from rich.console import Console
 from rich.panel import Panel
 
-from ezscreen.admet.filter import FilterConfig, V1_DISCLAIMER, filter_library
+from ezscreen.admet.filter import V1_DISCLAIMER, FilterConfig, filter_library
 
 console = Console()
 
@@ -27,11 +27,11 @@ def invoke(input_path: Path, output_path: Path | None = None) -> None:
     active = questionary.checkbox(
         "Which filters to apply?",
         choices=[
-            questionary.Choice("Lipinski Rule of Five",   value="lipinski",     checked=True),
-            questionary.Choice("PAINS alerts",             value="pains",        checked=True),
-            questionary.Choice("Brenk toxicophores",       value="toxicophores", checked=True),
-            questionary.Choice("Veber oral bioavailability", value="veber",      checked=True),
-            questionary.Choice("Egan BBB permeability",    value="egan_bbb",     checked=False),
+            questionary.Choice("Lipinski Rule of Five", value="lipinski", checked=True),
+            questionary.Choice("PAINS alerts", value="pains", checked=True),
+            questionary.Choice("Brenk toxicophores", value="toxicophores", checked=True),  # noqa: E501
+            questionary.Choice("Veber oral bioavailability", value="veber", checked=True),  # noqa: E501
+            questionary.Choice("Egan BBB permeability", value="egan_bbb", checked=False),  # noqa: E501
         ],
     ).ask()
 

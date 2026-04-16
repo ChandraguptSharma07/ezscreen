@@ -32,17 +32,21 @@ class FilterResult:
 # ---------------------------------------------------------------------------
 
 def _check_lipinski(mol) -> list[str]:
-    from rdkit.Chem.Descriptors import MolWt, MolLogP, NumHDonors, NumHAcceptors
-    from rdkit.Chem.rdMolDescriptors import CalcNumHBD, CalcNumHBA
+    from rdkit.Chem.Descriptors import MolLogP, MolWt
+    from rdkit.Chem.rdMolDescriptors import CalcNumHBA, CalcNumHBD
     failures = []
     mw  = MolWt(mol)
     lp  = MolLogP(mol)
     hbd = CalcNumHBD(mol)
     hba = CalcNumHBA(mol)
-    if mw  > 500: failures.append(f"MW {mw:.1f} > 500")
-    if lp  > 5:   failures.append(f"LogP {lp:.2f} > 5")
-    if hbd > 5:   failures.append(f"HBD {hbd} > 5")
-    if hba > 10:  failures.append(f"HBA {hba} > 10")
+    if mw  > 500:
+        failures.append(f"MW {mw:.1f} > 500")
+    if lp  > 5:
+        failures.append(f"LogP {lp:.2f} > 5")
+    if hbd > 5:
+        failures.append(f"HBD {hbd} > 5")
+    if hba > 10:
+        failures.append(f"HBA {hba} > 10")
     return failures
 
 
@@ -69,12 +73,14 @@ def _check_toxicophores(mol) -> list[str]:
 
 
 def _check_veber(mol) -> list[str]:
-    from rdkit.Chem.rdMolDescriptors import CalcTPSA, CalcNumRotatableBonds
+    from rdkit.Chem.rdMolDescriptors import CalcNumRotatableBonds, CalcTPSA
     failures = []
     tpsa = CalcTPSA(mol)
     rotb = CalcNumRotatableBonds(mol)
-    if tpsa > 140:  failures.append(f"TPSA {tpsa:.1f} > 140 Å²")
-    if rotb > 10:   failures.append(f"RotBonds {rotb} > 10")
+    if tpsa > 140:
+        failures.append(f"TPSA {tpsa:.1f} > 140 Å²")
+    if rotb > 10:
+        failures.append(f"RotBonds {rotb} > 10")
     return failures
 
 
@@ -84,8 +90,10 @@ def _check_egan_bbb(mol) -> list[str]:
     failures = []
     lp   = MolLogP(mol)
     tpsa = CalcTPSA(mol)
-    if not (-1.5 <= lp <= 6):  failures.append(f"Egan BBB: LogP {lp:.2f} out of [-1.5, 6]")
-    if not (0 <= tpsa <= 131): failures.append(f"Egan BBB: TPSA {tpsa:.1f} out of [0, 131]")
+    if not (-1.5 <= lp <= 6):
+        failures.append(f"Egan BBB: LogP {lp:.2f} out of [-1.5, 6]")
+    if not (0 <= tpsa <= 131):
+        failures.append(f"Egan BBB: TPSA {tpsa:.1f} out of [0, 131]")
     return failures
 
 
@@ -121,6 +129,7 @@ def filter_library(
     Molecules that fail are counted by rule.
     """
     from pathlib import Path as _Path
+
     from rdkit.Chem import SDMolSupplier, SDWriter, SmilesMolSupplier
 
     if cfg is None:
