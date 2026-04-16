@@ -32,12 +32,13 @@ class HomeScreen(Screen):
             with Vertical(id="sidebar"):
                 yield Label("Quick Actions", classes="section-title")
                 yield ListView(
-                    ListItem(Label("  New Run"),         id="action-run"),
-                    ListItem(Label("  Status Monitor"),  id="action-status"),
-                    ListItem(Label("  ADMET Filter"),    id="action-admet"),
-                    ListItem(Label("  Validate"),        id="action-validate"),
-                    ListItem(Label("  Auth Setup"),      id="action-auth"),
-                    ListItem(Label("  Settings"),        id="action-settings"),
+                    ListItem(Label("  New Run"),          id="action-run"),
+                    ListItem(Label("  Status Monitor"),   id="action-status"),
+                    ListItem(Label("  Library Browser"),  id="action-library"),
+                    ListItem(Label("  ADMET Filter"),     id="action-admet"),
+                    ListItem(Label("  Validate"),         id="action-validate"),
+                    ListItem(Label("  Auth Setup"),       id="action-auth"),
+                    ListItem(Label("  Settings"),         id="action-settings"),
                     id="quick-actions",
                 )
             with Vertical(id="runs-panel"):
@@ -114,6 +115,7 @@ class HomeScreen(Screen):
         actions = {
             "action-run":      self.action_new_run,
             "action-status":   self.action_open_status,
+            "action-library":  self.action_open_library,
             "action-admet":    self.action_open_admet,
             "action-validate": self.action_open_validate,
             "action-auth":     self.action_open_auth,
@@ -141,6 +143,10 @@ class HomeScreen(Screen):
     def action_open_status(self) -> None:
         from ezscreen.tui.screens.status_monitor import StatusScreen
         self.app.push_screen(StatusScreen())
+
+    def action_open_library(self) -> None:
+        from ezscreen.tui.screens.library_browser import LibraryBrowserScreen
+        self.app.push_screen(LibraryBrowserScreen())
 
     def action_open_admet(self) -> None:
         from ezscreen.tui.screens.admet_filter import AdmetScreen

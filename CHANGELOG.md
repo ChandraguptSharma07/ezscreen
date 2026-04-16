@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.0 — 2026-04-16
+
+### Added
+
+- **ZINC15 library downloader** — `ezscreen/libraries/zinc.py`; download drug-like, lead-like, or fragment-like compound sets in three sizes (1k / 10k / 100k) or any custom count; purchasable-only filter; Rich progress bar; writes standard `.smi`
+- **ChEMBL actives fetcher** — `ezscreen/libraries/chembl.py`; resolve a UniProt accession to a ChEMBL target, fetch binding-assay actives below a configurable IC50 threshold (default 1 µM), deduplicate SMILES, write `.smi`
+- **Library Browser TUI screen** — source picker (ZINC / ChEMBL), all filter controls, background download thread, "Use this file" button that auto-fills the wizard ligand path on success
+- **Library Browser in Quick Actions** — accessible from the home dashboard sidebar
+- **Download library button in Run Wizard step 3** — opens Library Browser mid-wizard; selected file path is injected back into the ligand input automatically
+- **Local AutoDock Vina CPU backend** — `ezscreen/backends/local/`; downloads the Vina binary on first use; runs docking locally without a Kaggle account; same CSV/SDF output format as the Kaggle runner
+- **Run locally toggle in Run Wizard step 4** — switches the submission backend to the local Vina runner
+
+---
+
 ## v1.1.0 — 2026-04-16
 
 ### Added

@@ -69,12 +69,12 @@ class RunWizardScreen(Screen):
                 # ── Step 1: Receptor & Chains ─────────────────────────
                 with Vertical(id="step-receptor", classes="wizard-step"):
                     yield Label(
-                        "PDB ID (e.g. 7L11) or path to a .pdb file",
+                        "PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file",
                         classes="form-label",
                     )
                     with Horizontal(classes="form-row"):
                         yield Input(
-                            placeholder="7L11 or /path/to/receptor.pdb",
+                            placeholder="7L11  or  AF:P00533  or  /path/to/receptor.pdb",
                             id="rec-input",
                         )
                         yield Button("Validate", id="btn-rec-validate")
@@ -117,7 +117,9 @@ class RunWizardScreen(Screen):
                         "Ligand library  (.sdf or .smi file)",
                         classes="form-label",
                     )
-                    yield Input(placeholder="/path/to/library.sdf", id="lig-input")
+                    with Horizontal(classes="form-row"):
+                        yield Input(placeholder="/path/to/library.sdf", id="lig-input")
+                        yield Button("Download library", id="btn-lib-browser")
                     yield Static("", id="lig-status", classes="form-status")
 
                 # ── Step 4: Run Options ───────────────────────────────
@@ -201,11 +203,21 @@ class RunWizardScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         dispatch = {
             "btn-rec-validate": self._start_rec_validate,
+            "btn-lib-browser":  self._open_lib_browser,
             "btn-back":         self._go_back,
             "btn-next":         self._go_next,
         }
         if fn := dispatch.get(event.button.id):
             fn()
+
+    def _open_lib_browser(self) -> None:
+        from ezscreen.tui.screens.library_browser import LibraryBrowserScreen
+
+        def _on_dismiss(path: str | None) -> None:
+            if path:
+                self.query_one("#lig-input", Input).value = path
+
+        self.app.push_screen(LibraryBrowserScreen(), _on_dismiss)
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         if event.radio_set.id == "site-method":
@@ -253,7 +265,14 @@ class RunWizardScreen(Screen):
             work_dir = Path.home() / ".ezscreen" / "tmp" / "wizard"
             work_dir.mkdir(parents=True, exist_ok=True)
 
-            if len(raw) == 4 and raw.isalnum():
+            if raw.upper().startswith("AF:"):
+                from ezscreen.prep.alphafold import download_alphafold_structure
+                uid = raw[3:].strip().upper()
+                out = work_dir / f"AF-{uid}-model.pdb"
+                pdb_path, _ = download_alphafold_structure(uid, out)
+                self._ctx["pdb_source"] = "alphafold"
+                self._ctx["pdb_id"]     = uid
+            elif len(raw) == 4 and raw.isalnum():
                 pdb_path = rec_prep.fetch_pdb(raw.upper(), work_dir / "receptor_raw")
                 self._ctx["pdb_source"] = "rcsb"
                 self._ctx["pdb_id"]     = raw.upper()
