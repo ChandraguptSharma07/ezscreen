@@ -44,7 +44,8 @@ class ResultsScreen(Screen):
                     "[#6e7681]Select a hit to see details.[/#6e7681]",
                     id="compound-info",
                 )
-                yield Button("Open 3D Viewer", id="btn-3d", variant="default")
+                yield Button("Open 3D Viewer",  id="btn-3d",     variant="default")
+                yield Button("Open Report",      id="btn-report", variant="default")
                 yield Label("Validate Setup", classes="section-title", id="validate-label")
                 yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
                 yield Button(
@@ -54,8 +55,10 @@ class ResultsScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#btn-3d").display = False
+        self.query_one("#btn-3d").display     = False
+        self.query_one("#btn-report").display = False
         self._load_hits()
+        self._refresh_report_button()
 
     # ------------------------------------------------------------------
     # Data
@@ -130,6 +133,8 @@ class ResultsScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-3d":
             self.action_open_viewer()
+        elif event.button.id == "btn-report":
+            self._open_report()
         elif event.button.id == "btn-validate":
             self._run_benchmark()
 
@@ -144,6 +149,51 @@ class ResultsScreen(Screen):
             self.app.notify("Opened 3D viewer in browser.", timeout=3)
         else:
             self.app.notify("No 3D viewer HTML found for this run.", timeout=4)
+
+    def _refresh_report_button(self) -> None:
+        self.query_one("#btn-report").display = (self._output / "scores.csv").exists()
+
+    def _report_path(self) -> Path:
+        return self._output / "results_report.html"
+
+    def _open_report(self) -> None:
+        scores_csv = self._output / "scores.csv"
+        if not scores_csv.exists():
+            self.app.notify("No docking results found for this run.", severity="error", timeout=5)
+            return
+
+        report = self._report_path()
+        if report.exists():
+            webbrowser.open(report.as_uri())
+            self.app.notify("Report opened in browser.", timeout=3)
+            return
+
+        self.app.notify("Generating report...", timeout=3)
+        self.query_one("#btn-report").disabled = True
+
+        def _worker() -> None:
+            from ezscreen.results.report_html import write_results_report
+            try:
+                write_results_report(scores_csv, report, run_id=self._run_id)
+                self.app.call_from_thread(self._on_report_ready, report)
+            except Exception as exc:
+                self.app.call_from_thread(
+                    self.app.notify,
+                    f"Report generation failed: {exc}",
+                    severity="error",
+                    timeout=8,
+                )
+                self.app.call_from_thread(
+                    setattr, self.query_one("#btn-report"), "disabled", False
+                )
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_report_ready(self, report: Path) -> None:
+        self.query_one("#btn-report").disabled = False
+        webbrowser.open(report.as_uri())
+        self.app.notify("Report opened in browser.", timeout=3)
 
     def _run_benchmark(self) -> None:
         actives_str = self.query_one("#actives-input", Input).value.strip()

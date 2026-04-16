@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.4.0 — 2026-04-16
+
+### Added
+
+- **Expanded HTML results report** — `write_results_report()` in `report_html.py` generates a self-contained HTML page from any `scores.csv`; includes a run metadata table, score distribution histogram, score vs MW and score vs LogP scatter plots (matplotlib), and a 2D structure grid of the top 10 hits (RDKit SVG, inline); all images are base64-embedded so the file is portable
+- **Open Report button in results viewer** — appears whenever a run has a `scores.csv`; on first click the report is generated in a background thread and opened in the default browser; on subsequent clicks the cached file is opened directly
+
+---
+
 ## v1.3.0 — 2026-04-16
 
 ### Added
