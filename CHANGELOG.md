@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.7.1 — 2026-04-17
+
+### Fixed
+
+- **Local docking backend never ran** — `run_wizard.py` step-options validation read `opt-admet` and `opt-depth` but skipped `opt-local`, so `ctx["run_locally"]` was never set and `_do_submit` always fell through to Kaggle; fixed by reading the switch in `_validate_step` and branching on `ctx["run_locally"]` in `_do_submit`
+- **Confirm summary missing backend** — added "Backend: Local CPU (AutoDock Vina) / Kaggle GPU" line to step-5 summary
+
+---
+
 ## v1.7.0 — 2026-04-16
 
 ### Added
