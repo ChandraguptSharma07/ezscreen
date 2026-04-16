@@ -458,6 +458,7 @@ class RunWizardScreen(Screen):
 
         elif step == "step-options":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
+            self._ctx["run_locally"]      = self.query_one("#opt-local", Switch).value
             depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
             label     = str(depth_btn.label) if depth_btn else ""
             if "Fast" in label:
@@ -498,8 +499,9 @@ class RunWizardScreen(Screen):
         chains = ", ".join(ctx.get("selected_chains", []))
         site  = ctx.get("site_method", "—")
         lig   = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
-        admet = "yes" if ctx.get("admet_pre_filter") else "no"
-        depth = ctx.get("search_label", "Balanced")
+        admet   = "yes" if ctx.get("admet_pre_filter") else "no"
+        depth   = ctx.get("search_label", "Balanced")
+        backend = "Local CPU (AutoDock Vina)" if ctx.get("run_locally") else "Kaggle GPU"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
             if ctx.get("is_alphafold") else ""
@@ -510,6 +512,7 @@ class RunWizardScreen(Screen):
             f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
             f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
             f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
+            f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
             af_note,
         ]))
 
@@ -609,50 +612,63 @@ class RunWizardScreen(Screen):
                 n_per = lig_result["report"]["total_input"] // len(shard_paths)
                 checkpoint.add_shard(run_id, i, n_per)
 
-            # Render notebook
-            import jinja2
+            if ctx.get("run_locally"):
+                # Local AutoDock Vina path
+                from ezscreen.backends.local.runner import run_local_screening
 
-            from ezscreen import __version__
+                log("[#79c0ff]Running local AutoDock Vina docking...[/#79c0ff]")
+                result = run_local_screening(
+                    run_id=run_id,
+                    receptor_pdbqt=receptor_pdbqt,
+                    shard_paths=shard_paths,
+                    box_center=box["center"],
+                    box_size=box["size"],
+                    work_dir=work_dir,
+                )
+            else:
+                # Kaggle GPU path
+                import jinja2
 
-            template_path = (
-                Path(__file__).parent.parent.parent
-                / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2"
-            )
-            env = jinja2.Environment(
-                variable_start_string="<<",
-                variable_end_string=">>",
-                block_start_string="<%",
-                block_end_string="%>",
-                loader=jinja2.FileSystemLoader(str(template_path.parent)),
-            )
-            notebook_src = env.get_template(template_path.name).render(
-                ezscreen_version=__version__,
-                run_id=run_id,
-                engine="unidock",
-                mode="hybrid",
-                box_center=box["center"],
-                box_size=box["size"],
-                shard_index=0,
-                total_shards=len(shard_paths),
-                ph=cfg["run"].get("default_ph", 7.4),
-                search_mode=ctx["search_params"].get("search_mode", "balance"),
-                enumerate_tautomers=False,
-                shard_filename=shard_paths[0].name,
-            )
-            notebook_path = work_dir / "notebook.ipynb"
-            notebook_path.write_text(notebook_src, encoding="utf-8")
+                from ezscreen import __version__
 
-            # Submit + poll
-            log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
-            result = kaggle_runner.run_screening_job(
-                run_id=run_id,
-                receptor_pdbqt=receptor_pdbqt,
-                shard_paths=shard_paths,
-                notebook_path=notebook_path,
-                username=kaggle_username,
-                work_dir=work_dir,
-                retry_limit=cfg["run"].get("shard_retry_limit", 3),
-            )
+                template_path = (
+                    Path(__file__).parent.parent.parent
+                    / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2"
+                )
+                env = jinja2.Environment(
+                    variable_start_string="<<",
+                    variable_end_string=">>",
+                    block_start_string="<%",
+                    block_end_string="%>",
+                    loader=jinja2.FileSystemLoader(str(template_path.parent)),
+                )
+                notebook_src = env.get_template(template_path.name).render(
+                    ezscreen_version=__version__,
+                    run_id=run_id,
+                    engine="unidock",
+                    mode="hybrid",
+                    box_center=box["center"],
+                    box_size=box["size"],
+                    shard_index=0,
+                    total_shards=len(shard_paths),
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    search_mode=ctx["search_params"].get("search_mode", "balance"),
+                    enumerate_tautomers=False,
+                    shard_filename=shard_paths[0].name,
+                )
+                notebook_path = work_dir / "notebook.ipynb"
+                notebook_path.write_text(notebook_src, encoding="utf-8")
+
+                log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
+                result = kaggle_runner.run_screening_job(
+                    run_id=run_id,
+                    receptor_pdbqt=receptor_pdbqt,
+                    shard_paths=shard_paths,
+                    notebook_path=notebook_path,
+                    username=kaggle_username,
+                    work_dir=work_dir,
+                    retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                )
 
             if result["status"] == "complete":
                 checkpoint.mark_run_complete(run_id)
