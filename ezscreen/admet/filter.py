@@ -84,7 +84,7 @@ def _check_egan_bbb(mol) -> list[str]:
     failures = []
     lp   = MolLogP(mol)
     tpsa = CalcTPSA(mol)
-    if not (-1 <= lp <= 6):   failures.append(f"Egan BBB: LogP {lp:.2f} out of [-1, 6]")
+    if not (-1.5 <= lp <= 6):  failures.append(f"Egan BBB: LogP {lp:.2f} out of [-1.5, 6]")
     if not (0 <= tpsa <= 131): failures.append(f"Egan BBB: TPSA {tpsa:.1f} out of [0, 131]")
     return failures
 

@@ -24,8 +24,11 @@ def _write_pdb(path: Path, lines: list[str]) -> Path:
 
 
 def _atom_line(serial, name, resname, chain, resseq, x, y, z, record="ATOM  "):
+    # Standard PDB column layout (1-indexed):
+    # 1-6 record, 7-11 serial, 12 blank, 13-16 name, 17 altLoc, 18-20 resname,
+    # 21 blank, 22 chain, 23-26 resseq, 27-30 blank, 31-38 x, 39-46 y, 47-54 z
     return (
-        f"{record:<6}{serial:5d} {name:<4}{resname:>3} {chain}{resseq:4d}    "
+        f"{record:<6}{serial:5d} {name:<4} {resname:>3} {chain}{resseq:4d}    "
         f"{x:8.3f}{y:8.3f}{z:8.3f}"
     )
 

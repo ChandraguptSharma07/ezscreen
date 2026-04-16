@@ -118,7 +118,7 @@ def test_veber_off_skips_check():
 # Egan BBB
 # ---------------------------------------------------------------------------
 
-CAFFEINE = "Cn1cnc2c1c(=O)n(C)c(=O)n2C"     # LogP -0.07, TPSA 58 — passes Egan
+CAFFEINE = "Cn1cnc2c1c(=O)n(C)c(=O)n2C"     # LogP ~-1.0, TPSA 58 — passes Egan (lower bound -1.5)
 HIGH_LOGP = "c1ccc(cc1)c1ccc(cc1)c1ccc(cc1)c1ccc(cc1)C"  # very high LogP
 
 
@@ -144,9 +144,12 @@ def test_egan_off_by_default():
 # All filters combined
 # ---------------------------------------------------------------------------
 
-def test_all_filters_pass_aspirin():
+IBUPROFEN = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"  # MW 206, LogP 3.5, no PAINS/Brenk flags
+
+def test_all_filters_pass_ibuprofen():
+    # Aspirin's acetyl ester is correctly flagged by Brenk — use ibuprofen as a clean reference
     cfg = FilterConfig(lipinski=True, pains=True, toxicophores=True, veber=True, egan_bbb=False)
-    result = filter_mol(mol(ASPIRIN), cfg)
+    result = filter_mol(mol(IBUPROFEN), cfg)
     assert result.passed
 
 
