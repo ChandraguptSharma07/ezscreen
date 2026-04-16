@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.1.0 — 2026-04-16
+
+### Added
+
+- **Benchmarking infrastructure** — retrospective enrichment validation for any completed screening run
+- `ezscreen/benchmark/decoys.py` — DUD-E style property-matched decoy generator; fetches candidates from ChEMBL, filters by Tanimoto < 0.35 to ensure structural dissimilarity from actives
+- `ezscreen/benchmark/metrics.py` — computes EF1%, EF5%, and AUC-ROC from a ranked active/decoy list using trapezoidal integration; no scipy dependency
+- `ezscreen/benchmark/runner.py` — loads a known actives SMILES file, canonicalises SMILES via RDKit, cross-references against docking results, and calls the metrics module
+- `ezscreen/results/report_html.py` — generates a self-contained benchmark HTML report with EF badges and an embedded ROC curve plot (matplotlib, base64 PNG)
+- Results viewer now has a **Validate Setup** section: enter a known actives file, run the benchmark in a background thread, see EF1%/EF5%/AUC inline, and open the HTML report in the browser
+
+### Changed
+
+- `pyproject.toml` — added `matplotlib>=3.7.0` dependency (required for the ROC curve plot)
+- GitHub Actions CI now publishes to PyPI automatically on version tag pushes (`v*`)
+
+---
+
 ## v1.0.0 — 2026-04-15
 
 First public release.
