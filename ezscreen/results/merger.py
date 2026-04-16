@@ -18,6 +18,42 @@ def _load_index(shard_dirs: list[Path]) -> dict[str, dict]:
     return index
 
 
+def _add_efficiency_cols(
+    rows: list[dict],
+    fieldnames: list[str],
+    score_col: str | None,
+) -> tuple[list[dict], list[str]]:
+    if not score_col:
+        return rows, fieldnames
+    try:
+        from rdkit import Chem
+        from rdkit.Chem.Descriptors import MolWt
+        from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms
+    except ImportError:
+        return rows, fieldnames
+
+    new_fields = list(fieldnames)
+    if "LE" not in new_fields:
+        new_fields += ["LE", "BEI"]
+
+    for row in rows:
+        smi = row.get("smiles", "")
+        try:
+            score = abs(float(row.get(score_col, 0)))
+            mol   = Chem.MolFromSmiles(smi) if smi else None
+            if mol and score > 0:
+                ha  = CalcNumHeavyAtoms(mol)
+                mw  = MolWt(mol)
+                row["LE"]  = f"{score / ha:.3f}"  if ha  else ""
+                row["BEI"] = f"{score / mw * 1000:.3f}" if mw else ""
+            else:
+                row["LE"] = row["BEI"] = ""
+        except Exception:
+            row["LE"] = row["BEI"] = ""
+
+    return rows, new_fields
+
+
 def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +103,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             best[key] = row
 
     deduped = sorted(best.values(), key=_score)
+    deduped, fieldnames = _add_efficiency_cols(deduped, fieldnames, score_col)
 
     scores_out = output_dir / "scores.csv"
     if deduped and fieldnames:

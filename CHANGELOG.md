@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.5.0 — 2026-04-16
+
+### Added
+
+- **Scaffold clustering** — `ezscreen/results/clustering.py`; Butina algorithm on Morgan fingerprints (radius 2, 2048 bits); configurable Tanimoto cutoff (default 0.4); returns cluster labels, centroid indices, and sizes; `export_centroids()` writes centroid SMILES as `.smi`
+- **Cluster Hits button in results viewer** — runs clustering in a background thread; shows cluster count, largest cluster size, and singleton count inline; saves `centroids.smi` to the run output directory
+- **Scaffold cluster section in HTML report** — centroid 2D structure grid (top 20 clusters by size) with compound count per cluster; generated automatically when `write_results_report()` is called with `cluster=True` (default)
+- **ProLIF interaction fingerprints** — `ezscreen/results/interactions.py`; wraps ProLIF + MDAnalysis to compute per-residue contact fingerprints from `poses.sdf` and the receptor PDB; gracefully returns `None` if ProLIF is not installed
+- **Interaction heatmap in HTML report** — compounds × residues table coloured by dominant interaction type (H-bond, hydrophobic, π-stacking, etc.); included in report when interaction data is passed to `write_results_report()`
+- **Ligand Efficiency (LE) and BEI columns** — computed by `merge_shard_results()` from docking score and RDKit heavy-atom count / MW; written to `scores.csv` automatically; LE values > 0.5 kcal/mol/atom are highlighted amber in the results viewer as a size-bias warning
+
+---
+
 ## v1.4.0 — 2026-04-16
 
 ### Added

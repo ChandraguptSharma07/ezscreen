@@ -30,6 +30,7 @@ class ResultsScreen(Screen):
         self._output    = Path.home() / ".ezscreen" / "runs" / run_id / "output"
         self._rows:  list[dict] = []
         self._headers: list[str] = []
+        self._score_col: str = ""
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -46,6 +47,8 @@ class ResultsScreen(Screen):
                 )
                 yield Button("Open 3D Viewer",  id="btn-3d",     variant="default")
                 yield Button("Open Report",      id="btn-report", variant="default")
+                yield Button("Cluster Hits",     id="btn-cluster", variant="default")
+                yield Static("", id="cluster-result")
                 yield Label("Validate Setup", classes="section-title", id="validate-label")
                 yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
                 yield Button(
@@ -55,8 +58,9 @@ class ResultsScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#btn-3d").display     = False
-        self.query_one("#btn-report").display = False
+        self.query_one("#btn-3d").display      = False
+        self.query_one("#btn-report").display  = False
+        self.query_one("#btn-cluster").display = False
         self._load_hits()
         self._refresh_report_button()
 
@@ -81,12 +85,13 @@ class ResultsScreen(Screen):
             table.add_row("scores.csv is empty")
             return
 
-        all_cols      = list(self._rows[0].keys())
-        self._headers = [h for h in all_cols if h not in _SKIP_COLS]
-        score_col     = next(
+        all_cols           = list(self._rows[0].keys())
+        self._headers      = [h for h in all_cols if h not in _SKIP_COLS]
+        self._score_col    = next(
             (h for h in self._headers if "score" in h.lower() or "affinity" in h.lower()),
             self._headers[-1],
         )
+        score_col = self._score_col
 
         table.add_column("#", width=4)
         for h in self._headers:
@@ -98,6 +103,13 @@ class ResultsScreen(Screen):
                 val = row.get(h, "")
                 if h == score_col:
                     cells.append(Text(val, style="bold #79c0ff"))
+                elif h == "LE" and val:
+                    # flag size-biased fragments: LE > 0.5 kcal/mol/atom is suspicious
+                    try:
+                        style = "#e3b341" if float(val) > 0.5 else "#8b949e"
+                    except ValueError:
+                        style = "#8b949e"
+                    cells.append(Text(val, style=style))
                 elif i <= 3:
                     cells.append(Text(val, style="#3fb950"))
                 else:
@@ -135,6 +147,8 @@ class ResultsScreen(Screen):
             self.action_open_viewer()
         elif event.button.id == "btn-report":
             self._open_report()
+        elif event.button.id == "btn-cluster":
+            self._run_clustering()
         elif event.button.id == "btn-validate":
             self._run_benchmark()
 
@@ -151,7 +165,9 @@ class ResultsScreen(Screen):
             self.app.notify("No 3D viewer HTML found for this run.", timeout=4)
 
     def _refresh_report_button(self) -> None:
-        self.query_one("#btn-report").display = (self._output / "scores.csv").exists()
+        has_results = (self._output / "scores.csv").exists()
+        self.query_one("#btn-report").display  = has_results
+        self.query_one("#btn-cluster").display = has_results
 
     def _report_path(self) -> Path:
         return self._output / "results_report.html"
@@ -194,6 +210,53 @@ class ResultsScreen(Screen):
         self.query_one("#btn-report").disabled = False
         webbrowser.open(report.as_uri())
         self.app.notify("Report opened in browser.", timeout=3)
+
+    def _run_clustering(self) -> None:
+        if not self._rows:
+            return
+        self.query_one("#cluster-result", Static).update(
+            "[#e3b341]Clustering...[/#e3b341]"
+        )
+        self.query_one("#btn-cluster").disabled = True
+
+        rows       = self._rows
+        score_col  = self._score_col
+        output_dir = self._output
+
+        def _worker() -> None:
+            from ezscreen.results.clustering import (
+                cluster_hits,
+                export_centroids,
+            )
+            try:
+                result = cluster_hits(rows, score_col)
+                centroids_path = output_dir / "centroids.smi"
+                export_centroids(rows, result, centroids_path)
+                self.app.call_from_thread(self._show_cluster_result, result, centroids_path)
+            except Exception as exc:
+                self.app.call_from_thread(
+                    self.query_one("#cluster-result", Static).update,
+                    f"[#f85149]Clustering failed: {exc}[/#f85149]",
+                )
+                self.app.call_from_thread(
+                    setattr, self.query_one("#btn-cluster"), "disabled", False
+                )
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_cluster_result(self, result, centroids_path: Path) -> None:
+        self.query_one("#btn-cluster").disabled = False
+        lines = [
+            "[bold #3fb950]Clustering complete[/bold #3fb950]",
+            "",
+            f"[#6e7681]Clusters:[/#6e7681]  [bold #79c0ff]{result.n_clusters}[/bold #79c0ff]",
+            f"[#6e7681]Largest:[/#6e7681]   {max(result.sizes)} compounds",
+            f"[#6e7681]Singletons:[/#6e7681] {result.sizes.count(1)}",
+            f"[#6e7681]Centroids → {centroids_path.name}[/#6e7681]",
+        ]
+        self.query_one("#cluster-result", Static).update("\n".join(lines))
+        self.app.notify(f"{result.n_clusters} clusters. Centroids saved.", timeout=4)
 
     def _run_benchmark(self) -> None:
         actives_str = self.query_one("#actives-input", Input).value.strip()

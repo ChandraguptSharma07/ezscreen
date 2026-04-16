@@ -255,11 +255,113 @@ def _metadata_table_html(run_id: str, n_total: int, top_score: str, metadata: di
     return f"<table>{trs}</table>"
 
 
+def _cluster_section_html(
+    rows: list[dict],
+    score_col: str,
+    tanimoto_cutoff: float = 0.4,
+) -> str:
+    from ezscreen.results.clustering import cluster_hits
+
+    try:
+        result = cluster_hits(rows, score_col, tanimoto_cutoff)
+    except Exception:
+        return ""
+
+    cards = []
+    for rank, (ci, size) in enumerate(
+        sorted(zip(result.centroid_indices, result.sizes), key=lambda x: -x[1])[:20], 1
+    ):
+        row   = rows[ci]
+        smi   = row.get("smiles", "")
+        name  = row.get("name", f"#{ci}")
+        score = row.get(score_col, "—")
+        svg   = _mol_svg(smi) if smi else ""
+        struct = svg if svg else "<div style='height:120px'></div>"
+        cards.append(
+            f'<div class="struct-card">'
+            f'<div class="rank">Cluster {rank}</div>'
+            f'{struct}'
+            f'<div>{name}</div>'
+            f'<div class="score">{score}</div>'
+            f'<div style="color:#888;font-size:0.8em">{size} compounds</div>'
+            f'</div>'
+        )
+
+    n = result.n_clusters
+    singletons = result.sizes.count(1)
+    summary = (
+        f"<p>{n} clusters &nbsp;·&nbsp; largest: {max(result.sizes)} &nbsp;·&nbsp; "
+        f"singletons: {singletons} &nbsp;·&nbsp; cutoff: {tanimoto_cutoff} Tc</p>"
+    )
+    return summary + '<div class="structs">' + "\n".join(cards) + "</div>"
+
+
+def _interactions_heatmap_html(
+    interactions: dict[str, dict[str, dict[str, int]]],
+) -> str:
+    # collect all residues and interaction types
+    residues: list[str] = []
+    itypes: list[str] = []
+    for contacts in interactions.values():
+        for res, imap in contacts.items():
+            if res not in residues:
+                residues.append(res)
+            for it in imap:
+                if it not in itypes:
+                    itypes.append(it)
+
+    if not residues:
+        return "<p>No interactions found.</p>"
+
+    # colour per interaction type
+    _ITYPE_COLOURS = {
+        "HBDonor":     "#4e91d0",
+        "HBAcceptor":  "#3fb950",
+        "Hydrophobic": "#e3b341",
+        "Cationic":    "#f85149",
+        "Anionic":     "#bc8cff",
+        "PiStacking":  "#79c0ff",
+        "PiCation":    "#ff9800",
+    }
+
+    header = "<tr><th>Compound</th>" + "".join(f"<th>{r}</th>" for r in residues[:30]) + "</tr>"
+    rows_html = []
+    for name, contacts in list(interactions.items())[:20]:
+        cells = [f"<td><b>{name}</b></td>"]
+        for res in residues[:30]:
+            imap = contacts.get(res, {})
+            if imap:
+                dominant = max(imap, key=imap.get)
+                colour = _ITYPE_COLOURS.get(dominant, "#8b949e")
+                title = ", ".join(f"{k}:{v}" for k, v in imap.items())
+                cells.append(
+                    f'<td style="background:{colour};color:#fff;text-align:center" title="{title}">'
+                    f'{dominant[:3]}</td>'
+                )
+            else:
+                cells.append("<td></td>")
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+
+    legend = "".join(
+        f'<span style="background:{c};color:#fff;padding:2px 8px;margin:2px;border-radius:4px;'
+        f'font-size:0.8em">{t}</span>'
+        for t, c in _ITYPE_COLOURS.items()
+    )
+
+    return (
+        f'<p style="font-size:0.85em;color:#666">Top 30 residues · top 20 compounds</p>'
+        f"<div style='margin-bottom:8px'>{legend}</div>"
+        f"<div style='overflow-x:auto'><table>{header}{''.join(rows_html)}</table></div>"
+    )
+
+
 def write_results_report(
     scores_csv: Path,
     output_path: Path,
     run_id: str = "",
     metadata: dict | None = None,
+    cluster: bool = True,
+    interactions: dict | None = None,
 ) -> Path:
     metadata = metadata or {}
 
@@ -299,6 +401,16 @@ def write_results_report(
         if b64:
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
+    cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
+    interactions_html = _interactions_heatmap_html(interactions) if interactions else ""
+
+    cluster_section = (
+        f"\n<h2>Scaffold Clusters</h2>\n{cluster_html}" if cluster_html else ""
+    )
+    interactions_section = (
+        f"\n<h2>Interaction Fingerprints</h2>\n{interactions_html}" if interactions_html else ""
+    )
+
     html = f"""\
 <!DOCTYPE html>
 <html lang="en">
@@ -319,7 +431,8 @@ def write_results_report(
 <div class="structs">
 {structs_html}
 </div>
-
+{cluster_section}
+{interactions_section}
 </body></html>
 """
     output_path.write_text(html, encoding="utf-8")
