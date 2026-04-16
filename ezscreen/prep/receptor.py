@@ -90,7 +90,7 @@ def _strip_alt_conformations(src: Path, dst: Path) -> int:
 
 def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
     chain_set = set(chains)
-    keep_records = {"TER", "MODEL", "ENDMDL", "END", "CRYST1", "REMARK", "HEADER", "TITLE"}
+    keep_records = {"TER", "MODEL", "ENDMDL", "END", "CRYST1", "REMARK", "HEADER", "TITLE"}  # noqa: E501
     lines = []
     for line in src.read_text(errors="ignore").splitlines():
         record = line[:6].rstrip()
@@ -163,8 +163,8 @@ def prompt_chain_selection(chains: list[str]) -> list[str] | object:
 
 def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[str, Any]:
     try:
-        from pdbfixer import PDBFixer
         from openmm.app import PDBFile
+        from pdbfixer import PDBFixer
     except ImportError as exc:
         raise ReceptorPrepError("pdbfixer/openmm not installed") from exc
 
@@ -174,7 +174,7 @@ def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[st
     # Clear missing residues so PDBFixer doesn't blindly model missing loops
     # Loop modeling often causes atomic clashes resulting in RDKit valency errors
     fixer.missingResidues = {}
-    
+
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
     fixer.removeHeterogens(keepWater=keep_waters)

@@ -7,12 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
-import os
-import sys
 from pathlib import Path
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -35,7 +30,8 @@ class TestMerger:
 
         shard0 = tmp_path / "shard0"
         shard1 = tmp_path / "shard1"
-        shard0.mkdir(); shard1.mkdir()
+        shard0.mkdir()
+        shard1.mkdir()
 
         fields = ["name", "docking_score", "rmsd"]
 
@@ -148,7 +144,7 @@ class TestReport:
 class TestVersionCheck:
     def test_banner_no_update(self) -> None:
         """banner() returns None when version matches current."""
-        from ezscreen import version_check, __version__
+        from ezscreen import __version__, version_check
 
         # Patch _latest to current version
         version_check._latest = __version__
@@ -170,7 +166,8 @@ class TestVersionCheck:
 
     def teardown_method(self, _method) -> None:
         """Reset module state between tests."""
-        from ezscreen import version_check
         import threading
+
+        from ezscreen import version_check
         version_check._latest = None
         version_check._done_evt = threading.Event()

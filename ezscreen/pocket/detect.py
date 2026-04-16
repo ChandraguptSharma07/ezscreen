@@ -59,7 +59,9 @@ def _box_from_coords(
     if not coords:
         raise ValueError("No coordinates provided for box calculation")
     xs, ys, zs = zip(*coords)
-    cx, cy, cz = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2, (max(zs) + min(zs)) / 2
+    cx = (max(xs) + min(xs)) / 2
+    cy = (max(ys) + min(ys)) / 2
+    cz = (max(zs) + min(zs)) / 2
     sx = max(xs) - min(xs) + 2 * padding
     sy = max(ys) - min(ys) + 2 * padding
     sz = max(zs) - min(zs) + 2 * padding

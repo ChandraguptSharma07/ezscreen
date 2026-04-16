@@ -143,6 +143,12 @@ class RunWizardScreen(Screen):
                             "Thorough   \u2014 flexible ligands, induced-fit targets",
                             id="rb-thorough",
                         )
+                    yield Label("Compute backend", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
+                        " Slower than GPU for large libraries.[/#6e7681]"
+                    )
+                    yield Switch(id="opt-local", value=False)
 
                 # ── Step 5: Confirm & Submit ──────────────────────────
                 with Vertical(id="step-confirm", classes="wizard-step"):
@@ -309,7 +315,7 @@ class RunWizardScreen(Screen):
             self.query_one("#af-warning-box").display = True
 
         if cocrystal:
-            names = ", ".join(l["resname"] for l in cocrystal)
+            names = ", ".join(lig["resname"] for lig in cocrystal)
             self.query_one("#cocrystal-info", Static).update(
                 f"[#3fb950]Found: {names}[/#3fb950]"
             )
@@ -586,6 +592,7 @@ class RunWizardScreen(Screen):
 
             # Render notebook
             import jinja2
+
             from ezscreen import __version__
 
             template_path = (

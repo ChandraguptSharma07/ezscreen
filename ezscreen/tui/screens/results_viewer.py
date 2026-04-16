@@ -47,7 +47,9 @@ class ResultsScreen(Screen):
                 yield Button("Open 3D Viewer", id="btn-3d", variant="default")
                 yield Label("Validate Setup", classes="section-title", id="validate-label")
                 yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
-                yield Button("Run Enrichment Benchmark", id="btn-validate", variant="primary")
+                yield Button(
+                    "Run Enrichment Benchmark", id="btn-validate", variant="primary"
+                )
                 yield Static("", id="benchmark-result")
         yield Footer()
 
@@ -184,10 +186,9 @@ class ResultsScreen(Screen):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _show_benchmark_result(self, result, report_path: Path) -> None:
-        from ezscreen.benchmark.metrics import BenchmarkResult
 
         lines = [
-            f"[bold #3fb950]Benchmark complete[/bold #3fb950]",
+            "[bold #3fb950]Benchmark complete[/bold #3fb950]",
             "",
             f"[#6e7681]EF 1%:[/#6e7681]  [bold #79c0ff]{result.ef1:.2f}x[/bold #79c0ff]",
             f"[#6e7681]EF 5%:[/#6e7681]  [bold #79c0ff]{result.ef5:.2f}x[/bold #79c0ff]",

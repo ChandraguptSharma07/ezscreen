@@ -85,7 +85,8 @@ class HomeScreen(Screen):
         from ezscreen import auth as _auth
         try:
             creds      = _auth.load_credentials()
-            kaggle_ok  = (p := _auth.get_kaggle_json_path(creds)) is not None and p.exists()
+            p = _auth.get_kaggle_json_path(creds)
+            kaggle_ok  = p is not None and p.exists()
             nim_ok     = bool(_auth.get_nim_key(creds))
         except Exception:
             kaggle_ok = nim_ok = False
@@ -93,7 +94,9 @@ class HomeScreen(Screen):
         def _fmt(ok: bool, optional: bool = False) -> str:
             if ok:
                 return "[bold #3fb950]configured[/bold #3fb950]"
-            return "[#6e7681]not set (optional)[/#6e7681]" if optional else "[bold #f85149]not set[/bold #f85149]"
+            if optional:
+                return "[#6e7681]not set (optional)[/#6e7681]"
+            return "[bold #f85149]not set[/bold #f85149]"
 
         hint = "\n\n[#6e7681]Run  ezscreen auth  to configure.[/#6e7681]" if not kaggle_ok else ""
 

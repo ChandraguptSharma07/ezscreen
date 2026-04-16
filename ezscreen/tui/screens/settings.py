@@ -61,12 +61,12 @@ class SettingsScreen(Screen):
         r = cfg.get("run", {})
         d = cfg.get("defaults", {})
 
-        self.query_one("#cfg-ph",       Input).value  = str(r.get("default_ph",             7.4))
-        self.query_one("#cfg-admet",    Switch).value = bool(r.get("admet_pre_filter",       True))
-        self.query_one("#cfg-retries",  Input).value  = str(r.get("shard_retry_limit",       3))
-        self.query_one("#cfg-resume",   Input).value  = str(r.get("auto_resume_threshold",   10))
-        self.query_one("#cfg-padding",  Input).value  = str(d.get("box_padding",             5.0))
-        self.query_one("#cfg-tautomers", Switch).value = bool(d.get("enumerate_tautomers",   False))
+        self.query_one("#cfg-ph",       Input).value  = str(r.get("default_ph",          7.4))
+        self.query_one("#cfg-admet",    Switch).value = bool(r.get("admet_pre_filter",    True))
+        self.query_one("#cfg-retries",  Input).value  = str(r.get("shard_retry_limit",    3))
+        self.query_one("#cfg-resume",   Input).value  = str(r.get("auto_resume_threshold", 10))
+        self.query_one("#cfg-padding",  Input).value  = str(d.get("box_padding",          5.0))
+        self.query_one("#cfg-tautomers", Switch).value = bool(d.get("enumerate_tautomers", False))
 
         depth = r.get("default_search_depth", "Balanced")
         sel = self.query_one("#cfg-depth", Select)
@@ -85,12 +85,16 @@ class SettingsScreen(Screen):
         from ezscreen import config
 
         def _f(wid: str, default: float) -> float:
-            try:    return float(self.query_one(wid, Input).value)
-            except: return default
+            try:
+                return float(self.query_one(wid, Input).value)
+            except Exception:
+                return default
 
         def _i(wid: str, default: int) -> int:
-            try:    return int(self.query_one(wid, Input).value)
-            except: return default
+            try:
+                return int(self.query_one(wid, Input).value)
+            except Exception:
+                return default
 
         depth_val = self.query_one("#cfg-depth", Select).value
         depth = str(depth_val) if depth_val != Select.BLANK else "Balanced"

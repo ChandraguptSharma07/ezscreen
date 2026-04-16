@@ -11,7 +11,7 @@ class BenchmarkResult:
     n_actives: int
     n_decoys: int
     total_screened: int
-    ranked_labels: list[int] = field(default_factory=list)  # 1=active, 0=decoy, best score first
+    ranked_labels: list[int] = field(default_factory=list)  # 1=active 0=decoy, best score first
 
 
 def compute_metrics(
@@ -21,7 +21,8 @@ def compute_metrics(
     if len(scores) != len(labels):
         raise ValueError("scores and labels must be the same length")
 
-    paired = sorted(zip(scores, labels), key=lambda x: x[0])  # ascending (lower score = better)
+    # ascending — lower score = better docking
+    paired = sorted(zip(scores, labels), key=lambda x: x[0])
     ranked_labels = [lbl for _, lbl in paired]
 
     n_actives = sum(labels)
@@ -69,5 +70,6 @@ def _auc_roc(ranked_labels: list[int], n_actives: int, n_decoys: int) -> float:
     # trapezoidal AUC
     auc = 0.0
     for i in range(1, len(fpr_points)):
-        auc += (fpr_points[i] - fpr_points[i - 1]) * (tpr_points[i] + tpr_points[i - 1]) / 2
+        dx = fpr_points[i] - fpr_points[i - 1]
+        auc += dx * (tpr_points[i] + tpr_points[i - 1]) / 2
     return auc
