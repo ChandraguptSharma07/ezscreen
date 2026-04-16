@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +16,7 @@ from ezscreen.backends.kaggle.poller import poll_until_done
 console = Console()
 _DATASET_POLL_INTERVAL = 10   # seconds
 _DATASET_TIMEOUT = 300        # 5 minutes
+_MAX_PARALLEL_KERNELS = 2
 
 
 def _wait_for_dataset(dataset_ref: str) -> None:
@@ -200,6 +204,15 @@ def run_screening_job(
     """
     work_dir.mkdir(parents=True, exist_ok=True)
 
+    # Persist paths so resume_failed_shards can find them later
+    resume_info = {
+        "receptor_pdbqt": str(receptor_pdbqt),
+        "shard_paths": [str(p) for p in shard_paths],
+        "notebook_path": str(notebook_path),
+        "username": username,
+    }
+    (work_dir / "resume.json").write_text(json.dumps(resume_info, indent=2))
+
     console.print(f"  [dim]Uploading run data ({len(shard_paths)} shard(s))...[/dim]")
     dataset_ref = upload_run_dataset(
         run_id=run_id,
@@ -256,6 +269,105 @@ def run_screening_job(
         return {"status": result["status"], "output_dir": None, "error_type": result["error_type"]}
 
     return {"status": "failed", "output_dir": None, "error_type": "max_retries_exceeded"}
+
+
+def _resume_one_shard(
+    run_id: str,
+    shard_index: int,
+    receptor_pdbqt: Path,
+    shard_path: Path,
+    notebook_path: Path,
+    username: str,
+    work_dir: Path,
+    retry_limit: int,
+    ck_lock: threading.Lock,
+) -> dict[str, Any]:
+    from ezscreen import checkpoint
+
+    sub_run_id = f"{run_id}-s{shard_index:03d}-resume"
+    sub_work   = work_dir / f"resume_shard_{shard_index:03d}"
+    try:
+        result = run_screening_job(
+            run_id=sub_run_id,
+            receptor_pdbqt=receptor_pdbqt,
+            shard_paths=[shard_path],
+            notebook_path=notebook_path,
+            username=username,
+            work_dir=sub_work,
+            retry_limit=retry_limit,
+        )
+        new_status = "done" if result["status"] == "complete" else "failed"
+        with ck_lock:
+            checkpoint.update_shard(run_id, shard_index, new_status)
+        return {"shard_index": shard_index, "result": result}
+    except Exception as exc:
+        with ck_lock:
+            checkpoint.update_shard(run_id, shard_index, "failed", str(exc))
+        return {"shard_index": shard_index, "result": {"status": "failed", "output_dir": None}}
+
+
+def resume_failed_shards(
+    run_id: str,
+    work_dir: Path,
+    retry_limit: int = 3,
+) -> dict[str, Any]:
+    from ezscreen import checkpoint
+    from ezscreen.results.merger import merge_shard_results
+
+    checkpoint.init_db()
+    failed = checkpoint.get_failed_shards(run_id)
+    if not failed:
+        return {"status": "nothing_to_resume", "n_shards": 0, "n_succeeded": 0}
+
+    resume_json = work_dir / "resume.json"
+    if not resume_json.exists():
+        return {"status": "failed", "error": "resume.json not found — run predates resume support"}
+
+    info = json.loads(resume_json.read_text())
+    receptor_pdbqt = Path(info["receptor_pdbqt"])
+    notebook_path  = Path(info["notebook_path"])
+    username       = info["username"]
+    shard_dir      = work_dir / "shards"
+
+    ck_lock = threading.Lock()
+    futures_map: dict = {}
+
+    with ThreadPoolExecutor(max_workers=_MAX_PARALLEL_KERNELS) as pool:
+        for shard in failed:
+            idx        = shard["shard_index"]
+            shard_file = shard_dir / f"shard_{idx:03d}.pdbqt"
+            if not shard_file.exists():
+                console.print(f"  [yellow]Shard {idx}: file not found, skipping[/yellow]")
+                continue
+            fut = pool.submit(
+                _resume_one_shard,
+                run_id, idx, receptor_pdbqt, shard_file,
+                notebook_path, username, work_dir, retry_limit, ck_lock,
+            )
+            futures_map[fut] = idx
+
+        outcomes = [fut.result() for fut in as_completed(futures_map)]
+
+    # Merge new partial results with existing output
+    completed_output_dirs = [
+        work_dir / f"resume_shard_{o['shard_index']:03d}" / "output"
+        for o in outcomes
+        if o["result"]["status"] == "complete"
+    ]
+    existing_output = work_dir / "output"
+    if completed_output_dirs:
+        all_dirs = [existing_output] + completed_output_dirs
+        merge_shard_results(all_dirs, existing_output)
+        console.print(f"  [dim]Merged results from {len(completed_output_dirs)} resumed shard(s)[/dim]")
+
+    n_succeeded = sum(1 for o in outcomes if o["result"]["status"] == "complete")
+    overall     = "complete" if n_succeeded == len(failed) else ("partial" if n_succeeded else "failed")
+
+    if overall in ("complete", "partial"):
+        with ck_lock:
+            checkpoint.mark_run_complete(run_id) if overall == "complete" else None
+
+    return {"status": overall, "n_shards": len(failed), "n_succeeded": n_succeeded}
 
 
 def clean_run(run_id: str, username: str) -> None:
