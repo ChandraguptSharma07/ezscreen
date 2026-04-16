@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.7.0 — 2026-04-16
+
+### Added
+
+- **Team accounts** — `ezscreen/auth.py`: `add_team_account()`, `remove_team_account()`, `list_team_accounts()`, `get_all_kaggle_accounts()`; collaborator credentials stored under `[team.<name>]` in `~/.ezscreen/credentials`; validated against kaggle.json at add time
+- **Team Accounts TUI screen** — `ezscreen/tui/screens/team_accounts.py`; lists collaborators with name / email / Kaggle username / path; add form with consent checkbox; remove selected; accessible from home Quick Actions
+- **Round-robin account selection on resume** — `resume_failed_shards()` distributes failed shards across all configured accounts in round-robin order; per-account lock prevents concurrent env-var clobbering; effective Kaggle username per shard derived from assigned account
+- **Desktop notifications** — `ezscreen/notify.py`; `plyer`-based toast on run complete / failed / timeout; graceful no-op if `plyer` not installed or display unavailable; toggled via Settings → Desktop notifications switch
+- **Email notifications** — `ezscreen/notify.py`; SMTP with STARTTLS; configurable host, port, from/to in Settings; no-op when host not set
+- **Notification settings** — Settings screen extended with Notifications section: desktop toggle, SMTP host, port, from/to address; all values persisted under `[notify]` in `config.toml`
+- **Poller notification hook** — `ezscreen/backends/kaggle/poller.py` calls `notify.send_run_complete()` after every terminal kernel status (complete, failed, timeout)
+
+---
+
 ## v1.6.0 — 2026-04-16
 
 ### Added

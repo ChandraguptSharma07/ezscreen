@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -271,6 +272,20 @@ def run_screening_job(
     return {"status": "failed", "output_dir": None, "error_type": "max_retries_exceeded"}
 
 
+def _apply_account(account: dict | None) -> str | None:
+    """Point kaggle API at a specific team account; returns original username env var."""
+    if not account:
+        return None
+    kj_path = Path(account.get("kaggle_json_path", "")).expanduser()
+    if not kj_path.exists():
+        return None
+    import json as _json
+    data = _json.loads(kj_path.read_text())
+    os.environ["KAGGLE_USERNAME"] = data.get("username", "")
+    os.environ["KAGGLE_KEY"]      = data.get("key", "")
+    return account.get("username")
+
+
 def _resume_one_shard(
     run_id: str,
     shard_index: int,
@@ -281,18 +296,29 @@ def _resume_one_shard(
     work_dir: Path,
     retry_limit: int,
     ck_lock: threading.Lock,
+    account: dict | None = None,
+    account_lock: threading.Lock | None = None,
 ) -> dict[str, Any]:
     from ezscreen import checkpoint
 
-    sub_run_id = f"{run_id}-s{shard_index:03d}-resume"
-    sub_work   = work_dir / f"resume_shard_{shard_index:03d}"
+    sub_run_id  = f"{run_id}-s{shard_index:03d}-resume"
+    sub_work    = work_dir / f"resume_shard_{shard_index:03d}"
+    effective_u = username
     try:
+        # Switch to team account credentials if provided; hold account lock to
+        # prevent two threads from simultaneously overwriting os.environ creds.
+        lock_ctx = account_lock if account_lock is not None else threading.Lock()
+        with lock_ctx:
+            alt_user = _apply_account(account)
+            if alt_user:
+                effective_u = alt_user
+
         result = run_screening_job(
             run_id=sub_run_id,
             receptor_pdbqt=receptor_pdbqt,
             shard_paths=[shard_path],
             notebook_path=notebook_path,
-            username=username,
+            username=effective_u,
             work_dir=sub_work,
             retry_limit=retry_limit,
         )
@@ -329,20 +355,28 @@ def resume_failed_shards(
     username       = info["username"]
     shard_dir      = work_dir / "shards"
 
+    from ezscreen import auth as _auth
+    accounts     = _auth.get_all_kaggle_accounts()
+    acct_locks   = {a["name"]: threading.Lock() for a in accounts}
+
     ck_lock = threading.Lock()
     futures_map: dict = {}
 
     with ThreadPoolExecutor(max_workers=_MAX_PARALLEL_KERNELS) as pool:
-        for shard in failed:
+        for i, shard in enumerate(failed):
             idx        = shard["shard_index"]
             shard_file = shard_dir / f"shard_{idx:03d}.pdbqt"
             if not shard_file.exists():
                 console.print(f"  [yellow]Shard {idx}: file not found, skipping[/yellow]")
                 continue
+            # Round-robin account selection
+            account     = accounts[i % len(accounts)] if len(accounts) > 1 else None
+            acct_lock   = acct_locks[account["name"]] if account else None
             fut = pool.submit(
                 _resume_one_shard,
                 run_id, idx, receptor_pdbqt, shard_file,
-                notebook_path, username, work_dir, retry_limit, ck_lock,
+                notebook_path, username, work_dir, retry_limit,
+                ck_lock, account, acct_lock,
             )
             futures_map[fut] = idx
 

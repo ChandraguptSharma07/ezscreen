@@ -69,6 +69,45 @@ def has_nim_key() -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Team accounts
+# ---------------------------------------------------------------------------
+
+def list_team_accounts(creds: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    creds = creds or load_credentials()
+    team  = creds.get("team", {})
+    return [{"name": k, **v} for k, v in team.items()]
+
+
+def add_team_account(name: str, email: str, kaggle_json_path: Path) -> dict[str, Any]:
+    data  = validate_kaggle_json(kaggle_json_path)
+    creds = load_credentials()
+    creds.setdefault("team", {})[name] = {
+        "email":            email,
+        "kaggle_json_path": str(kaggle_json_path),
+        "username":         data["username"],
+    }
+    save_credentials(creds)
+    return creds["team"][name]
+
+
+def remove_team_account(name: str) -> None:
+    creds = load_credentials()
+    creds.get("team", {}).pop(name, None)
+    save_credentials(creds)
+
+
+def get_all_kaggle_accounts(creds: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    creds   = creds or load_credentials()
+    primary = get_kaggle_json_path(creds)
+    accounts: list[dict[str, Any]] = []
+    if primary:
+        accounts.append({"name": "primary", "kaggle_json_path": str(primary)})
+    for acct in list_team_accounts(creds):
+        accounts.append(acct)
+    return accounts
+
+
+# ---------------------------------------------------------------------------
 # Validation helpers
 # ---------------------------------------------------------------------------
 

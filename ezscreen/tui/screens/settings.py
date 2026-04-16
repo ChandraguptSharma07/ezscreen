@@ -42,6 +42,18 @@ class SettingsScreen(Screen):
             yield Label("Enumerate tautomers", classes="form-label")
             yield Switch(id="cfg-tautomers")
 
+            yield Label("Notifications", classes="form-section")
+            yield Label("Desktop notifications", classes="form-label")
+            yield Switch(id="cfg-desktop-notify")
+            yield Label("SMTP host", classes="form-label")
+            yield Input(id="cfg-smtp-host", placeholder="smtp.gmail.com")
+            yield Label("SMTP port", classes="form-label")
+            yield Input(id="cfg-smtp-port", placeholder="587")
+            yield Label("From address", classes="form-label")
+            yield Input(id="cfg-smtp-from", placeholder="me@example.com")
+            yield Label("To address", classes="form-label")
+            yield Input(id="cfg-smtp-to", placeholder="me@example.com")
+
             with Horizontal(classes="form-row form-actions"):
                 yield Button("Save",              id="btn-save",  variant="primary")
                 yield Button("Reset to defaults", id="btn-reset")
@@ -67,6 +79,13 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-resume",   Input).value  = str(r.get("auto_resume_threshold", 10))
         self.query_one("#cfg-padding",  Input).value  = str(d.get("box_padding",          5.0))
         self.query_one("#cfg-tautomers", Switch).value = bool(d.get("enumerate_tautomers", False))
+
+        n = cfg.get("notify", {})
+        self.query_one("#cfg-desktop-notify", Switch).value = bool(n.get("desktop_enabled", False))
+        self.query_one("#cfg-smtp-host", Input).value = str(n.get("smtp_host", ""))
+        self.query_one("#cfg-smtp-port", Input).value = str(n.get("smtp_port", "587"))
+        self.query_one("#cfg-smtp-from", Input).value = str(n.get("from_address", ""))
+        self.query_one("#cfg-smtp-to",   Input).value = str(n.get("to_address", ""))
 
         depth = r.get("default_search_depth", "Balanced")
         sel = self.query_one("#cfg-depth", Select)
@@ -110,6 +129,13 @@ class SettingsScreen(Screen):
             "defaults": {
                 "box_padding":          _f("#cfg-padding",   5.0),
                 "enumerate_tautomers":  self.query_one("#cfg-tautomers", Switch).value,
+            },
+            "notify": {
+                "desktop_enabled": self.query_one("#cfg-desktop-notify", Switch).value,
+                "smtp_host":       self.query_one("#cfg-smtp-host", Input).value.strip(),
+                "smtp_port":       _i("#cfg-smtp-port", 587),
+                "from_address":    self.query_one("#cfg-smtp-from", Input).value.strip(),
+                "to_address":      self.query_one("#cfg-smtp-to",   Input).value.strip(),
             },
         }
         config.save(cfg)

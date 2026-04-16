@@ -38,6 +38,7 @@ class HomeScreen(Screen):
                     ListItem(Label("  ADMET Filter"),     id="action-admet"),
                     ListItem(Label("  Validate"),         id="action-validate"),
                     ListItem(Label("  Auth Setup"),       id="action-auth"),
+                    ListItem(Label("  Team Accounts"),    id="action-team"),
                     ListItem(Label("  Settings"),         id="action-settings"),
                     id="quick-actions",
                 )
@@ -119,6 +120,7 @@ class HomeScreen(Screen):
             "action-admet":    self.action_open_admet,
             "action-validate": self.action_open_validate,
             "action-auth":     self.action_open_auth,
+            "action-team":     self.action_open_team,
             "action-settings": self.action_open_settings,
         }
         fn = actions.get(event.item.id)
@@ -159,6 +161,10 @@ class HomeScreen(Screen):
     def action_open_auth(self) -> None:
         from ezscreen.tui.screens.auth_setup import AuthScreen
         self.app.push_screen(AuthScreen())
+
+    def action_open_team(self) -> None:
+        from ezscreen.tui.screens.team_accounts import TeamAccountsScreen
+        self.app.push_screen(TeamAccountsScreen())
 
     def action_open_settings(self) -> None:
         from ezscreen.tui.screens.settings import SettingsScreen

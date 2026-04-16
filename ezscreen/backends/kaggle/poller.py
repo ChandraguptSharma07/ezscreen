@@ -45,6 +45,14 @@ def _fetch_and_show_logs(kernel_ref: str) -> None:
         console.print(f"  [dim]Could not fetch kernel logs: {exc}[/dim]")
 
 
+def _notify(run_id: str, status: str) -> None:
+    try:
+        from ezscreen.notify import send_run_complete
+        send_run_complete(run_id, status)
+    except Exception:
+        pass
+
+
 def _classify_error(msg: str) -> str:
     m = msg.lower()
     if "preempt" in m or "interrupt" in m:
@@ -104,6 +112,7 @@ def poll_until_done(
             live.update(_status_grid(run_id, status, elapsed, retries))
 
             if status == "complete":
+                _notify(run_id, "complete")
                 return {"status": "complete", "error_type": None, "retry_count": retries}
 
             if status in ("error", "cancelacknowledged", "unknown"):
@@ -118,9 +127,11 @@ def poll_until_done(
                         f"\n  [yellow]⟳ Retry {retries}/{retry_limit} — {error_type}[/yellow]"
                     )
                     return {"status": "retry", "error_type": error_type, "retry_count": retries}
+                _notify(run_id, f"failed ({error_type})")
                 return {"status": "failed", "error_type": error_type, "retry_count": retries}
 
             time.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
 
+    _notify(run_id, "timeout")
     return {"status": "timeout", "error_type": "timeout", "retry_count": retries}
