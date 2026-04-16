@@ -14,8 +14,10 @@ from __future__ import annotations
 
 try:
     # Real scrubber package — installed separately by the user
-    from scrubber import Scrubber          # noqa: F401  (re-export)
-    from scrubber import ScrubberError     # noqa: F401
+    from scrubber import (
+        Scrubber,  # noqa: F401  (re-export)
+        ScrubberError,  # noqa: F401
+    )
     SCRUBBER_AVAILABLE = True
 except ImportError:
     SCRUBBER_AVAILABLE = False

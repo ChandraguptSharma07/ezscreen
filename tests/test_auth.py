@@ -8,8 +8,7 @@ import pytest
 import requests
 
 from ezscreen.auth import validate_kaggle_json, validate_nim_key
-from ezscreen.errors import KaggleAuthError, NIMAuthError, NetworkTimeoutError
-
+from ezscreen.errors import KaggleAuthError, NetworkTimeoutError, NIMAuthError
 
 # ---------------------------------------------------------------------------
 # validate_kaggle_json

@@ -7,7 +7,7 @@ from typing import Any
 from rich.console import Console
 
 from ezscreen.backends.kaggle.dataset import upload_run_dataset
-from ezscreen.backends.kaggle.kernel import push_kernel, delete_kernel
+from ezscreen.backends.kaggle.kernel import delete_kernel, push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
 
 console = Console()
@@ -60,7 +60,8 @@ def _recover_scores(output_dir: Path) -> None:
     Kaggle's kernels_output API downloads subdirectories but not all flat files,
     so scores.csv written by Cell 8 may not be downloaded even when docking succeeds.
     """
-    import csv, re
+    import csv
+    import re
     scores_csv = output_dir / "scores.csv"
     if scores_csv.exists():
         return

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from ezscreen.benchmark.metrics import BenchmarkResult
 
-
 _HTML_TEMPLATE = """\
 <!DOCTYPE html>
 <html lang="en">

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 import ezscreen.checkpoint as cp
-
 
 # ---------------------------------------------------------------------------
 # Redirect DB to a fresh tmp_path SQLite file per test

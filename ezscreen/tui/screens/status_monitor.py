@@ -8,7 +8,7 @@ from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Label
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
-from ezscreen.tui.widgets.run_card import RunCard, _STATUS_STYLE
+from ezscreen.tui.widgets.run_card import _STATUS_STYLE, RunCard
 
 
 class StatusScreen(Screen):

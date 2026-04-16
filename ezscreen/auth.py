@@ -3,13 +3,13 @@ from __future__ import annotations
 import json
 import os
 import stat
+import tomllib
 from pathlib import Path
 from typing import Any
 
 import questionary
 import requests
 import tomli_w
-import tomllib
 from rich.console import Console
 from rich.panel import Panel
 

@@ -30,7 +30,11 @@ class _Props:
 def _props(smiles: str) -> _Props | None:
     from rdkit import Chem
     from rdkit.Chem.Descriptors import MolLogP, MolWt
-    from rdkit.Chem.rdMolDescriptors import CalcNumHBA, CalcNumHBD, CalcNumRotatableBonds
+    from rdkit.Chem.rdMolDescriptors import (
+        CalcNumHBA,
+        CalcNumHBD,
+        CalcNumRotatableBonds,
+    )
     from rdkit.Chem.rdmolops import GetFormalCharge
 
     mol = Chem.MolFromSmiles(smiles)

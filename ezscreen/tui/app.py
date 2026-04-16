@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-import subprocess
-
-from textual.app import App, ComposeResult
+from textual.app import App
 from textual.binding import Binding
 from textual.widgets import Input
 from textual.worker import WorkerState

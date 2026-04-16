@@ -7,7 +7,6 @@ import pytest
 
 import ezscreen.config as cfg
 
-
 # ---------------------------------------------------------------------------
 # Helpers — redirect CONFIG_PATH to tmp_path so tests never touch ~/.ezscreen
 # ---------------------------------------------------------------------------

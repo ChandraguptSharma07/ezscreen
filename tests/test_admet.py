@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import pytest
 from rdkit.Chem import MolFromSmiles
 
-from ezscreen.admet.filter import FilterConfig, FilterResult, filter_mol
-
+from ezscreen.admet.filter import FilterConfig, filter_mol
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,6 @@ from ezscreen.pocket.detect import (
     box_from_residues,
     find_cocrystal_ligands,
 )
-
 
 # ---------------------------------------------------------------------------
 # Minimal PDB fixtures
