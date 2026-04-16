@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.3.0 — 2026-04-16
+
+### Added
+
+- **AlphaFold structure downloader** — `ezscreen/prep/alphafold.py`; fetches the EBI AlphaFold DB v4 model for any UniProt accession; parses per-residue pLDDT from the B-factor column; prints a summary of low-confidence spans (pLDDT < 50) and flags disordered loops (pLDDT < 40); escalates to a bold warning if any user-specified binding-site residues fall inside a low-confidence region
+- **`AF:UniProt` input in Run Wizard** — receptor step now accepts `AF:P00533` alongside PDB IDs and local file paths; the structure is downloaded and cached to `~/.ezscreen/tmp/wizard/` before validation continues; co-crystal ligand detection is skipped for AlphaFold inputs
+
+---
+
 ## v1.2.0 — 2026-04-16
 
 ### Added
