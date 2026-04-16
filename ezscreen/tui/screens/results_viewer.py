@@ -9,7 +9,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Label, Static
+from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
@@ -45,6 +45,10 @@ class ResultsScreen(Screen):
                     id="compound-info",
                 )
                 yield Button("Open 3D Viewer", id="btn-3d", variant="default")
+                yield Label("Validate Setup", classes="section-title", id="validate-label")
+                yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
+                yield Button("Run Enrichment Benchmark", id="btn-validate", variant="primary")
+                yield Static("", id="benchmark-result")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -104,9 +108,9 @@ class ResultsScreen(Screen):
         if idx is None or idx >= len(self._rows):
             return
 
-        row   = self._rows[idx]
-        name  = row.get("name", "—")
-        score = row.get("docking_score", "—")
+        row    = self._rows[idx]
+        name   = row.get("name", "—")
+        score  = row.get("docking_score", "—")
         smiles = row.get("smiles", "")
 
         lines = [
@@ -124,6 +128,8 @@ class ResultsScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-3d":
             self.action_open_viewer()
+        elif event.button.id == "btn-validate":
+            self._run_benchmark()
 
     # ------------------------------------------------------------------
     # Actions
@@ -136,6 +142,63 @@ class ResultsScreen(Screen):
             self.app.notify("Opened 3D viewer in browser.", timeout=3)
         else:
             self.app.notify("No 3D viewer HTML found for this run.", timeout=4)
+
+    def _run_benchmark(self) -> None:
+        actives_str = self.query_one("#actives-input", Input).value.strip()
+        if not actives_str:
+            self.app.notify("Enter the path to your known actives file.", timeout=4)
+            return
+
+        actives_path = Path(actives_str).expanduser()
+        if not actives_path.exists():
+            self.app.notify(f"File not found: {actives_path}", severity="error", timeout=5)
+            return
+
+        scores_csv = self._output / "scores.csv"
+        if not scores_csv.exists():
+            self.app.notify("No docking results found for this run.", severity="error", timeout=5)
+            return
+
+        self.query_one("#benchmark-result", Static).update(
+            "[#e3b341]Running benchmark...[/#e3b341]"
+        )
+
+        def _worker() -> None:
+            from ezscreen.benchmark.runner import run_benchmark
+            from ezscreen.results.report_html import write_benchmark_report
+
+            try:
+                result = run_benchmark(actives_path, scores_csv)
+                report_path = self._output / "benchmark_report.html"
+                write_benchmark_report(result, report_path)
+                self.call_from_thread(self._show_benchmark_result, result, report_path)
+            except Exception as exc:
+                self.call_from_thread(
+                    self.app.notify,
+                    f"Benchmark failed: {exc}",
+                    severity="error",
+                    timeout=8,
+                )
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _show_benchmark_result(self, result, report_path: Path) -> None:
+        from ezscreen.benchmark.metrics import BenchmarkResult
+
+        lines = [
+            f"[bold #3fb950]Benchmark complete[/bold #3fb950]",
+            "",
+            f"[#6e7681]EF 1%:[/#6e7681]  [bold #79c0ff]{result.ef1:.2f}x[/bold #79c0ff]",
+            f"[#6e7681]EF 5%:[/#6e7681]  [bold #79c0ff]{result.ef5:.2f}x[/bold #79c0ff]",
+            f"[#6e7681]AUC-ROC:[/#6e7681] [bold #79c0ff]{result.auc_roc:.3f}[/bold #79c0ff]",
+            f"[#6e7681]Actives matched:[/#6e7681] {result.n_actives} / {result.total_screened}",
+        ]
+        self.query_one("#benchmark-result", Static).update("\n".join(lines))
+
+        if report_path.exists():
+            webbrowser.open(report_path.as_uri())
+            self.app.notify("Report opened in browser.", timeout=3)
 
     def _viewer_html(self) -> Path | None:
         p = self._output / "viewer.html"
