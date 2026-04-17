@@ -209,10 +209,12 @@ class RunWizardScreen(Screen):
         for acct in accounts:
             name = acct["name"]
             safe = name.replace(" ", "-").lower()
-            row  = Horizontal()
-            row.mount(Label(f"  {name}  "))
-            row.mount(Input(id=f"acct-shards-{safe}", placeholder="auto"))
-            section.mount(row)
+            section.mount(
+                Horizontal(
+                    Label(f"  {name}  "),
+                    Input(id=f"acct-shards-{safe}", placeholder="auto"),
+                )
+            )
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "opt-local":
