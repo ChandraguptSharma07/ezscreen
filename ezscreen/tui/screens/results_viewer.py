@@ -126,7 +126,7 @@ class ResultsScreen(Screen):
             return
 
         row    = self._rows[idx]
-        name   = row.get("name", "—")
+        name   = row.get("name") or row.get("ligand", "—")
         score  = row.get("docking_score", "—")
         smiles = row.get("smiles", "")
 
@@ -247,6 +247,11 @@ class ResultsScreen(Screen):
 
     def _show_cluster_result(self, result, centroids_path: Path) -> None:
         self.query_one("#btn-cluster").disabled = False
+        if result.n_clusters == 0:
+            self.query_one("#cluster-result", Static).update(
+                "[#e3b341]No SMILES data available for clustering.[/#e3b341]"
+            )
+            return
         lines = [
             "[bold #3fb950]Clustering complete[/bold #3fb950]",
             "",

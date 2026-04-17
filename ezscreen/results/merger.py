@@ -93,8 +93,15 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
         except (ValueError, TypeError):
             return 0.0
 
-    _SCORE_FLOOR = -15.0
-    all_rows = [r for r in all_rows if _score(r) >= _SCORE_FLOOR]
+    try:
+        from ezscreen import config as _cfg
+        _lc           = _cfg.load().get("local", {})
+        _enable_floor = bool(_lc.get("enable_score_floor", True))
+        _score_floor  = float(_lc.get("score_floor", -15.0))
+    except Exception:
+        _enable_floor, _score_floor = True, -15.0
+    if _enable_floor:
+        all_rows = [r for r in all_rows if _score(r) >= _score_floor]
 
     best: dict[str, dict] = {}
     for row in all_rows:

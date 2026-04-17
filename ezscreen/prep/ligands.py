@@ -192,7 +192,7 @@ def prep_ligands(
                     mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
                     smiles = MolToSmiles(mol)
                     index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles})
-                    shard_buf.append(pdbqt)
+                    shard_buf.append(f"REMARK lig_id {lig_id}\n" + pdbqt)
                     prep_passed += 1
                     if len(shard_buf) >= shard_size:
                         _flush()

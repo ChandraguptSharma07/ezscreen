@@ -130,7 +130,7 @@ class RunWizardScreen(Screen):
                         " (recommended)[/#6e7681]"
                     )
                     yield Switch(id="opt-admet", value=True)
-                    yield Label("Search depth", classes="form-section")
+                    yield Label("Search depth", classes="form-section", id="lbl-depth")
                     with RadioSet(id="opt-depth"):
                         yield RadioButton(
                             "Fast       \u2014 triage only, misses ~25% best poses",
@@ -151,6 +151,10 @@ class RunWizardScreen(Screen):
                         " Slower than GPU for large libraries.[/#6e7681]"
                     )
                     yield Switch(id="opt-local", value=False)
+                    with Vertical(id="local-options-section"):
+                        yield Label("Exhaustiveness (Vina)", classes="form-label")
+                        yield Input(id="opt-exhaustiveness", placeholder="4 (from settings)")
+                    yield Vertical(id="acct-assignment-section")
 
                 # ── Step 5: Confirm & Submit ──────────────────────────
                 with Vertical(id="step-confirm", classes="wizard-step"):
@@ -175,7 +179,9 @@ class RunWizardScreen(Screen):
         self.query_one("#chain-section").display  = False
         for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind"):
             self.query_one(f"#{sid}").display = False
+        self.query_one("#local-options-section").display = False
         self._load_defaults()
+        self._populate_account_assignment()
 
     def _load_defaults(self) -> None:
         try:
@@ -185,6 +191,40 @@ class RunWizardScreen(Screen):
             self.query_one("#opt-admet", Switch).value = bool(admet)
         except Exception:
             pass
+
+    def _populate_account_assignment(self) -> None:
+        from ezscreen import auth
+        accounts = auth.get_all_kaggle_accounts()
+        section  = self.query_one("#acct-assignment-section", Vertical)
+        section.remove_children()
+        if len(accounts) <= 1:
+            section.display = False
+            return
+
+        section.display = True
+        section.mount(Label("Account shard assignment (Kaggle)", classes="form-section"))
+        section.mount(Static(
+            "[#6e7681]Shards per account (leave blank to auto-distribute evenly).[/#6e7681]"
+        ))
+        for acct in accounts:
+            name = acct["name"]
+            safe = name.replace(" ", "-").lower()
+            row  = Horizontal()
+            row.mount(Label(f"  {name}  "))
+            row.mount(Input(id=f"acct-shards-{safe}", placeholder="auto"))
+            section.mount(row)
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        if event.switch.id == "opt-local":
+            local_on = event.value
+            self.query_one("#local-options-section").display = local_on
+            self.query_one("#lbl-depth").display = not local_on
+            self.query_one("#opt-depth").display = not local_on
+            acct_section = self.query_one("#acct-assignment-section", Vertical)
+            if local_on:
+                acct_section.display = False
+            else:
+                self._populate_account_assignment()
 
     def _update_ui(self) -> None:
         self.query_one("#step-indicator", Static).update(
@@ -459,6 +499,30 @@ class RunWizardScreen(Screen):
         elif step == "step-options":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
             self._ctx["run_locally"]      = self.query_one("#opt-local", Switch).value
+            raw_exh = self.query_one("#opt-exhaustiveness", Input).value.strip()
+            try:
+                self._ctx["exhaustiveness"] = int(raw_exh) if raw_exh else None
+            except ValueError:
+                return "Exhaustiveness must be a whole number."
+            # Collect account shard assignments when Kaggle backend is selected
+            if not self._ctx["run_locally"]:
+                from ezscreen import auth
+                accounts = auth.get_all_kaggle_accounts()
+                if len(accounts) > 1:
+                    assignments = []
+                    for acct in accounts:
+                        safe = acct["name"].replace(" ", "-").lower()
+                        try:
+                            raw   = self.query_one(f"#acct-shards-{safe}", Input).value.strip()
+                            count = int(raw) if raw else 0
+                        except Exception:
+                            count = 0
+                        assignments.append({"account": acct, "shard_count": count})
+                    self._ctx["account_assignments"] = assignments
+                else:
+                    self._ctx["account_assignments"] = None
+            else:
+                self._ctx["account_assignments"] = None
             depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
             label     = str(depth_btn.label) if depth_btn else ""
             if "Fast" in label:
@@ -501,7 +565,11 @@ class RunWizardScreen(Screen):
         lig   = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
         admet   = "yes" if ctx.get("admet_pre_filter") else "no"
         depth   = ctx.get("search_label", "Balanced")
-        backend = "Local CPU (AutoDock Vina)" if ctx.get("run_locally") else "Kaggle GPU"
+        if ctx.get("run_locally"):
+            exh = ctx.get("exhaustiveness") or "default (from settings)"
+            backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
+        else:
+            backend = "Kaggle GPU"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
             if ctx.get("is_alphafold") else ""
@@ -624,51 +692,72 @@ class RunWizardScreen(Screen):
                     box_center=box["center"],
                     box_size=box["size"],
                     work_dir=work_dir,
+                    exhaustiveness=ctx.get("exhaustiveness"),
                 )
             else:
-                # Kaggle GPU path
-                import jinja2
+                account_assignments = ctx.get("account_assignments")
+                if account_assignments and len(account_assignments) > 1:
+                    # Multi-account Kaggle path
+                    log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
+                    for a in account_assignments:
+                        n = a["shard_count"] or "auto"
+                        log(f"[#6e7681]  {a['account']['name']}: {n} shard(s)[/#6e7681]")
+                    result = kaggle_runner.run_multi_account_screening(
+                        run_id=run_id,
+                        receptor_pdbqt=receptor_pdbqt,
+                        shard_paths=shard_paths,
+                        account_assignments=account_assignments,
+                        work_dir=work_dir,
+                        box_center=box["center"],
+                        box_size=box["size"],
+                        search_mode=ctx["search_params"].get("search_mode", "balance"),
+                        ph=cfg["run"].get("default_ph", 7.4),
+                        retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                    )
+                else:
+                    # Single-account Kaggle path
+                    import jinja2
 
-                from ezscreen import __version__
+                    from ezscreen import __version__
 
-                template_path = (
-                    Path(__file__).parent.parent.parent
-                    / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2"
-                )
-                env = jinja2.Environment(
-                    variable_start_string="<<",
-                    variable_end_string=">>",
-                    block_start_string="<%",
-                    block_end_string="%>",
-                    loader=jinja2.FileSystemLoader(str(template_path.parent)),
-                )
-                notebook_src = env.get_template(template_path.name).render(
-                    ezscreen_version=__version__,
-                    run_id=run_id,
-                    engine="unidock",
-                    mode="hybrid",
-                    box_center=box["center"],
-                    box_size=box["size"],
-                    shard_index=0,
-                    total_shards=len(shard_paths),
-                    ph=cfg["run"].get("default_ph", 7.4),
-                    search_mode=ctx["search_params"].get("search_mode", "balance"),
-                    enumerate_tautomers=False,
-                    shard_filename=shard_paths[0].name,
-                )
-                notebook_path = work_dir / "notebook.ipynb"
-                notebook_path.write_text(notebook_src, encoding="utf-8")
+                    template_path = (
+                        Path(__file__).parent.parent.parent
+                        / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2"
+                    )
+                    env = jinja2.Environment(
+                        variable_start_string="<<",
+                        variable_end_string=">>",
+                        block_start_string="<%",
+                        block_end_string="%>",
+                        loader=jinja2.FileSystemLoader(str(template_path.parent)),
+                    )
+                    notebook_src = env.get_template(template_path.name).render(
+                        ezscreen_version=__version__,
+                        run_id=run_id,
+                        engine="unidock",
+                        mode="hybrid",
+                        box_center=box["center"],
+                        box_size=box["size"],
+                        shard_index=0,
+                        total_shards=len(shard_paths),
+                        ph=cfg["run"].get("default_ph", 7.4),
+                        search_mode=ctx["search_params"].get("search_mode", "balance"),
+                        enumerate_tautomers=False,
+                        shard_filename=shard_paths[0].name,
+                    )
+                    notebook_path = work_dir / "notebook.ipynb"
+                    notebook_path.write_text(notebook_src, encoding="utf-8")
 
-                log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
-                result = kaggle_runner.run_screening_job(
-                    run_id=run_id,
-                    receptor_pdbqt=receptor_pdbqt,
-                    shard_paths=shard_paths,
-                    notebook_path=notebook_path,
-                    username=kaggle_username,
-                    work_dir=work_dir,
-                    retry_limit=cfg["run"].get("shard_retry_limit", 3),
-                )
+                    log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
+                    result = kaggle_runner.run_screening_job(
+                        run_id=run_id,
+                        receptor_pdbqt=receptor_pdbqt,
+                        shard_paths=shard_paths,
+                        notebook_path=notebook_path,
+                        username=kaggle_username,
+                        work_dir=work_dir,
+                        retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                    )
 
             if result["status"] == "complete":
                 checkpoint.mark_run_complete(run_id)

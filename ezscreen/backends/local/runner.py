@@ -19,32 +19,64 @@ from rich.progress import (
 from ezscreen.backends.local.vina_binary import get_vina_binary
 
 console = Console()
-_SCORE_FLOOR = -15.0
 
 
-def _sdf_to_pdbqt(sdf_path: Path, out_dir: Path) -> list[tuple[str, Path]]:
-    from meeko import MoleculePreparation, PDBQTWriterLegacy
-    from rdkit import Chem
+def _split_pdbqt_shard(shard_path: Path, out_dir: Path) -> list[tuple[str, Path]]:
+    """Split a multi-molecule PDBQT shard into individual (lig_id, path) tuples.
 
-    supplier = Chem.SDMolSupplier(str(sdf_path), removeHs=False, sanitize=True)
-    prep     = MoleculePreparation()
-    out      = []
+    Meeko PDBQT terminates each ligand block with a TORSDOF line (e.g. 'TORSDOF 3').
+    ligand_prep injects 'REMARK lig_id lig_00042' so we can correlate back to index.csv.
+    """
+    text    = shard_path.read_text(errors="replace")
+    results = []
+    current: list[str] = []
+    current_lig_id: str | None = None
+    fallback_idx = 0
 
-    for i, mol in enumerate(supplier):
-        if mol is None:
-            continue
-        name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else f"lig_{i:05d}"
-        try:
-            setup = prep.prepare(mol)
-            pdbqt_str, _, _ = PDBQTWriterLegacy.write_string(setup)
-        except Exception:
-            continue
+    def _flush(lines: list[str], lig_id: str | None, fb_idx: int) -> None:
+        if not any(ln.strip() for ln in lines):
+            return
+        block = "\n".join(lines) + "\n"
+        name  = lig_id if lig_id else f"lig_{fb_idx:05d}"
+        safe  = re.sub(r"[^\w\-]", "_", name)
+        p     = out_dir / f"{safe}.pdbqt"
+        p.write_text(block)
+        results.append((name, p))
 
-        pdbqt_path = out_dir / f"{name}.pdbqt"
-        pdbqt_path.write_text(pdbqt_str)
-        out.append((name, pdbqt_path))
+    for line in text.splitlines():
+        current.append(line)
+        if line.startswith("REMARK lig_id "):
+            parts = line.split()
+            if len(parts) >= 3:
+                current_lig_id = parts[2]
+        if line.startswith("TORSDOF"):
+            _flush(current, current_lig_id, fallback_idx)
+            current = []
+            current_lig_id = None
+            fallback_idx += 1
 
-    return out
+    _flush(current, current_lig_id, fallback_idx)
+    return results
+
+
+def _load_smiles_index(shard_dir: Path) -> dict[str, dict]:
+    """Load lig_id → {name, smiles} from index.csv written by ligand_prep."""
+    index_csv = shard_dir / "index.csv"
+    if not index_csv.exists():
+        return {}
+    mapping: dict[str, dict] = {}
+    try:
+        with index_csv.open() as f:
+            for row in csv.DictReader(f):
+                lig_id = row.get("ligand", "")
+                if lig_id:
+                    mapping[lig_id] = {
+                        "name":   row.get("name", ""),
+                        "smiles": row.get("smiles", ""),
+                    }
+    except Exception:
+        pass
+    return mapping
 
 
 def _parse_vina_score(pdbqt_text: str) -> float | None:
@@ -61,6 +93,8 @@ def _run_vina(
     size: list[float],
     exhaustiveness: int,
     num_modes: int,
+    cpu_cores: int = 0,
+    ligand_name: str = "",
 ) -> str | None:
     cmd = [
         str(vina),
@@ -75,27 +109,40 @@ def _run_vina(
         "--size_z",   str(size[2]),
         "--exhaustiveness", str(exhaustiveness),
         "--num_modes",      str(num_modes),
-        "--cpu", "1",
+        "--cpu", str(cpu_cores),
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode == 0 and out_path.exists():
             return out_path.read_text()
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass
+        err = (result.stderr or result.stdout or "").strip()
+        tag = f"[{ligand_name}] " if ligand_name else ""
+        console.print(f"  [dim]{tag}Vina failed (code {result.returncode}): {err[:120]}[/dim]")
+    except subprocess.TimeoutExpired:
+        console.print(f"  [dim][{ligand_name}] Vina timed out (120s)[/dim]")
+    except FileNotFoundError:
+        console.print("  [red]Vina binary not found[/red]")
     return None
 
 
 def run_local_screening(
-    run_id: str,
+    run_id: str,  # kept for interface parity with kaggle runner; used in console output
     receptor_pdbqt: Path,
     shard_paths: list[Path],
     box_center: list[float],
     box_size: list[float],
     work_dir: Path,
-    exhaustiveness: int = 8,
+    exhaustiveness: int | None = None,
     num_modes: int = 3,
 ) -> dict[str, Any]:
+    from ezscreen import config as _cfg
+    _lc           = _cfg.load().get("local", {})
+    if exhaustiveness is None:
+        exhaustiveness = int(_lc.get("exhaustiveness", 4))
+    _enable_floor = bool(_lc.get("enable_score_floor", True))
+    _score_floor  = float(_lc.get("score_floor", -15.0))
+    _cpu_cores    = int(_lc.get("cpu_cores", 0))
+
     work_dir.mkdir(parents=True, exist_ok=True)
     output_dir = work_dir / "output"
     output_dir.mkdir(exist_ok=True)
@@ -105,15 +152,22 @@ def run_local_screening(
     except Exception as exc:
         return {"status": "failed", "output_dir": None, "error_type": f"vina_download_failed: {exc}"}
 
-    rows: list[dict]  = []
-    poses_sdf_parts:  list[str] = []
+    # Load SMILES from index.csv written by ligand_prep (best-effort)
+    shard_dir    = shard_paths[0].parent if shard_paths else work_dir
+    smiles_index = _load_smiles_index(shard_dir)
+
+    rows: list[dict]     = []
+    poses_parts: list[str] = []
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
 
         for shard in shard_paths:
-            ligands = _sdf_to_pdbqt(shard, tmp)
-            console.print(f"  [dim]Docking {len(ligands)} ligands from {shard.name}...[/dim]")
+            # Shards are already PDBQT — split into individual molecules
+            ligands = _split_pdbqt_shard(shard, tmp)
+            console.print(
+                f"  [dim]{len(ligands)} ligand(s) parsed from {shard.name} — docking...[/dim]"
+            )
 
             with Progress(
                 SpinnerColumn(),
@@ -126,30 +180,31 @@ def run_local_screening(
                 task = progress.add_task(shard.name, total=len(ligands))
 
                 for name, lig_pdbqt in ligands:
-                    out_pdbqt = tmp / f"{name}_out.pdbqt"
+                    safe_out   = re.sub(r"[^\w\-]", "_", name)
+                    out_pdbqt  = tmp / f"{safe_out}_out.pdbqt"
                     pdbqt_text = _run_vina(
                         vina, receptor_pdbqt, lig_pdbqt, out_pdbqt,
                         box_center, box_size, exhaustiveness, num_modes,
+                        cpu_cores=_cpu_cores, ligand_name=name,
                     )
                     progress.advance(task)
 
                     if pdbqt_text is None:
                         continue
                     score = _parse_vina_score(pdbqt_text)
-                    if score is None or score < _SCORE_FLOOR:
+                    if score is None or (_enable_floor and score < _score_floor):
                         continue
 
-                    rows.append({"ligand": name, "docking_score": score})
-
-                    # pull SMILES from original sdf for enrichment later
-                    from rdkit import Chem
-                    sup = Chem.SDMolSupplier(str(shard), removeHs=False)
-                    for mol in sup:
-                        if mol and (mol.GetProp("_Name").strip() if mol.HasProp("_Name") else "") == name:
-                            rows[-1]["smiles"] = Chem.MolToSmiles(mol)
-                            break
-
-                    poses_sdf_parts.append(pdbqt_text)  # store raw pdbqt; proper SDF needs obabel
+                    info = smiles_index.get(name, {})
+                    row: dict = {
+                        "ligand":        name,
+                        "name":          info.get("name") or name,
+                        "docking_score": score,
+                    }
+                    if info.get("smiles"):
+                        row["smiles"] = info["smiles"]
+                    rows.append(row)
+                    poses_parts.append(pdbqt_text)
 
     rows.sort(key=lambda r: r["docking_score"])
 
@@ -161,9 +216,7 @@ def run_local_screening(
             w.writeheader()
             w.writerows(rows)
 
-    # poses are stored as pdbqt text in poses.pdbqt (SDF conversion requires obabel)
-    poses_out = output_dir / "poses.pdbqt"
-    poses_out.write_text("\n".join(poses_sdf_parts))
+    (output_dir / "poses.pdbqt").write_text("\n".join(poses_parts))
 
-    console.print(f"  [green]Local docking done — {len(rows)} scored poses[/green]")
+    console.print(f"  [green]Local docking done [{run_id}] — {len(rows)} scored poses[/green]")
     return {"status": "complete", "output_dir": output_dir, "error_type": None}

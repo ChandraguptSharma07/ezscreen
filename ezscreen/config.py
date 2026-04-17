@@ -24,6 +24,12 @@ DEFAULTS: dict[str, Any] = {
         "box_padding": 5.0,
         "enumerate_tautomers": False,
     },
+    "local": {
+        "enable_score_floor": True,
+        "score_floor": -15.0,
+        "exhaustiveness": 4,
+        "cpu_cores": 0,
+    },
 }
 
 

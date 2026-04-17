@@ -288,6 +288,8 @@ def _cluster_section_html(
         )
 
     n = result.n_clusters
+    if n == 0:
+        return ""
     singletons = result.sizes.count(1)
     summary = (
         f"<p>{n} clusters &nbsp;·&nbsp; largest: {max(result.sizes)} &nbsp;·&nbsp; "
