@@ -54,6 +54,16 @@ class SettingsScreen(Screen):
             yield Label("To address", classes="form-label")
             yield Input(id="cfg-smtp-to", placeholder="me@example.com")
 
+            yield Label("Local Docking", classes="form-section")
+            yield Label("Enable score floor filter", classes="form-label")
+            yield Switch(id="cfg-score-floor-enable")
+            yield Label("Score floor (kcal/mol)", classes="form-label")
+            yield Input(id="cfg-score-floor", placeholder="-15.0")
+            yield Label("Exhaustiveness (local Vina)", classes="form-label")
+            yield Input(id="cfg-exhaustiveness", placeholder="4")
+            yield Label("CPU cores (0 = auto)", classes="form-label")
+            yield Input(id="cfg-cpu-cores", placeholder="0")
+
             with Horizontal(classes="form-row form-actions"):
                 yield Button("Save",              id="btn-save",  variant="primary")
                 yield Button("Reset to defaults", id="btn-reset")
@@ -86,6 +96,12 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-smtp-port", Input).value = str(n.get("smtp_port", "587"))
         self.query_one("#cfg-smtp-from", Input).value = str(n.get("from_address", ""))
         self.query_one("#cfg-smtp-to",   Input).value = str(n.get("to_address", ""))
+
+        lc = cfg.get("local", {})
+        self.query_one("#cfg-score-floor-enable", Switch).value = bool(lc.get("enable_score_floor", True))
+        self.query_one("#cfg-score-floor",   Input).value = str(lc.get("score_floor",    -15.0))
+        self.query_one("#cfg-exhaustiveness", Input).value = str(lc.get("exhaustiveness",  4))
+        self.query_one("#cfg-cpu-cores",      Input).value = str(lc.get("cpu_cores",        0))
 
         depth = r.get("default_search_depth", "Balanced")
         sel = self.query_one("#cfg-depth", Select)
@@ -136,6 +152,12 @@ class SettingsScreen(Screen):
                 "smtp_port":       _i("#cfg-smtp-port", 587),
                 "from_address":    self.query_one("#cfg-smtp-from", Input).value.strip(),
                 "to_address":      self.query_one("#cfg-smtp-to",   Input).value.strip(),
+            },
+            "local": {
+                "enable_score_floor": self.query_one("#cfg-score-floor-enable", Switch).value,
+                "score_floor":        _f("#cfg-score-floor",    -15.0),
+                "exhaustiveness":     _i("#cfg-exhaustiveness",  4),
+                "cpu_cores":          _i("#cfg-cpu-cores",        0),
             },
         }
         config.save(cfg)
