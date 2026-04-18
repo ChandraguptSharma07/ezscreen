@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -149,7 +151,9 @@ def prep_ligands(
     ph: float = 7.4,
     enumerate_tautomers: bool = False,
     shard_size: int = _SHARD_SIZE,
+    n_shards: int | None = None,
 ) -> dict[str, Any]:
+    import math
     from rdkit.Chem import SDWriter
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -176,32 +180,68 @@ def prep_ligands(
         shard_idx += 1
 
     from rdkit.Chem import MolToSmiles
+
+    # Phase 1: load all molecules (sequential — suppliers are not thread-safe)
+    all_mols:  list = []
+    all_meta:  list[tuple[str, str]] = []   # (smiles, mol_name)
+    bad_mols:  list = []                     # None-supplier failures to count
+    for fp in files:
+        for mol in _load_supplier(fp):
+            if mol is None:
+                bad_mols.append(None)
+                continue
+            total += 1
+            smiles   = MolToSmiles(mol)
+            mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
+            all_mols.append(mol)
+            all_meta.append((smiles, mol_name))
+
+    prep_failed += len(bad_mols)
+    failures["sanitization"] += len(bad_mols)
+
+    # Phase 2: parallel conformer generation + PDBQT conversion.
+    # RDKit's ETKDGv3 and MMFF are C++ extensions that release the GIL,
+    # so ThreadPoolExecutor gives near-linear speedup without pickling.
+    n_workers = min(max(os.cpu_count() or 1, 1), 16)
+    console.print(f"  [dim]Prepping {total} ligand(s) with {n_workers} worker(s)...[/dim]")
+
+    results: list[tuple | None] = [None] * len(all_mols)
+
     with Progress(SpinnerColumn(), "[progress.description]{task.description}",
                   BarColumn(), TaskProgressColumn(), console=console) as prog:
-        task = prog.add_task("Prepping ligands...", total=None)
-        for fp in files:
-            for mol in _load_supplier(fp):
-                if mol is None:
-                    prep_failed += 1
-                    failures["sanitization"] += 1
-                    continue
-                total += 1
-                pdbqt, reason = _prep_one(mol, Scrubber, ph)
-                if pdbqt:
-                    lig_id = f"lig_{prep_passed:05d}"
-                    mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
-                    smiles = MolToSmiles(mol)
-                    index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles})
-                    shard_buf.append(f"REMARK lig_id {lig_id}\n" + pdbqt)
-                    prep_passed += 1
-                    if len(shard_buf) >= shard_size:
-                        _flush()
-                else:
-                    prep_failed += 1
-                    failures[reason] += 1
-                    failed_writer.write(mol)
+        task = prog.add_task("Prepping ligands...", total=len(all_mols))
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            future_to_idx = {
+                pool.submit(_prep_one, mol, Scrubber, ph): i
+                for i, mol in enumerate(all_mols)
+            }
+            for fut in as_completed(future_to_idx):
+                idx = future_to_idx[fut]
+                results[idx] = fut.result()
                 prog.advance(task)
-        _flush()
+
+    # If a target shard count was requested, recompute shard_size now that we
+    # know how many ligands actually passed prep (can't know this before Phase 2).
+    if n_shards is not None and n_shards > 0:
+        n_passing = sum(1 for r in results if r is not None and r[0] is not None)
+        if n_passing > 0:
+            shard_size = max(1, math.ceil(n_passing / n_shards))
+
+    # Phase 3: assemble shards in original order (preserves lig_id sequence)
+    for (smiles, mol_name), mol, result in zip(all_meta, all_mols, results):
+        pdbqt, reason = result  # type: ignore[misc]
+        if pdbqt:
+            lig_id = f"lig_{prep_passed:05d}"
+            index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles})
+            shard_buf.append(f"REMARK lig_id {lig_id}\n" + pdbqt)
+            prep_passed += 1
+            if len(shard_buf) >= shard_size:
+                _flush()
+        else:
+            prep_failed += 1
+            failures[reason] += 1
+            failed_writer.write(mol)
+    _flush()
 
     index_path = output_dir / "index.csv"
     with index_path.open("w", newline="") as f:

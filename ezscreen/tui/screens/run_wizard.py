@@ -202,9 +202,9 @@ class RunWizardScreen(Screen):
             return
 
         section.display = True
-        section.mount(Label("Account shard assignment (Kaggle)", classes="form-section"))
+        section.mount(Label("Account notebook assignment (Kaggle)", classes="form-section"))
         section.mount(Static(
-            "[#6e7681]Shards per account (leave blank to auto-distribute evenly).[/#6e7681]"
+            "[#6e7681]Notebooks per account (leave blank for 1 per account).[/#6e7681]"
         ))
         for acct in accounts:
             name = acct["name"]
@@ -212,7 +212,7 @@ class RunWizardScreen(Screen):
             section.mount(
                 Horizontal(
                     Label(f"  {name}  "),
-                    Input(id=f"acct-shards-{safe}", placeholder="auto"),
+                    Input(id=f"acct-shards-{safe}", placeholder="1"),
                 )
             )
 
@@ -665,15 +665,22 @@ class RunWizardScreen(Screen):
 
             # Ligand prep
             log("[#79c0ff]Prepping ligands...[/#79c0ff]")
+            account_assignments = ctx.get("account_assignments")
+            if account_assignments and len(account_assignments) > 1:
+                n_shards_target = sum(a["shard_count"] or 1 for a in account_assignments)
+            else:
+                n_shards_target = None
             lig_result  = ligand_prep.prep_ligands(
                 input_path=ligand_input,
                 output_dir=work_dir / "shards",
                 ph=cfg["run"].get("default_ph", 7.4),
+                n_shards=n_shards_target,
             )
             shard_paths = lig_result["shard_paths"]
             if not shard_paths:
                 raise RuntimeError("Ligand prep produced 0 dockable compounds.")
-            log(f"[#6e7681]{len(shard_paths)} shard(s) ready[/#6e7681]")
+            n_prep = lig_result["report"]["prep_passed"]
+            log(f"[#6e7681]{len(shard_paths)} shard(s) ready ({n_prep:,} ligands prepped)[/#6e7681]")
 
             # Checkpoint
             checkpoint.init_db()
@@ -702,8 +709,8 @@ class RunWizardScreen(Screen):
                     # Multi-account Kaggle path
                     log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
                     for a in account_assignments:
-                        n = a["shard_count"] or "auto"
-                        log(f"[#6e7681]  {a['account']['name']}: {n} shard(s)[/#6e7681]")
+                        n = a["shard_count"] or 1
+                        log(f"[#6e7681]  {a['account']['name']}: {n} notebook(s)[/#6e7681]")
                     result = kaggle_runner.run_multi_account_screening(
                         run_id=run_id,
                         receptor_pdbqt=receptor_pdbqt,
@@ -740,12 +747,12 @@ class RunWizardScreen(Screen):
                         mode="hybrid",
                         box_center=box["center"],
                         box_size=box["size"],
-                        shard_index=0,
-                        total_shards=len(shard_paths),
+                        notebook_index=0,
+                        total_notebooks=1,
+                        shard_filenames=[p.name for p in shard_paths],
                         ph=cfg["run"].get("default_ph", 7.4),
                         search_mode=ctx["search_params"].get("search_mode", "balance"),
                         enumerate_tautomers=False,
-                        shard_filename=shard_paths[0].name,
                     )
                     notebook_path = work_dir / "notebook.ipynb"
                     notebook_path.write_text(notebook_src, encoding="utf-8")
@@ -761,13 +768,18 @@ class RunWizardScreen(Screen):
                         retry_limit=cfg["run"].get("shard_retry_limit", 3),
                     )
 
-            if result["status"] == "complete":
-                checkpoint.mark_run_complete(run_id)
-                log(f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]")
+            if result["status"] in ("complete", "partial"):
+                if result["status"] == "complete":
+                    checkpoint.mark_run_complete(run_id)
+                    log(f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]")
+                else:
+                    checkpoint.mark_run_complete(run_id)
+                    log(f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]")
                 self.app.call_from_thread(self._on_complete, run_id)
             else:
                 checkpoint.mark_run_failed(run_id)
-                log(f"[#f85149]\u2717 Run {result['status']}: {result.get('error_type', '')}[/#f85149]")
+                err = result.get('error_type') or result.get('status', 'unknown')
+                log(f"[#f85149]\u2717 Run failed: {err}[/#f85149]")
                 log(f"[#6e7681]Resume with: ezscreen resume {run_id}[/#6e7681]")
                 self.app.call_from_thread(self._on_done)
 

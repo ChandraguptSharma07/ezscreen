@@ -406,42 +406,19 @@ def resume_failed_shards(
 
 
 def _set_account_creds(kaggle_json_path: str | Path) -> str:
-    """Switch os.environ Kaggle credentials; caller must hold _KAGGLE_API_LOCK."""
-    data = json.loads(Path(kaggle_json_path).expanduser().read_text())
-    os.environ["KAGGLE_USERNAME"] = data["username"]
-    os.environ["KAGGLE_KEY"]      = data["key"]
-    return data["username"]
+    """Switch Kaggle credentials; caller must hold _KAGGLE_API_LOCK.
 
-
-def _split_shards(shard_paths: list[Path], assignments: list[dict]) -> list[list[Path]]:
-    """Divide shard_paths among accounts.
-
-    Each assignment entry has 'shard_count' (0 = auto).  Accounts with 0 share
-    the remaining shards equally.  Any leftover falls to the last auto account.
+    Sets env vars then immediately re-authenticates the SDK singleton so
+    subsequent API calls use these credentials without a second authenticate().
     """
-    n = len(shard_paths)
-    fixed      = {i: a["shard_count"] for i, a in enumerate(assignments) if a["shard_count"] > 0}
-    auto_idxs  = [i for i, a in enumerate(assignments) if a["shard_count"] == 0]
-    reserved   = sum(fixed.values())
-    remaining  = max(n - reserved, 0)
-    per_auto   = remaining // len(auto_idxs) if auto_idxs else 0
-
-    counts: list[int] = []
-    for i in range(len(assignments)):
-        if i in fixed:
-            counts.append(min(fixed[i], n))
-        else:
-            counts.append(per_auto)
-    # give leftover to last auto account
-    if auto_idxs:
-        counts[auto_idxs[-1]] += remaining - per_auto * len(auto_idxs)
-
-    groups: list[list[Path]] = []
-    cursor = 0
-    for c in counts:
-        groups.append(shard_paths[cursor: cursor + c])
-        cursor += c
-    return groups
+    import kaggle
+    data = json.loads(Path(kaggle_json_path).expanduser().read_text())
+    username = data["username"]
+    key      = data["key"]
+    os.environ["KAGGLE_USERNAME"] = username
+    os.environ["KAGGLE_KEY"]      = key
+    kaggle.api.authenticate()
+    return username
 
 
 def run_multi_account_screening(
@@ -456,25 +433,98 @@ def run_multi_account_screening(
     ph: float = 7.4,
     retry_limit: int = 3,
 ) -> dict[str, Any]:
-    """Submit shard batches to multiple Kaggle accounts and merge results.
+    """Submit all shards to multiple Kaggle accounts and merge results.
 
     account_assignments — list of {account: {name, kaggle_json_path, username}, shard_count: int}
+    shard_count means notebooks per account (0 = 1).  All shard files are uploaded
+    in one dataset per account; shards are distributed evenly across all notebooks.
     Kernels are submitted sequentially (env-var safety), then polled concurrently.
     """
     import jinja2
 
     from ezscreen import __version__
 
-    # Split shards across accounts
-    shard_groups = _split_shards(shard_paths, account_assignments)
-    active = [
-        (assignments_entry, group)
-        for assignments_entry, group in zip(account_assignments, shard_groups)
-        if group
-    ]
-    if not active:
-        return {"status": "failed", "output_dir": None, "error_type": "no_shards_to_submit"}
+    n_shards = len(shard_paths)
 
+    # Notebook count per account (0 → 1)
+    notebook_counts = [a["shard_count"] or 1 for a in account_assignments]
+    total_notebooks = sum(notebook_counts)
+
+    console.print(
+        f"  [dim]{n_shards} shard(s) → {total_notebooks} notebook(s) "
+        f"across {len(account_assignments)} account(s)[/dim]"
+    )
+
+    # Distribute shards in contiguous blocks across all notebooks
+    base  = n_shards // total_notebooks
+    extra = n_shards % total_notebooks
+    nb_shard_groups: list[list[Path]] = []
+    cursor = 0
+    for i in range(total_notebooks):
+        count = base + (1 if i < extra else 0)
+        nb_shard_groups.append(shard_paths[cursor:cursor + count])
+        cursor += count
+
+    # Build per-account spec: collect the shards needed and notebook metadata
+    account_specs: list[dict] = []
+    nb_offset = 0
+    for acct_i, (assignment, nb_count) in enumerate(zip(account_assignments, notebook_counts)):
+        account = assignment["account"]
+        notebooks: list[dict] = []
+        acct_shard_paths: list[Path] = []
+        seen: set = set()
+        for nb_j in range(nb_count):
+            nb_idx = nb_offset + nb_j
+            group  = nb_shard_groups[nb_idx]
+            notebooks.append({"notebook_index": nb_idx, "shard_filenames": [p.name for p in group]})
+            for p in group:
+                if p not in seen:
+                    acct_shard_paths.append(p)
+                    seen.add(p)
+        nb_offset += nb_count
+
+        sub_run_id = f"{run_id}-acct{acct_i}"
+        sub_work   = work_dir / f"acct_{acct_i}"
+        sub_work.mkdir(parents=True, exist_ok=True)
+        account_specs.append({
+            "account":         account,
+            "kj_path":         account["kaggle_json_path"],
+            "shard_paths":     acct_shard_paths,
+            "notebooks":       notebooks,
+            "sub_run_id":      sub_run_id,
+            "sub_work":        sub_work,
+        })
+        console.print(
+            f"  [dim]  {account['name']}: {len(acct_shard_paths)} shard(s), "
+            f"{nb_count} notebook(s)[/dim]"
+        )
+
+    # Upload one dataset per account (all its shards in one go)
+    for spec in account_specs:
+        kj_path    = spec["kj_path"]
+        account    = spec["account"]
+        sub_run_id = spec["sub_run_id"]
+        sub_work   = spec["sub_work"]
+        with _KAGGLE_API_LOCK:
+            username = _set_account_creds(kj_path)
+            spec["username"] = username
+            console.print(f"  [dim]Uploading {len(spec['shard_paths'])} shard(s) for {account['name']}...[/dim]")
+            dataset_ref = upload_run_dataset(
+                run_id=sub_run_id,
+                receptor_pdbqt=receptor_pdbqt,
+                shard_paths=spec["shard_paths"],
+                username=username,
+                work_dir=sub_work,
+            )
+            _wait_for_dataset(dataset_ref)
+        spec["dataset_ref"] = dataset_ref
+        console.print(f"  [dim]Dataset ready: {dataset_ref}[/dim]")
+
+    # Single propagation wait after all uploads
+    console.print("  [dim]Waiting 90s for all datasets to sync to compute nodes...[/dim]")
+    time.sleep(90)
+
+    # Render and submit each notebook sequentially (env-var safety)
     template_path = Path(__file__).parent / "templates" / "vina_shard.ipynb.j2"
     j2_env = jinja2.Environment(
         variable_start_string="<<", variable_end_string=">>",
@@ -483,82 +533,89 @@ def run_multi_account_screening(
     )
 
     submissions: list[dict] = []
+    for spec in account_specs:
+        kj_path     = spec["kj_path"]
+        account     = spec["account"]
+        dataset_ref = spec["dataset_ref"]
+        sub_work    = spec["sub_work"]
+        username    = spec["username"]
+        for nb_spec in spec["notebooks"]:
+            nb_idx      = nb_spec["notebook_index"]
+            filenames   = nb_spec["shard_filenames"]
+            nb_run_id   = f"{spec['sub_run_id']}-nb{nb_idx}"
+            nb_dir      = sub_work / f"nb_{nb_idx}"
+            nb_dir.mkdir(parents=True, exist_ok=True)
 
-    # Submit kernels sequentially to avoid env-var races
-    for i, (assignment, group) in enumerate(active):
-        account    = assignment["account"]
-        kj_path    = account["kaggle_json_path"]
-        sub_run_id = f"{run_id}-acct{i}"
-        sub_work   = work_dir / f"acct_{i}"
-        sub_work.mkdir(parents=True, exist_ok=True)
-
-        with _KAGGLE_API_LOCK:
-            username = _set_account_creds(kj_path)
-
-        console.print(f"  [dim]Uploading {len(group)} shard(s) for {account['name']}...[/dim]")
-
-        nb_src = j2_env.get_template(template_path.name).render(
-            ezscreen_version=__version__,
-            run_id=sub_run_id,
-            engine="unidock",
-            mode="hybrid",
-            box_center=box_center or [],
-            box_size=box_size or [],
-            shard_index=0,
-            total_shards=len(group),
-            ph=ph,
-            search_mode=search_mode,
-            enumerate_tautomers=False,
-            shard_filename=group[0].name,
-        )
-        nb_path = sub_work / "notebook.ipynb"
-        nb_path.write_text(nb_src)
-
-        with _KAGGLE_API_LOCK:
-            _set_account_creds(kj_path)
-            dataset_ref = upload_run_dataset(
-                run_id=sub_run_id,
-                receptor_pdbqt=receptor_pdbqt,
-                shard_paths=group,
-                username=username,
-                work_dir=sub_work,
+            nb_src = j2_env.get_template(template_path.name).render(
+                ezscreen_version=__version__,
+                run_id=nb_run_id,
+                engine="unidock",
+                mode="hybrid",
+                box_center=box_center or [],
+                box_size=box_size or [],
+                notebook_index=nb_idx,
+                total_notebooks=total_notebooks,
+                shard_filenames=filenames,
+                ph=ph,
+                search_mode=search_mode,
+                enumerate_tautomers=False,
             )
-            _wait_for_dataset(dataset_ref)
+            nb_path = nb_dir / "notebook.ipynb"
+            nb_path.write_text(nb_src)
 
-        console.print(f"  [dim]Waiting 90s for dataset sync ({account['name']})...[/dim]")
-        time.sleep(90)
-
-        with _KAGGLE_API_LOCK:
-            _set_account_creds(kj_path)
-            kernel_ref = push_kernel(
-                run_id=sub_run_id,
-                notebook_path=nb_path,
-                dataset_ref=dataset_ref,
-                username=username,
-                work_dir=sub_work,
+            try:
+                with _KAGGLE_API_LOCK:
+                    _set_account_creds(kj_path)
+                    kernel_ref = push_kernel(
+                        run_id=nb_run_id,
+                        notebook_path=nb_path,
+                        dataset_ref=dataset_ref,
+                        username=username,
+                        work_dir=nb_dir,
+                    )
+            except Exception as _push_exc:
+                console.print(f"  [red]Kernel push failed for {nb_run_id}: {_push_exc}[/red]")
+                continue
+            console.print(
+                f"  [dim]Kernel submitted: {kernel_ref}  "
+                f"[{account['name']} nb{nb_idx + 1}/{total_notebooks}][/dim]"
             )
-
-        submissions.append({
-            "account":    account,
-            "kj_path":    kj_path,
-            "kernel_ref": kernel_ref,
-            "sub_work":   sub_work,
-            "sub_run_id": sub_run_id,
-        })
-        console.print(f"  [dim]Kernel submitted: {kernel_ref}[/dim]")
+            submissions.append({
+                "account":    account,
+                "kj_path":    kj_path,
+                "kernel_ref": kernel_ref,
+                "nb_work":    nb_dir,
+                "nb_run_id":  nb_run_id,
+            })
 
     # Poll all kernels concurrently
     def _poll_one(sub: dict) -> dict:
-        with _KAGGLE_API_LOCK:
-            _set_account_creds(sub["kj_path"])
-        result = poll_until_done(sub["kernel_ref"], sub["sub_run_id"], retry_limit)
+        result = poll_until_done(
+            sub["kernel_ref"], sub["nb_run_id"], retry_limit,
+            cred_lock=_KAGGLE_API_LOCK, kj_path=sub["kj_path"],
+            show_live=False,
+        )
         return {"sub": sub, "result": result}
 
     poll_results: list[dict] = []
     with ThreadPoolExecutor(max_workers=len(submissions)) as pool:
         futures = [pool.submit(_poll_one, s) for s in submissions]
         for fut in as_completed(futures):
-            poll_results.append(fut.result())
+            try:
+                poll_results.append(fut.result())
+            except Exception as exc:
+                console.print(f"  [red]Poller thread crashed: {exc}[/red]")
+
+    # Log per-notebook outcome before downloading
+    console.print("  [dim]Notebook results:[/dim]")
+    for pr in poll_results:
+        sub    = pr["sub"]
+        result = pr["result"]
+        icon   = "[green]✓[/green]" if result["status"] == "complete" else "[red]✗[/red]"
+        console.print(
+            f"  {icon} {sub['kernel_ref']}  "
+            f"status={result['status']}  error={result.get('error_type')}"
+        )
 
     # Download and merge results
     output_dirs: list[Path] = []
@@ -568,7 +625,7 @@ def run_multi_account_screening(
         if result["status"] == "complete":
             with _KAGGLE_API_LOCK:
                 _set_account_creds(sub["kj_path"])
-            out = _download_output(sub["kernel_ref"], sub["sub_work"])
+            out = _download_output(sub["kernel_ref"], sub["nb_work"])
             output_dirs.append(out)
 
     if not output_dirs:
@@ -577,7 +634,10 @@ def run_multi_account_screening(
     from ezscreen.results.merger import merge_shard_results
     main_output = work_dir / "output"
     merge_shard_results(output_dirs, main_output)
-    console.print(f"  [green]Multi-account run complete — merged {len(output_dirs)}/{len(submissions)} account result(s)[/green]")
+    console.print(
+        f"  [green]Multi-account run complete — merged "
+        f"{len(output_dirs)}/{len(submissions)} notebook result(s)[/green]"
+    )
 
     status = "complete" if len(output_dirs) == len(submissions) else "partial"
     return {"status": status, "output_dir": main_output, "error_type": None}

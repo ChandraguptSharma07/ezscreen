@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
-from rich.live import Live
+from rich.live import Live  # used only in show_live=True path
 from rich.panel import Panel
 from rich.table import Table
 
@@ -82,34 +84,54 @@ def poll_until_done(
     kernel_ref: str,
     run_id: str,
     retry_limit: int = 3,
+    cred_lock: threading.Lock | None = None,
+    kj_path: str | None = None,
+    show_live: bool = True,
 ) -> dict[str, Any]:
     """Poll a Kaggle kernel until complete, failed, or timed out.
 
     Returns dict with keys: status, error_type, retry_count.
       status: 'complete' | 'failed' | 'timeout' | 'retry'
+
+    Pass cred_lock + kj_path when polling kernels from multiple accounts
+    concurrently — each API call will re-authenticate under the lock so
+    credentials cannot be overwritten by another thread mid-call.
+    Set show_live=False for concurrent callers to avoid Rich LiveError
+    (only one Live instance is allowed per console at a time).
     """
-    username, slug = kernel_ref.split("/", 1)
-    api = _api()
     elapsed = retries = 0
+
+    def _status_call() -> tuple[str, str]:
+        """Return (status, errmsg), holding cred_lock if provided."""
+        import kaggle
+        if cred_lock is not None and kj_path is not None:
+            with cred_lock:
+                data = json.loads(Path(kj_path).expanduser().read_text())
+                os.environ["KAGGLE_USERNAME"] = data["username"]
+                os.environ["KAGGLE_KEY"]      = data["key"]
+                kaggle.api.authenticate()
+                resp = kaggle.api.kernels_status(kernel_ref)
+        else:
+            kaggle.api.authenticate()
+            resp = kaggle.api.kernels_status(kernel_ref)
+        status_raw = str(getattr(resp, "status", "unknown"))
+        return status_raw.split(".")[-1].lower(), getattr(resp, "failure_message", "") or ""
 
     # Give Kaggle time to register the kernel before the first status check —
     # polling immediately after push returns "error" while the kernel is still queuing
     time.sleep(15)
     elapsed += 15
 
-    with Live(console=console, refresh_per_second=0.1) as live:
+    def _poll_loop(update_fn) -> dict[str, Any]:
+        nonlocal elapsed, retries
         while elapsed < _TIMEOUT:
             try:
-                resp = api.kernels_status(kernel_ref)
-                # resp.status is an Enum like <KernelWorkerStatus.COMPLETE: 2>
-                status_raw = str(getattr(resp, "status", "unknown"))
-                status = status_raw.split('.')[-1].lower() # e.g. 'complete', 'error', 'queued'
-                errmsg = getattr(resp, "failure_message", "") or ""
+                status, errmsg = _status_call()
             except Exception as e:
                 status = "error"
                 errmsg = f"Poller crashed: {e}"
 
-            live.update(_status_grid(run_id, status, elapsed, retries))
+            update_fn(status)
 
             if status == "complete":
                 _notify(run_id, "complete")
@@ -123,9 +145,7 @@ def poll_until_done(
                 _fetch_and_show_logs(kernel_ref)
                 if error_type in ("preempted", "gpu_oom") and retries < retry_limit:
                     retries += 1
-                    console.print(
-                        f"\n  [yellow]⟳ Retry {retries}/{retry_limit} — {error_type}[/yellow]"
-                    )
+                    console.print(f"\n  [yellow]⟳ Retry {retries}/{retry_limit} — {error_type}[/yellow]")
                     return {"status": "retry", "error_type": error_type, "retry_count": retries}
                 _notify(run_id, f"failed ({error_type})")
                 return {"status": "failed", "error_type": error_type, "retry_count": retries}
@@ -133,5 +153,13 @@ def poll_until_done(
             time.sleep(_POLL_INTERVAL)
             elapsed += _POLL_INTERVAL
 
-    _notify(run_id, "timeout")
-    return {"status": "timeout", "error_type": "timeout", "retry_count": retries}
+        _notify(run_id, "timeout")
+        return {"status": "timeout", "error_type": "timeout", "retry_count": retries}
+
+    if show_live:
+        with Live(console=console, refresh_per_second=0.1) as live:
+            return _poll_loop(lambda s: live.update(_status_grid(run_id, s, elapsed, retries)))
+    else:
+        def _print_tick(s: str) -> None:
+            console.print(f"  [dim]{run_id}  {s}  {elapsed // 60}m {elapsed % 60}s[/dim]")
+        return _poll_loop(_print_tick)
