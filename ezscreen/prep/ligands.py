@@ -193,6 +193,11 @@ def prep_ligands(
             total += 1
             smiles   = MolToSmiles(mol)
             mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
+            if not mol_name:
+                for _prop in ("Catalog_ID", "ID", "Name", "IDNUMBER", "PUBCHEM_COMPOUND_CID"):
+                    if mol.HasProp(_prop):
+                        mol_name = mol.GetProp(_prop).strip()
+                        break
             all_mols.append(mol)
             all_meta.append((smiles, mol_name))
 
