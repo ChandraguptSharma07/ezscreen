@@ -398,9 +398,29 @@
    "metadata": {},
    "outputs": [],
    "source": [
+    "import pathlib, zipfile\n",
+    "_working = pathlib.Path('/kaggle/working')\n",
+    "_to_zip = ['scores.csv', 'poses.sdf', 'error.json']\n",
+    "with zipfile.ZipFile(_working / 'output.zip', 'w', zipfile.ZIP_DEFLATED) as _zf:\n",
+    "    for _fn in _to_zip:\n",
+    "        _fp = _working / _fn\n",
+    "        if _fp.exists():\n",
+    "            _zf.write(_fp, _fn)\n",
+    "            print(f'  zipped {_fn} ({_fp.stat().st_size} bytes)')\n",
+    "print('Cell 9 done: output.zip ready')\n"
+   ]
+  },
+
+  {
+   "cell_type": "code",
+   "id": "cell-10",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
     "import pathlib\n",
     "pathlib.Path('/kaggle/working/done.flag').write_text('ok')\n",
-    "print('Cell 9 done: done.flag written -- run complete')\n"
+    "print('Cell 10 done: done.flag written -- run complete')\n"
    ]
   }
 

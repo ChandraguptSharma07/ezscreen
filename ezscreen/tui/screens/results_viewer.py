@@ -61,50 +61,65 @@ class ResultsScreen(Screen):
         self.query_one("#btn-3d").display      = False
         self.query_one("#btn-report").display  = False
         self.query_one("#btn-cluster").display = False
-        self._load_hits()
-        self._refresh_report_button()
+        table = self.query_one("#hits-table", DataTable)
+        table.add_column("Info")
+        table.add_row("Loading results…")
+        import threading
+        threading.Thread(target=self._load_hits_worker, daemon=True).start()
 
     # ------------------------------------------------------------------
     # Data
     # ------------------------------------------------------------------
 
-    def _load_hits(self) -> None:
-        table      = self.query_one("#hits-table", DataTable)
+    def _load_hits_worker(self) -> None:
+        """Read and process CSV in a background thread, then populate the table."""
         scores_csv = self._output / "scores.csv"
 
         if not scores_csv.exists():
-            table.add_columns("Info")
-            table.add_row(f"No results found in {self._output}")
+            self.app.call_from_thread(self._populate_error, f"No results found in {self._output}")
             return
 
         with scores_csv.open(newline="") as f:
-            self._rows = list(csv.DictReader(f))
+            rows = list(csv.DictReader(f))
 
-        if not self._rows:
-            table.add_columns("Info")
-            table.add_row("scores.csv is empty")
+        if not rows:
+            self.app.call_from_thread(self._populate_error, "scores.csv is empty")
             return
 
-        all_cols           = list(self._rows[0].keys())
-        self._headers      = [h for h in all_cols if h not in _SKIP_COLS]
-        self._score_col    = next(
-            (h for h in self._headers if "score" in h.lower() or "affinity" in h.lower()),
-            self._headers[-1],
+        all_cols    = list(rows[0].keys())
+        headers     = [h for h in all_cols if h not in _SKIP_COLS]
+        score_col   = next(
+            (h for h in headers if "score" in h.lower() or "affinity" in h.lower()),
+            headers[-1],
         )
-        score_col = self._score_col
 
+        self._rows      = rows
+        self._headers   = headers
+        self._score_col = score_col
+
+        self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
+        self.app.call_from_thread(self._refresh_report_button)
+
+    def _populate_error(self, msg: str) -> None:
+        table = self.query_one("#hits-table", DataTable)
+        table.clear(columns=True)
+        table.add_column("Info")
+        table.add_row(msg)
+
+    def _populate_table(self, rows: list[dict], headers: list[str], score_col: str) -> None:
+        table = self.query_one("#hits-table", DataTable)
+        table.clear(columns=True)
         table.add_column("#", width=4)
-        for h in self._headers:
+        for h in headers:
             table.add_column(h.replace("_", " ").title())
 
-        for i, row in enumerate(self._rows[:200], 1):
+        for i, row in enumerate(rows, 1):
             cells: list = [str(i)]
-            for h in self._headers:
+            for h in headers:
                 val = row.get(h, "")
                 if h == score_col:
                     cells.append(Text(val, style="bold #79c0ff"))
                 elif h == "LE" and val:
-                    # flag size-biased fragments: LE > 0.5 kcal/mol/atom is suspicious
                     try:
                         style = "#e3b341" if float(val) > 0.5 else "#8b949e"
                     except ValueError:
