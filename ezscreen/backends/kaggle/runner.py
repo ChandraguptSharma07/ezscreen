@@ -171,21 +171,88 @@ def _enrich_scores_with_identity(output_dir: Path) -> None:
     console.print(f"  [dim]Enriched scores.csv with compound identity ({enriched} rows)[/dim]")
 
 
-def _download_output(kernel_ref: str, work_dir: Path, retries: int = 5) -> Path:
+def _fetch_output_urls(kernel_ref: str) -> list:
+    """Return list of (filename, url) tuples for a kernel's output files.
+    Caller must hold _KAGGLE_API_LOCK and have already set credentials.
+    """
     import kaggle
-    kaggle.api.authenticate()
+    if "/" in kernel_ref:
+        owner_slug, kernel_slug = kernel_ref.split("/", 1)
+    else:
+        owner_slug = kaggle.api.config_values.get(kaggle.api.CONFIG_NAME_USER, "")
+        kernel_slug = kernel_ref
+    with kaggle.api.build_kaggle_client() as kc:
+        from kagglesdk.kernels.types.kernels_api_service import ApiListKernelSessionOutputRequest
+        req = ApiListKernelSessionOutputRequest()
+        req.user_name   = owner_slug
+        req.kernel_slug = kernel_slug
+        resp = kc.kernels.kernels_api_client.list_kernel_session_output(req)
+    return [(f.file_name, f.url) for f in (resp.files or [])]
+
+
+def _download_output(
+    kernel_ref: str,
+    work_dir: Path,
+    kj_path: str | None = None,
+    retries: int = 5,
+) -> Path:
+    import requests as _req
+    from concurrent.futures import ThreadPoolExecutor
+
     out = work_dir / "output"
     out.mkdir(parents=True, exist_ok=True)
+
+    # Phase 1 — get pre-signed URLs under the lock (brief API call only)
+    file_urls: list = []
     for attempt in range(retries):
         try:
-            kaggle.api.kernels_output(kernel_ref, path=str(out))
+            with _KAGGLE_API_LOCK:
+                if kj_path:
+                    _set_account_creds(kj_path)
+                import kaggle
+                kaggle.api.authenticate()
+                file_urls = _fetch_output_urls(kernel_ref)
+            break
+        except ImportError:
+            # kagglesdk not available — fall back to the SDK helper
+            with _KAGGLE_API_LOCK:
+                if kj_path:
+                    _set_account_creds(kj_path)
+                import kaggle
+                kaggle.api.authenticate()
+                kaggle.api.kernels_output(kernel_ref, path=str(out), quiet=True)
+            file_urls = []
             break
         except Exception as exc:
             if attempt == retries - 1:
                 raise
             wait = 2 ** (attempt + 1)
-            console.print(f"  [yellow]Download error (attempt {attempt + 1}/{retries}), retrying in {wait}s: {exc}[/yellow]")
+            console.print(f"  [yellow]Output list error (attempt {attempt + 1}/{retries}), retrying in {wait}s: {exc}[/yellow]")
             time.sleep(wait)
+
+    # Phase 2 — download files in parallel; pre-signed URLs need no auth
+    def _dl(name_url: tuple[str, str]) -> None:
+        name, url = name_url
+        dest = out / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        r = _req.get(url, stream=True, timeout=300)
+        r.raise_for_status()
+        with dest.open("wb") as f:
+            for chunk in r.iter_content(65536):
+                f.write(chunk)
+
+    if file_urls:
+        with ThreadPoolExecutor(max_workers=min(8, len(file_urls))) as pool:
+            list(pool.map(_dl, file_urls))
+
+    # Unzip if the notebook bundled outputs into output.zip
+    zip_path = out / "output.zip"
+    if zip_path.exists():
+        import zipfile
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(out)
+        zip_path.unlink()
+
     _recover_scores(out)
     _enrich_scores_with_identity(out)
     return out
@@ -617,16 +684,23 @@ def run_multi_account_screening(
             f"status={result['status']}  error={result.get('error_type')}"
         )
 
-    # Download and merge results
-    output_dirs: list[Path] = []
-    for pr in poll_results:
-        sub    = pr["sub"]
-        result = pr["result"]
-        if result["status"] == "complete":
-            with _KAGGLE_API_LOCK:
-                _set_account_creds(sub["kj_path"])
-            out = _download_output(sub["kernel_ref"], sub["nb_work"])
-            output_dirs.append(out)
+    # Download all completed notebooks concurrently
+    def _download_one(pr: dict) -> Path | None:
+        sub = pr["sub"]
+        if pr["result"]["status"] != "complete":
+            return None
+        try:
+            return _download_output(
+                sub["kernel_ref"], sub["nb_work"], kj_path=sub["kj_path"]
+            )
+        except Exception as exc:
+            console.print(f"  [yellow]Download failed for {sub['kernel_ref']}: {exc}[/yellow]")
+            return None
+
+    console.print("  [dim]Downloading results...[/dim]")
+    with ThreadPoolExecutor(max_workers=len(poll_results)) as pool:
+        dl_results = list(pool.map(_download_one, poll_results))
+    output_dirs = [p for p in dl_results if p is not None]
 
     if not output_dirs:
         return {"status": "failed", "output_dir": None, "error_type": "all_accounts_failed"}
