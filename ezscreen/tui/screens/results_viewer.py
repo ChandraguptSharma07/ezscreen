@@ -142,7 +142,7 @@ class ResultsScreen(Screen):
 
         row    = self._rows[idx]
         name   = row.get("name") or row.get("ligand", "—")
-        score  = row.get("docking_score", "—")
+        score  = row.get(self._score_col, "—") if self._score_col else "—"
         smiles = row.get("smiles", "")
 
         lines = [
