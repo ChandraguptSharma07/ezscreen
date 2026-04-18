@@ -194,6 +194,7 @@ def _download_output(
     kernel_ref: str,
     work_dir: Path,
     kj_path: str | None = None,
+    index_csv: Path | None = None,
     retries: int = 5,
 ) -> Path:
     import requests as _req
@@ -252,6 +253,11 @@ def _download_output(
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(out)
         zip_path.unlink()
+
+    # Copy index.csv so enrichment can resolve compound names and SMILES
+    if index_csv and index_csv.exists() and not (out / "index.csv").exists():
+        import shutil
+        shutil.copy2(index_csv, out / "index.csv")
 
     _recover_scores(out)
     _enrich_scores_with_identity(out)
@@ -685,13 +691,17 @@ def run_multi_account_screening(
         )
 
     # Download all completed notebooks concurrently
+    _index_csv = work_dir / "shards" / "index.csv"
+
     def _download_one(pr: dict) -> Path | None:
         sub = pr["sub"]
         if pr["result"]["status"] != "complete":
             return None
         try:
             return _download_output(
-                sub["kernel_ref"], sub["nb_work"], kj_path=sub["kj_path"]
+                sub["kernel_ref"], sub["nb_work"],
+                kj_path=sub["kj_path"],
+                index_csv=_index_csv,
             )
         except Exception as exc:
             console.print(f"  [yellow]Download failed for {sub['kernel_ref']}: {exc}[/yellow]")
