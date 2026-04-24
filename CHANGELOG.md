@@ -1,5 +1,27 @@
 # Changelog
 
+## v1.9.0 — 2026-04-24
+
+### Added
+
+- **Prep-on-Kaggle** — ligand 3D embedding and PDBQT conversion now runs inside the Kaggle notebook instead of locally; `shard_raw()` in `ligands.py` shards raw SMILES for upload, then the notebook runs ETKDGv3 + MMFF + Meeko on the GPU instance; cuts local CPU time to near-zero for large libraries
+- **GPU type selection** — Run Wizard step 4 now shows a radio button to pick between P100 (16 GB, default) and T4 × 2 (32 GB, uses both GPUs via `--gpu_ids 0,1`); selection propagates to `kernel-metadata.json` via the new `accelerator` parameter on `push_kernel()`
+- **Docking failure log** — each Kaggle notebook now writes `failed_docking.csv` alongside `scores.csv`; records every ligand that had a valid output PDBQT but was rejected, with `reason` (`score_ceiling`, `score_floor`, `no_remark`, `unparseable_score`, `non_finite_score`) and the raw score string; included in `output.zip`
+- **`unscored_reasons.csv`** — merger collects `failed_docking.csv` from all shard dirs and combines it with compounds that got no output PDBQT at all (`no_pose`) and GPU-size-filtered entries (`gpu_size_filter`) into a single file in the run output directory
+- **Ligand pre-filter settings** — Settings screen now exposes GPU size filter toggle, max heavy atoms, max MW, and max rotatable bonds; values persisted under `[prep]` in `config.toml`
+- **Score ceiling setting** — score ceiling (default 0.0 kcal/mol) is now configurable in Settings alongside the existing floor; both applied consistently by the merger
+
+### Fixed
+
+- **Score regex silently dropped 89% of poses** — the `REMARK VINA RESULT` pattern `[-\d.]+` didn't match `nan`, `inf`, or scientific-notation overflow scores, so those PDBQTs were silently skipped; pattern updated to `\S+` with explicit float parse and `math.isfinite` check
+- **PDBFixer added terminal atoms that crashed Meeko** — `addMissingAtoms` and `addMissingHydrogens` were being called, causing PDBFixer to insert OXT and N-terminal H atoms that produced valence-5 carbons RDKit couldn't sanitize; both calls removed since Meeko assigns its own H and atom types from residue templates
+- **Blank chain IDs caused no chains detected** — PDB files with no chain identifier in column 22 returned an empty list from `get_chains()`; now returns `[" "]` so prep can continue
+- **SMTP auth was missing** — email notifications didn't call `smtp.login()`, so any server requiring authentication silently failed; added login with configurable `smtp_password`
+- **Account assignment rows overlapped** — wizard account rows had no explicit height so Textual collapsed them together; fixed with `acct-row` CSS class setting `height: 3` and proper label width
+- **Account rows past "primary" were inaccessible** — account assignment section was a plain `Vertical` with no scroll, so overflow rows were clipped; replaced with `VerticalScroll` capped at 16 rows
+
+---
+
 ## v1.7.2 — 2026-04-17
 
 ### Fixed
