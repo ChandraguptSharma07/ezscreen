@@ -242,6 +242,27 @@ Button:hover {
     margin-left: 1;
 }
 
+#acct-assignment-section {
+    max-height: 16;
+    height: auto;
+}
+
+.acct-row {
+    height: 3;
+    margin-top: 1;
+    align: left middle;
+}
+
+.acct-row-label {
+    width: 16;
+    content-align: left middle;
+    padding: 0 1;
+}
+
+.acct-row-input {
+    width: 8;
+}
+
 .form-actions {
     margin-top: 2;
 }
