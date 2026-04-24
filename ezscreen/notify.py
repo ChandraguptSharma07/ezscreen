@@ -31,6 +31,7 @@ def _send_email(run_id: str, status: str, message: str | None) -> None:
     smtp_port = int(nc.get("smtp_port", 587))
     from_addr = nc.get("from_address", "")
     to_addr   = nc.get("to_address", "")
+    password  = nc.get("smtp_password", "")
 
     if not (smtp_host and from_addr and to_addr):
         return
@@ -43,6 +44,8 @@ def _send_email(run_id: str, status: str, message: str | None) -> None:
         msg.set_content(message or f"Run {run_id} finished with status: {status}.")
         with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as smtp:
             smtp.starttls()
+            if password:
+                smtp.login(from_addr, password)
             smtp.send_message(msg)
     except Exception:
         pass

@@ -54,11 +54,23 @@ class SettingsScreen(Screen):
             yield Label("To address", classes="form-label")
             yield Input(id="cfg-smtp-to", placeholder="me@example.com")
 
+            yield Label("Ligand Pre-filter", classes="form-section")
+            yield Label("Enable GPU size filter", classes="form-label")
+            yield Switch(id="cfg-gpu-filter-enable")
+            yield Label("Max heavy atoms", classes="form-label")
+            yield Input(id="cfg-max-ha", placeholder="70")
+            yield Label("Max mol. weight (Da)", classes="form-label")
+            yield Input(id="cfg-max-mw", placeholder="700.0")
+            yield Label("Max rotatable bonds", classes="form-label")
+            yield Input(id="cfg-max-rb", placeholder="20")
+
             yield Label("Local Docking", classes="form-section")
-            yield Label("Enable score floor filter", classes="form-label")
+            yield Label("Enable score filter", classes="form-label")
             yield Switch(id="cfg-score-floor-enable")
             yield Label("Score floor (kcal/mol)", classes="form-label")
             yield Input(id="cfg-score-floor", placeholder="-15.0")
+            yield Label("Score ceiling (kcal/mol)", classes="form-label")
+            yield Input(id="cfg-score-ceiling", placeholder="0.0")
             yield Label("Exhaustiveness (local Vina)", classes="form-label")
             yield Input(id="cfg-exhaustiveness", placeholder="4")
             yield Label("CPU cores (0 = auto)", classes="form-label")
@@ -97,9 +109,16 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-smtp-from", Input).value = str(n.get("from_address", ""))
         self.query_one("#cfg-smtp-to",   Input).value = str(n.get("to_address", ""))
 
+        pc = cfg.get("prep", {})
+        self.query_one("#cfg-gpu-filter-enable", Switch).value = bool(pc.get("enable_gpu_size_filter", True))
+        self.query_one("#cfg-max-ha", Input).value = str(pc.get("max_heavy_atoms",     70))
+        self.query_one("#cfg-max-mw", Input).value = str(pc.get("max_mw",           700.0))
+        self.query_one("#cfg-max-rb", Input).value = str(pc.get("max_rotatable_bonds", 20))
+
         lc = cfg.get("local", {})
         self.query_one("#cfg-score-floor-enable", Switch).value = bool(lc.get("enable_score_floor", True))
-        self.query_one("#cfg-score-floor",   Input).value = str(lc.get("score_floor",    -15.0))
+        self.query_one("#cfg-score-floor",   Input).value = str(lc.get("score_floor",   -15.0))
+        self.query_one("#cfg-score-ceiling", Input).value = str(lc.get("score_ceiling",   0.0))
         self.query_one("#cfg-exhaustiveness", Input).value = str(lc.get("exhaustiveness",  4))
         self.query_one("#cfg-cpu-cores",      Input).value = str(lc.get("cpu_cores",        0))
 
@@ -153,9 +172,16 @@ class SettingsScreen(Screen):
                 "from_address":    self.query_one("#cfg-smtp-from", Input).value.strip(),
                 "to_address":      self.query_one("#cfg-smtp-to",   Input).value.strip(),
             },
+            "prep": {
+                "enable_gpu_size_filter": self.query_one("#cfg-gpu-filter-enable", Switch).value,
+                "max_heavy_atoms":        _i("#cfg-max-ha", 70),
+                "max_mw":                 _f("#cfg-max-mw", 700.0),
+                "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
+            },
             "local": {
                 "enable_score_floor": self.query_one("#cfg-score-floor-enable", Switch).value,
-                "score_floor":        _f("#cfg-score-floor",    -15.0),
+                "score_floor":        _f("#cfg-score-floor",   -15.0),
+                "score_ceiling":      _f("#cfg-score-ceiling",   0.0),
                 "exhaustiveness":     _i("#cfg-exhaustiveness",  4),
                 "cpu_cores":          _i("#cfg-cpu-cores",        0),
             },

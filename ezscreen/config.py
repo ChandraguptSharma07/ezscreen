@@ -27,8 +27,15 @@ DEFAULTS: dict[str, Any] = {
     "local": {
         "enable_score_floor": True,
         "score_floor": -15.0,
+        "score_ceiling": 0.0,
         "exhaustiveness": 4,
         "cpu_cores": 0,
+    },
+    "prep": {
+        "enable_gpu_size_filter": True,
+        "max_heavy_atoms": 70,
+        "max_mw": 700.0,
+        "max_rotatable_bonds": 20,
     },
 }
 
