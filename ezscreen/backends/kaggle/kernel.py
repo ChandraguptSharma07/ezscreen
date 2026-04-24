@@ -45,6 +45,7 @@ def push_kernel(
     dataset_ref: str,
     username: str,
     work_dir: Path,
+    accelerator: str = "nvidiaTeslaP100",
 ) -> str:
     """Render and push the notebook to Kaggle. Returns kernel ref."""
     api = _api()
@@ -66,7 +67,7 @@ def push_kernel(
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": True,
-        "accelerator": "nvidiaTeslaT4",
+        "accelerator": accelerator,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],

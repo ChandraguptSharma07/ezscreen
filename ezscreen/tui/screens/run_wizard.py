@@ -5,7 +5,7 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import (
     Button,
@@ -93,6 +93,7 @@ class RunWizardScreen(Screen):
                         yield RadioButton("Active site residues",       id="rb-residues")
                         yield RadioButton("P2Rank pocket prediction",   id="rb-p2rank",  value=True)
                         yield RadioButton("Blind docking  \u26a0",      id="rb-blind")
+                        yield RadioButton("Enter coordinates manually", id="rb-manual")
                     with Vertical(id="sub-cocrystal", classes="site-sub"):
                         yield Static("", id="cocrystal-info")
                     with Vertical(id="sub-residues", classes="site-sub"):
@@ -110,11 +111,22 @@ class RunWizardScreen(Screen):
                             "slow and noisy. Only use if no binding pocket is known.",
                             id="blind-warning",
                         )
+                    with Vertical(id="sub-manual", classes="site-sub"):
+                        yield Label("Box center (Å)", classes="form-label")
+                        with Horizontal(classes="form-row"):
+                            yield Input(placeholder="X", id="manual-cx")
+                            yield Input(placeholder="Y", id="manual-cy")
+                            yield Input(placeholder="Z", id="manual-cz")
+                        yield Label("Box size (Å)", classes="form-label")
+                        with Horizontal(classes="form-row"):
+                            yield Input(placeholder="X", id="manual-sx")
+                            yield Input(placeholder="Y", id="manual-sy")
+                            yield Input(placeholder="Z", id="manual-sz")
 
                 # ── Step 3: Ligand Library ────────────────────────────
                 with Vertical(id="step-ligands", classes="wizard-step"):
                     yield Label(
-                        "Ligand library  (.sdf or .smi file)",
+                        "Ligand library  (.sdf, .smi, or .ism file)",
                         classes="form-label",
                     )
                     with Horizontal(classes="form-row"):
@@ -154,7 +166,19 @@ class RunWizardScreen(Screen):
                     with Vertical(id="local-options-section"):
                         yield Label("Exhaustiveness (Vina)", classes="form-label")
                         yield Input(id="opt-exhaustiveness", placeholder="4 (from settings)")
-                    yield Vertical(id="acct-assignment-section")
+                    with Vertical(id="kaggle-gpu-section"):
+                        yield Label("Kaggle GPU", classes="form-section")
+                        with RadioSet(id="opt-gpu-type"):
+                            yield RadioButton(
+                                "P100 (16 GB) ★ — standard, widest availability",
+                                id="rb-p100",
+                                value=True,
+                            )
+                            yield RadioButton(
+                                "T4 × 2 (32 GB) — more memory, uses both GPUs",
+                                id="rb-t4x2",
+                            )
+                    yield VerticalScroll(id="acct-assignment-section")
 
                 # ── Step 5: Confirm & Submit ──────────────────────────
                 with Vertical(id="step-confirm", classes="wizard-step"):
@@ -177,9 +201,10 @@ class RunWizardScreen(Screen):
         self._update_ui()
         self.query_one("#af-warning-box").display = False
         self.query_one("#chain-section").display  = False
-        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind"):
+        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
             self.query_one(f"#{sid}").display = False
         self.query_one("#local-options-section").display = False
+        self.query_one("#kaggle-gpu-section").display = True
         self._load_defaults()
         self._populate_account_assignment()
 
@@ -195,7 +220,7 @@ class RunWizardScreen(Screen):
     def _populate_account_assignment(self) -> None:
         from ezscreen import auth
         accounts = auth.get_all_kaggle_accounts()
-        section  = self.query_one("#acct-assignment-section", Vertical)
+        section  = self.query_one("#acct-assignment-section", VerticalScroll)
         section.remove_children()
         if len(accounts) <= 1:
             section.display = False
@@ -211,8 +236,9 @@ class RunWizardScreen(Screen):
             safe = name.replace(" ", "-").lower()
             section.mount(
                 Horizontal(
-                    Label(f"  {name}  "),
-                    Input(id=f"acct-shards-{safe}", placeholder="1"),
+                    Label(f"  {name}", classes="acct-row-label"),
+                    Input(id=f"acct-shards-{safe}", placeholder="1", classes="acct-row-input"),
+                    classes="acct-row",
                 )
             )
 
@@ -220,9 +246,10 @@ class RunWizardScreen(Screen):
         if event.switch.id == "opt-local":
             local_on = event.value
             self.query_one("#local-options-section").display = local_on
+            self.query_one("#kaggle-gpu-section").display = not local_on
             self.query_one("#lbl-depth").display = not local_on
             self.query_one("#opt-depth").display = not local_on
-            acct_section = self.query_one("#acct-assignment-section", Vertical)
+            acct_section = self.query_one("#acct-assignment-section", VerticalScroll)
             if local_on:
                 acct_section.display = False
             else:
@@ -267,7 +294,7 @@ class RunWizardScreen(Screen):
             self._show_site_sub(label)
 
     def _show_site_sub(self, label: str) -> None:
-        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind"):
+        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
             self.query_one(f"#{sid}").display = False
         if "Co-crystal" in label:
             self.query_one("#sub-cocrystal").display = True
@@ -279,6 +306,8 @@ class RunWizardScreen(Screen):
                 self._start_p2rank()
         elif "Blind" in label or "\u26a0" in label:
             self.query_one("#sub-blind").display = True
+        elif "manually" in label:
+            self.query_one("#sub-manual").display = True
 
     # ------------------------------------------------------------------
     # Step 1 — Receptor validation
@@ -361,7 +390,9 @@ class RunWizardScreen(Screen):
         chain_list = self.query_one("#chain-list", Vertical)
         chain_list.remove_children()
         for ch in chains:
-            chain_list.mount(Checkbox(f"Chain {ch}", id=f"chain-{ch}", value=True))
+            label = f"Chain {ch}" if ch.strip() else "All (no chain ID)"
+            safe_id = ch if ch.strip() else "_blank"
+            chain_list.mount(Checkbox(label, id=f"chain-{safe_id}", value=True))
         self.query_one("#chain-section").display = True
         self._chains = chains
 
@@ -471,7 +502,7 @@ class RunWizardScreen(Screen):
                 return "Validate the receptor first."
             selected = [
                 ch for ch in self._chains
-                if self.query_one(f"#chain-{ch}", Checkbox).value
+                if self.query_one(f"#chain-{ch if ch.strip() else '_blank'}", Checkbox).value
             ]
             if not selected:
                 return "Select at least one chain."
@@ -486,6 +517,10 @@ class RunWizardScreen(Screen):
                 return "No co-crystal ligand found. Choose a different method."
             if "P2Rank" in label and not self._pockets:
                 return "P2Rank has not finished yet. Wait or choose a different method."
+            if "manually" in label:
+                err = self._validate_manual_coords()
+                if err:
+                    return err
             self._ctx["site_method"]  = label
             self._ctx["site_details"] = self._collect_site_details(label)
 
@@ -500,7 +535,13 @@ class RunWizardScreen(Screen):
 
         elif step == "step-options":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
-            self._ctx["run_locally"]      = self.query_one("#opt-local", Switch).value
+            self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
+            gpu_btn = self.query_one("#opt-gpu-type", RadioSet).pressed_button
+            self._ctx["gpu_type"] = (
+                "nvidiaTeslaT4x2"
+                if gpu_btn and "T4" in str(gpu_btn.label)
+                else "nvidiaTeslaP100"
+            )
             raw_exh = self.query_one("#opt-exhaustiveness", Input).value.strip()
             try:
                 self._ctx["exhaustiveness"] = int(raw_exh) if raw_exh else None
@@ -539,6 +580,18 @@ class RunWizardScreen(Screen):
 
         return None
 
+    def _validate_manual_coords(self) -> str | None:
+        fields = ["manual-cx", "manual-cy", "manual-cz", "manual-sx", "manual-sy", "manual-sz"]
+        for fid in fields:
+            val = self.query_one(f"#{fid}", Input).value.strip()
+            if not val:
+                return "Fill in all six box coordinate fields."
+            try:
+                float(val)
+            except ValueError:
+                return f"Invalid number in box coordinates: '{val}'"
+        return None
+
     def _collect_site_details(self, label: str) -> dict:
         if "Co-crystal" in label:
             return {"type": "cocrystal", "ligands": self._cocrystal_ligands}
@@ -553,6 +606,18 @@ class RunWizardScreen(Screen):
                 return {"type": "p2rank", "pocket": self._pockets[idx]}
             except Exception:
                 return {"type": "p2rank", "pocket": self._pockets[0] if self._pockets else {}}
+        if "manually" in label:
+            cx = float(self.query_one("#manual-cx", Input).value)
+            cy = float(self.query_one("#manual-cy", Input).value)
+            cz = float(self.query_one("#manual-cz", Input).value)
+            sx = float(self.query_one("#manual-sx", Input).value)
+            sy = float(self.query_one("#manual-sy", Input).value)
+            sz = float(self.query_one("#manual-sz", Input).value)
+            return {
+                "type": "manual",
+                "center": [cx, cy, cz],
+                "size":   [sx, sy, sz],
+            }
         return {"type": "blind"}
 
     # ------------------------------------------------------------------
@@ -571,7 +636,8 @@ class RunWizardScreen(Screen):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
         else:
-            backend = "Kaggle GPU"
+            gpu_label = "T4 × 2" if ctx.get("gpu_type") == "nvidiaTeslaT4x2" else "P100"
+            backend = f"Kaggle GPU ({gpu_label})"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
             if ctx.get("is_alphafold") else ""
@@ -605,8 +671,12 @@ class RunWizardScreen(Screen):
         from ezscreen.prep import ligands as ligand_prep
         from ezscreen.prep import receptor as rec_prep
 
+        _log_file = (Path.home() / ".ezscreen" / "runs" / "last_run.log").open("w", buffering=1, encoding="utf-8")
+
         def log(msg: str) -> None:
             self.app.call_from_thread(self.query_one("#run-log", RichLog).write, msg)
+            import re
+            _log_file.write(re.sub(r"\[/?[^\[\]]*\]", "", msg) + "\n")
 
         try:
             run_id   = "ezs-" + secrets.token_hex(3)
@@ -647,6 +717,8 @@ class RunWizardScreen(Screen):
                 )
             elif site["type"] == "p2rank":
                 box = {**site["pocket"]}
+            elif site["type"] == "manual":
+                box = {"center": site["center"], "size": site["size"]}
             else:
                 box = pocket.box_blind(ctx["pdb_path"])
             ctx["box"] = box
@@ -664,23 +736,33 @@ class RunWizardScreen(Screen):
                 ligand_input  = admet_out
 
             # Ligand prep
-            log("[#79c0ff]Prepping ligands...[/#79c0ff]")
             account_assignments = ctx.get("account_assignments")
             if account_assignments and len(account_assignments) > 1:
                 n_shards_target = sum(a["shard_count"] or 1 for a in account_assignments)
             else:
                 n_shards_target = None
-            lig_result  = ligand_prep.prep_ligands(
-                input_path=ligand_input,
-                output_dir=work_dir / "shards",
-                ph=cfg["run"].get("default_ph", 7.4),
-                n_shards=n_shards_target,
-            )
+
+            if ctx.get("run_locally"):
+                log("[#79c0ff]Prepping ligands locally...[/#79c0ff]")
+                lig_result = ligand_prep.prep_ligands(
+                    input_path=ligand_input,
+                    output_dir=work_dir / "shards",
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    n_shards=n_shards_target,
+                )
+                log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['prep_passed']:,} ligands prepped)[/#6e7681]")
+            else:
+                log("[#79c0ff]Sharding ligands for Kaggle prep...[/#79c0ff]")
+                lig_result = ligand_prep.shard_raw(
+                    input_path=ligand_input,
+                    output_dir=work_dir / "shards",
+                    n_shards=n_shards_target,
+                )
+                log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['total_input']:,} ligands)[/#6e7681]")
+
             shard_paths = lig_result["shard_paths"]
             if not shard_paths:
                 raise RuntimeError("Ligand prep produced 0 dockable compounds.")
-            n_prep = lig_result["report"]["prep_passed"]
-            log(f"[#6e7681]{len(shard_paths)} shard(s) ready ({n_prep:,} ligands prepped)[/#6e7681]")
 
             # Checkpoint
             checkpoint.init_db()
@@ -722,6 +804,7 @@ class RunWizardScreen(Screen):
                         search_mode=ctx["search_params"].get("search_mode", "balance"),
                         ph=cfg["run"].get("default_ph", 7.4),
                         retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                        accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
                     )
                 else:
                     # Single-account Kaggle path
@@ -740,6 +823,8 @@ class RunWizardScreen(Screen):
                         block_end_string="%>",
                         loader=jinja2.FileSystemLoader(str(template_path.parent)),
                     )
+                    _prep_cfg = cfg.get("prep", {})
+                    _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
                     notebook_src = env.get_template(template_path.name).render(
                         ezscreen_version=__version__,
                         run_id=run_id,
@@ -753,6 +838,11 @@ class RunWizardScreen(Screen):
                         ph=cfg["run"].get("default_ph", 7.4),
                         search_mode=ctx["search_params"].get("search_mode", "balance"),
                         enumerate_tautomers=False,
+                        prep_on_kaggle=True,
+                        max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
+                        max_mw=float(_prep_cfg.get("max_mw", 700.0)),
+                        max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
+                        gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4x2" else "",
                     )
                     notebook_path = work_dir / "notebook.ipynb"
                     notebook_path.write_text(notebook_src, encoding="utf-8")
@@ -766,6 +856,7 @@ class RunWizardScreen(Screen):
                         username=kaggle_username,
                         work_dir=work_dir,
                         retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                        accelerator=_gpu_type,
                     )
 
             if result["status"] in ("complete", "partial"):
@@ -784,11 +875,17 @@ class RunWizardScreen(Screen):
                 self.app.call_from_thread(self._on_done)
 
         except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            _log_file.write(f"Error: {exc}\n{tb}\n")
+            _log_file.close()
             self.app.call_from_thread(
                 self.query_one("#run-log", RichLog).write,
-                f"[#f85149]Error: {exc}[/#f85149]",
+                f"[#f85149]Error: {exc}[/#f85149]\n[#6e7681]Full log: ~/.ezscreen/runs/last_run.log[/#6e7681]",
             )
             self.app.call_from_thread(self._on_done)
+        else:
+            _log_file.close()
 
     def _on_complete(self, run_id: str) -> None:
         from ezscreen.tui.screens.results_viewer import ResultsScreen
