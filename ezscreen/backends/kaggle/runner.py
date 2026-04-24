@@ -100,14 +100,15 @@ def _recover_scores(output_dir: Path) -> None:
 
     rows.sort(key=lambda r: r["score"])
 
-    # Filter unphysical scores — UniDock GPU produces nonsensical values (<-15)
-    # for very small/flexible molecules due to GPU scoring artifacts.
-    # AutoDock Vina-family scores never go below -15 for real binding events.
+    # Vina-family scores are always negative for real binding events.
+    # Scores < -15 are GPU underflow artifacts; scores >= 0 are GPU overflow artifacts
+    # (UniDock reports values like 3.776e+06 kcal/mol for "Large" high-torsion molecules).
     _SCORE_FLOOR = -15.0
-    filtered = [r for r in rows if r["score"] >= _SCORE_FLOOR]
+    _SCORE_CEIL  =   0.0
+    filtered = [r for r in rows if _SCORE_FLOOR <= r["score"] < _SCORE_CEIL]
     n_artifacts = len(rows) - len(filtered)
     if n_artifacts:
-        console.print(f"  [dim]Filtered {n_artifacts} artifact score(s) below {_SCORE_FLOOR} kcal/mol[/dim]")
+        console.print(f"  [dim]Filtered {n_artifacts} artifact score(s) outside [{_SCORE_FLOOR}, {_SCORE_CEIL}) kcal/mol[/dim]")
     rows = filtered
 
     # Include name/smiles columns only if any row has them
@@ -195,6 +196,7 @@ def _download_output(
     work_dir: Path,
     kj_path: str | None = None,
     index_csv: Path | None = None,
+    filtered_csv: Path | None = None,
     retries: int = 5,
 ) -> Path:
     import requests as _req
@@ -225,8 +227,21 @@ def _download_output(
             file_urls = []
             break
         except Exception as exc:
+            # On the last retry, try the old SDK fallback before giving up —
+            # kagglesdk returns 403 for some account/kernel combinations even
+            # when the kernel is complete and the credentials are valid.
             if attempt == retries - 1:
-                raise
+                try:
+                    with _KAGGLE_API_LOCK:
+                        if kj_path:
+                            _set_account_creds(kj_path)
+                        import kaggle
+                        kaggle.api.authenticate()
+                        kaggle.api.kernels_output(kernel_ref, path=str(out), quiet=True)
+                    file_urls = []
+                    break
+                except Exception:
+                    raise exc
             wait = 2 ** (attempt + 1)
             console.print(f"  [yellow]Output list error (attempt {attempt + 1}/{retries}), retrying in {wait}s: {exc}[/yellow]")
             time.sleep(wait)
@@ -254,10 +269,13 @@ def _download_output(
             zf.extractall(out)
         zip_path.unlink()
 
-    # Copy index.csv so enrichment can resolve compound names and SMILES
+    # Copy index.csv and filtered_gpu_size.csv so the merger can resolve
+    # compound identity and assign score=0 to GPU-filtered molecules.
+    import shutil
     if index_csv and index_csv.exists() and not (out / "index.csv").exists():
-        import shutil
         shutil.copy2(index_csv, out / "index.csv")
+    if filtered_csv and filtered_csv.exists() and not (out / "filtered_gpu_size.csv").exists():
+        shutil.copy2(filtered_csv, out / "filtered_gpu_size.csv")
 
     _recover_scores(out)
     _enrich_scores_with_identity(out)
@@ -272,6 +290,7 @@ def run_screening_job(
     username: str,
     work_dir: Path,
     retry_limit: int = 3,
+    accelerator: str = "nvidiaTeslaP100",
 ) -> dict[str, Any]:
     """
     Full pipeline: upload dataset → push kernel → poll → download output.
@@ -312,6 +331,7 @@ def run_screening_job(
         dataset_ref=dataset_ref,
         username=username,
         work_dir=work_dir,
+        accelerator=accelerator,
     )
     console.print(f"  [dim]Kernel: {kernel_ref}[/dim]")
 
@@ -337,6 +357,7 @@ def run_screening_job(
                 dataset_ref=dataset_ref,
                 username=username,
                 work_dir=work_dir,
+                accelerator=accelerator,
             )
             continue
 
@@ -505,6 +526,7 @@ def run_multi_account_screening(
     search_mode: str = "balance",
     ph: float = 7.4,
     retry_limit: int = 3,
+    accelerator: str = "nvidiaTeslaP100",
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -605,6 +627,12 @@ def run_multi_account_screening(
         loader=jinja2.FileSystemLoader(str(template_path.parent)),
     )
 
+    try:
+        from ezscreen import config as _cfg
+        _prep_cfg = _cfg.load().get("prep", {})
+    except Exception:
+        _prep_cfg = {}
+
     submissions: list[dict] = []
     for spec in account_specs:
         kj_path     = spec["kj_path"]
@@ -632,6 +660,11 @@ def run_multi_account_screening(
                 ph=ph,
                 search_mode=search_mode,
                 enumerate_tautomers=False,
+                prep_on_kaggle=True,
+                max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
+                max_mw=float(_prep_cfg.get("max_mw", 700.0)),
+                max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
+                gpu_ids="0,1" if accelerator == "nvidiaTeslaT4x2" else "",
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)
@@ -645,6 +678,7 @@ def run_multi_account_screening(
                         dataset_ref=dataset_ref,
                         username=username,
                         work_dir=nb_dir,
+                        accelerator=accelerator,
                     )
             except Exception as _push_exc:
                 console.print(f"  [red]Kernel push failed for {nb_run_id}: {_push_exc}[/red]")
@@ -691,7 +725,8 @@ def run_multi_account_screening(
         )
 
     # Download all completed notebooks concurrently
-    _index_csv = work_dir / "shards" / "index.csv"
+    _index_csv    = work_dir / "shards" / "index.csv"
+    _filtered_csv = work_dir / "shards" / "filtered_gpu_size.csv"
 
     def _download_one(pr: dict) -> Path | None:
         sub = pr["sub"]
@@ -702,6 +737,7 @@ def run_multi_account_screening(
                 sub["kernel_ref"], sub["nb_work"],
                 kj_path=sub["kj_path"],
                 index_csv=_index_csv,
+                filtered_csv=_filtered_csv,
             )
         except Exception as exc:
             console.print(f"  [yellow]Download failed for {sub['kernel_ref']}: {exc}[/yellow]")

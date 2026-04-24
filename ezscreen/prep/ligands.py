@@ -38,11 +38,11 @@ def _get_scrubber():
 
 def scan_input(path: Path) -> list[Path]:
     if path.is_file():
-        if path.suffix.lower() in (".sdf", ".smi", ".smiles"):
+        if path.suffix.lower() in (".sdf", ".smi", ".smiles", ".ism"):
             return [path]
         raise LigandPrepError(f"Unsupported file type: {path.suffix}")
     files: list[Path] = []
-    for ext in ("*.sdf", "*.smi", "*.smiles"):
+    for ext in ("*.sdf", "*.smi", "*.smiles", "*.ism"):
         files.extend(sorted(path.rglob(ext)))
     if not files:
         raise LigandPrepError(f"No .sdf or .smi files found in {path}")
@@ -112,12 +112,26 @@ _AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
 })
 
 
-def _prep_one(mol, Scrubber, ph: float) -> tuple[str | None, str | None]:
+def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None) -> tuple[str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
         SanitizeMol(mol)
     except Exception:
         return None, "sanitization"
+
+    # GPU size pre-filter — cheapest check, done before expensive 3-D embedding.
+    # UniDock GPU overflows float32 for large/flexible molecules, producing FLT_MAX
+    # scores. Thresholds match UniDock paper recommendations (78 HA hard crash limit;
+    # we use 70 as a conservative margin).
+    if gpu_filter:
+        from rdkit.Chem.Descriptors import MolWt
+        from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms, CalcNumRotatableBonds
+        if CalcNumHeavyAtoms(mol) > gpu_filter["max_heavy_atoms"]:
+            return None, "too_large_for_gpu"
+        if MolWt(mol) > gpu_filter["max_mw"]:
+            return None, "too_large_for_gpu"
+        if CalcNumRotatableBonds(mol) > gpu_filter["max_rotatable_bonds"]:
+            return None, "too_large_for_gpu"
 
     # Reject molecules with elements AutoDock/UniDock can't handle.
     # Meeko writes these as bare element symbols (e.g. "B" for Boron) which
@@ -145,6 +159,59 @@ def _prep_one(mol, Scrubber, ph: float) -> tuple[str | None, str | None]:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def shard_raw(
+    input_path: Path,
+    output_dir: Path,
+    shard_size: int = _SHARD_SIZE,
+    n_shards: int | None = None,
+) -> dict[str, Any]:
+    """Split input into raw SMILES shards without 3D prep — prep runs on Kaggle."""
+    import math
+    from rdkit.Chem import MolToSmiles
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    files = scan_input(input_path)
+
+    all_entries: list[tuple[str, str]] = []
+    for fp in files:
+        for mol in _load_supplier(fp):
+            if mol is None:
+                continue
+            smiles = MolToSmiles(mol)
+            mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
+            if not mol_name:
+                for _prop in ("Catalog_ID", "ID", "Name", "IDNUMBER", "PUBCHEM_COMPOUND_CID"):
+                    if mol.HasProp(_prop):
+                        mol_name = mol.GetProp(_prop).strip()
+                        break
+            all_entries.append((smiles, mol_name))
+
+    total = len(all_entries)
+    if n_shards is not None and n_shards > 0 and total > 0:
+        shard_size = max(1, math.ceil(total / n_shards))
+
+    shard_paths: list[Path] = []
+    for i in range(0, max(total, 1), shard_size):
+        chunk = all_entries[i : i + shard_size]
+        if not chunk:
+            break
+        p = output_dir / f"shard_{len(shard_paths):03d}.smi"
+        p.write_text("\n".join(f"{smi}\t{name}" for smi, name in chunk))
+        shard_paths.append(p)
+
+    return {
+        "shard_paths": shard_paths,
+        "filtered_gpu_size_csv": None,
+        "report": {
+            "input_source": str(input_path),
+            "input_files": len(files),
+            "total_input": total,
+            "prep_passed": total,
+            "prep_failed": 0,
+        },
+    }
+
+
 def prep_ligands(
     input_path: Path,
     output_dir: Path,
@@ -163,7 +230,19 @@ def prep_ligands(
     failed_path = output_dir / "failed_prep.sdf"
     failed_writer = SDWriter(str(failed_path))
 
-    failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0}
+    try:
+        from ezscreen import config as _cfg
+        _pc = _cfg.load().get("prep", {})
+        gpu_filter: dict | None = {
+            "max_heavy_atoms":     int(_pc.get("max_heavy_atoms",     70)),
+            "max_mw":             float(_pc.get("max_mw",           700.0)),
+            "max_rotatable_bonds": int(_pc.get("max_rotatable_bonds", 20)),
+        } if _pc.get("enable_gpu_size_filter", True) else None
+    except Exception:
+        gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
+
+    failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0, "too_large_for_gpu": 0}
+    filtered_too_large: list[dict] = []
     shard_buf: list[str] = []
     shard_paths: list[Path] = []
     index_rows: list[dict] = []   # ligand id → name + smiles
@@ -217,7 +296,7 @@ def prep_ligands(
         task = prog.add_task("Prepping ligands...", total=len(all_mols))
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             future_to_idx = {
-                pool.submit(_prep_one, mol, Scrubber, ph): i
+                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter): i
                 for i, mol in enumerate(all_mols)
             }
             for fut in as_completed(future_to_idx):
@@ -245,7 +324,10 @@ def prep_ligands(
         else:
             prep_failed += 1
             failures[reason] += 1
-            failed_writer.write(mol)
+            if reason == "too_large_for_gpu":
+                filtered_too_large.append({"name": mol_name, "smiles": smiles})
+            else:
+                failed_writer.write(mol)
     _flush()
 
     index_path = output_dir / "index.csv"
@@ -253,6 +335,13 @@ def prep_ligands(
         w = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles"])
         w.writeheader()
         w.writerows(index_rows)
+
+    filtered_path = output_dir / "filtered_gpu_size.csv"
+    if filtered_too_large:
+        with filtered_path.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["name", "smiles"])
+            w.writeheader()
+            w.writerows(filtered_too_large)
 
     failed_writer.close()
 
@@ -279,6 +368,7 @@ def prep_ligands(
 
     return {
         "shard_paths": shard_paths,
+        "filtered_gpu_size_csv": filtered_path if filtered_too_large else None,
         "report": {
             "input_source": str(input_path),
             "input_files": len(files),
@@ -287,6 +377,7 @@ def prep_ligands(
             "prep_failed": prep_failed,
             "prep_failures": failures,
             "failed_prep_file": str(failed_path) if prep_failed else None,
+            "filtered_gpu_size": len(filtered_too_large),
             "tautomers_enumerated": enumerate_tautomers,
             "protonation_ph": ph,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
