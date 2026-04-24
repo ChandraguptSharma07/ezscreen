@@ -65,12 +65,17 @@ def detect_alphafold(pdb_path: Path) -> tuple[bool, str | None]:
 def get_chains(pdb_path: Path) -> list[str]:
     chains: list[str] = []
     seen: set[str] = set()
+    has_atoms = False
     for line in pdb_path.read_text(errors="ignore").splitlines():
         if line.startswith("ATOM  "):
+            has_atoms = True
             ch = line[21:22].strip()
             if ch and ch not in seen:
                 seen.add(ch)
                 chains.append(ch)
+    # PDB with no chain IDs (blank column) — treat entire file as one chain
+    if not chains and has_atoms:
+        chains = [" "]
     return chains
 
 
@@ -161,7 +166,7 @@ def prompt_chain_selection(chains: list[str]) -> list[str] | object:
 # pdbfixer + Meeko
 # ---------------------------------------------------------------------------
 
-def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[str, Any]:
+def _run_pdbfixer(src: Path, dst: Path, keep_waters: bool) -> dict[str, Any]:
     try:
         from openmm.app import PDBFile
         from pdbfixer import PDBFixer
@@ -171,19 +176,16 @@ def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[st
     fixer = PDBFixer(filename=str(src))
     fixer.findMissingResidues()
     n_missing = sum(len(v) for v in fixer.missingResidues.values())
-    # Clear missing residues so PDBFixer doesn't blindly model missing loops
-    # Loop modeling often causes atomic clashes resulting in RDKit valency errors
     fixer.missingResidues = {}
 
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
     fixer.removeHeterogens(keepWater=keep_waters)
-    fixer.findMissingAtoms()
-    # Clear terminal atoms (OXT etc.) — pdbfixer adds these to carbonyl C atoms
-    # that already have 4 bonds, producing a C with valence 5 that RDKit rejects
-    fixer.missingTerminals = {}
-    fixer.addMissingAtoms()
-    fixer.addMissingHydrogens(ph)
+    # Do NOT call addMissingAtoms or addMissingHydrogens — PDBFixer adds
+    # N/C-terminal H and OXT atoms that cause ProDy to infer valence-4 O
+    # or valence-5 C, crashing Meeko's RDKit sanitization. Meeko assigns
+    # its own H and atom types from residue templates.
+
     residue_count = fixer.topology.getNumResidues()
     with dst.open("w") as f:
         PDBFile.writeFile(fixer.topology, fixer.positions, f)
@@ -195,10 +197,66 @@ def _run_pdbfixer(src: Path, dst: Path, ph: float, keep_waters: bool) -> dict[st
     return {"missing_residues": n_missing, "residue_count": residue_count, "pdbfixer_version": v}
 
 
+def _infer_element(atom_name: str) -> str:
+    """Guess element symbol from PDB atom name (e.g. 'CA' → 'C', 'FE' → 'FE')."""
+    name = atom_name.strip().lstrip("0123456789")
+    if not name:
+        return ""
+    # Two-letter elements common in proteins
+    two = name[:2].upper()
+    if two in {"FE", "ZN", "MG", "MN", "CA", "NA", "CL", "BR", "CU", "CO", "NI"}:
+        return two
+    return name[0].upper()
+
+
+def _ensure_element_column(lines: list[str]) -> list[str]:
+    """Pad ATOM/HETATM lines to 80 chars and fill blank element column (76-78)."""
+    out = []
+    for line in lines:
+        if line.startswith(("ATOM  ", "HETATM")):
+            line = line.rstrip("\n").ljust(80)
+            if not line[76:78].strip():
+                elem = _infer_element(line[12:16])
+                line = line[:76] + elem.rjust(2) + line[78:]
+        out.append(line)
+    return out
+
+
+def _strip_conect(src: Path, dst: Path) -> None:
+    """Remove CONECT/LINK/SSBOND records and explicit hydrogen atoms.
+
+    PDBFixer adds N-terminal H2/H3 via addMissingAtoms even without
+    addMissingHydrogens. ProDy then infers extra bonds by distance and
+    pushes CA valence to 5, crashing RDKit. Meeko rebuilds all Hs from
+    its own residue templates, so stripping them here is safe.
+    """
+    skip_records = {"CONECT", "LINK  ", "SSBOND"}
+    lines = []
+    for line in src.read_text(errors="ignore").splitlines():
+        if line[:6] in skip_records:
+            continue
+        if line.startswith(("ATOM  ", "HETATM")):
+            element   = line[76:78].strip() if len(line) >= 78 else ""
+            atom_name = line[12:16].strip()
+            if element == "H" or (not element and atom_name.startswith("H")):
+                continue
+            if atom_name in {"OXT", "OT1", "OT2"}:
+                continue
+        lines.append(line)
+    dst.write_text("\n".join(lines) + "\n")
+
+
 def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     exe = shutil.which("mk_prepare_receptor")
     if exe is None:
         raise ReceptorPrepError("mk_prepare_receptor not found — pip install meeko")
+
+    # Strip CONECT/LINK/SSBOND records before Meeko sees the file — explicit
+    # bond records from DUD-E/PDBFixer can create carbon with 5 bonds which
+    # RDKit's sanitizer rejects with AtomValenceException.
+    clean = output_dir / (src.stem + "_clean.pdb")
+    _strip_conect(src, clean)
+
     pdbqt = output_dir / (src.stem + ".pdbqt")
 
     # OpenBLAS (used by meeko internally) tries to spawn many threads and can
@@ -216,7 +274,7 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     console.print("  [dim]meeko: converting receptor to PDBQT...[/dim]")
     try:
         result = subprocess.run(
-            [exe, "-i", str(src), "-p", str(pdbqt)],
+            [exe, "-i", str(clean), "-p", str(pdbqt), "--allow_bad_res"],
             capture_output=True,
             stdin=subprocess.DEVNULL,
             env=env,
@@ -227,13 +285,36 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
 
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip() if isinstance(result.stderr, bytes) else result.stderr.strip()
-        raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{stderr}")
+        meeko_err = stderr
+        console.print(f"  [yellow]meeko failed — trying obabel fallback...[/yellow]")
+        try:
+            return _run_obabel_receptor(clean, output_dir)
+        except ReceptorPrepError as ob_exc:
+            raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{meeko_err}") from ob_exc
     try:
         import meeko
         mv = meeko.__version__
     except (ImportError, AttributeError):
         mv = "unknown"
     return pdbqt, mv
+
+
+def _run_obabel_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
+    exe = shutil.which("obabel")
+    if exe is None:
+        raise ReceptorPrepError("obabel not found — install Open Babel: https://openbabel.org")
+    pdbqt = output_dir / (src.stem + ".pdbqt")
+    console.print("  [dim]obabel: converting receptor to PDBQT...[/dim]")
+    result = subprocess.run(
+        [exe, str(src), "-xr", "-O", str(pdbqt)],
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=180,
+    )
+    if result.returncode != 0 or not pdbqt.exists() or pdbqt.stat().st_size == 0:
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()
+        raise ReceptorPrepError(f"obabel failed:\n{stderr}")
+    return pdbqt, "obabel"
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +346,7 @@ def prep_receptor(
 
     fixed = output_dir / "receptor_fixed.pdb"
     try:
-        fx = _run_pdbfixer(chain_filtered, fixed, ph=ph, keep_waters=keep_waters)
+        fx = _run_pdbfixer(chain_filtered, fixed, keep_waters=keep_waters)
     except ReceptorPrepError:
         raise
     except Exception as exc:
