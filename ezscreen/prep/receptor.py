@@ -286,7 +286,7 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     if result.returncode != 0:
         stderr = result.stderr.decode("utf-8", errors="replace").strip() if isinstance(result.stderr, bytes) else result.stderr.strip()
         meeko_err = stderr
-        console.print(f"  [yellow]meeko failed — trying obabel fallback...[/yellow]")
+        console.print("  [yellow]meeko failed — trying obabel fallback...[/yellow]")
         try:
             return _run_obabel_receptor(clean, output_dir)
         except ReceptorPrepError as ob_exc:

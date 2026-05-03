@@ -167,6 +167,7 @@ def shard_raw(
 ) -> dict[str, Any]:
     """Split input into raw SMILES shards without 3D prep — prep runs on Kaggle."""
     import math
+
     from rdkit.Chem import MolToSmiles
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +222,7 @@ def prep_ligands(
     n_shards: int | None = None,
 ) -> dict[str, Any]:
     import math
+
     from rdkit.Chem import SDWriter
 
     output_dir.mkdir(parents=True, exist_ok=True)
