@@ -70,14 +70,14 @@ def _scrub(mol, Scrubber, ph: float):
         return None
 
 
-def _embed_3d(mol):
+def _embed_3d(mol, mmff_max_iters: int = 0):
     from rdkit.Chem import AddHs, AllChem
     mol_h = AddHs(mol)
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
     if AllChem.EmbedMolecule(mol_h, params) == -1:
         return None
-    AllChem.MMFFOptimizeMolecule(mol_h, maxIters=200)
+    AllChem.MMFFOptimizeMolecule(mol_h, maxIters=mmff_max_iters)
     return mol_h
 
 
@@ -112,7 +112,7 @@ _AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
 })
 
 
-def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None) -> tuple[str | None, str | None]:
+def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0) -> tuple[str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
         SanitizeMol(mol)
@@ -144,7 +144,7 @@ def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None) -> tuple
     if scrubbed is None:
         return None, "sanitization"
 
-    mol_3d = _embed_3d(scrubbed)
+    mol_3d = _embed_3d(scrubbed, mmff_max_iters)
     if mol_3d is None:
         return None, "conformer_generation"
 
@@ -238,8 +238,10 @@ def prep_ligands(
             "max_mw":             float(_pc.get("max_mw",           700.0)),
             "max_rotatable_bonds": int(_pc.get("max_rotatable_bonds", 20)),
         } if _pc.get("enable_gpu_size_filter", True) else None
+        mmff_max_iters: int = int(_pc.get("mmff_max_iters", 0))
     except Exception:
         gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
+        mmff_max_iters = 0
 
     failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0, "too_large_for_gpu": 0}
     filtered_too_large: list[dict] = []
@@ -296,7 +298,7 @@ def prep_ligands(
         task = prog.add_task("Prepping ligands...", total=len(all_mols))
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             future_to_idx = {
-                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter): i
+                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter, mmff_max_iters): i
                 for i, mol in enumerate(all_mols)
             }
             for fut in as_completed(future_to_idx):
