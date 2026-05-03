@@ -302,8 +302,10 @@ def run_screening_job(
     work_dir.mkdir(parents=True, exist_ok=True)
 
     # Persist paths so resume_failed_shards can find them later
+    receptor_pdb = receptor_pdbqt.parent / "receptor_prep.pdb"
     resume_info = {
         "receptor_pdbqt": str(receptor_pdbqt),
+        "receptor_pdb": str(receptor_pdb) if receptor_pdb.exists() else None,
         "shard_paths": [str(p) for p in shard_paths],
         "notebook_path": str(notebook_path),
         "username": username,

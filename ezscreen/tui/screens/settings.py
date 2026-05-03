@@ -70,6 +70,10 @@ class SettingsScreen(Screen):
             yield Label("Fixed MMFF iterations (ignored when convergence mode on)", classes="form-label")
             yield Input(id="cfg-mmff-iters", placeholder="200")
 
+            yield Label("Results", classes="form-section")
+            yield Label("Interaction viewer compounds (top N)", classes="form-label")
+            yield Input(id="cfg-interaction-top-n", placeholder="20")
+
             yield Label("Local Docking", classes="form-section")
             yield Label("Enable score filter", classes="form-label")
             yield Switch(id="cfg-score-floor-enable")
@@ -124,6 +128,9 @@ class SettingsScreen(Screen):
         mmff = int(pc.get("mmff_max_iters", 0))
         self.query_one("#cfg-mmff-converge", Switch).value = (mmff == 0)
         self.query_one("#cfg-mmff-iters", Input).value = str(mmff if mmff > 0 else 200)
+
+        rc = cfg.get("results", {})
+        self.query_one("#cfg-interaction-top-n", Input).value = str(rc.get("interaction_top_n", 20))
 
         lc = cfg.get("local", {})
         self.query_one("#cfg-score-floor-enable", Switch).value = bool(lc.get("enable_score_floor", True))
@@ -189,6 +196,9 @@ class SettingsScreen(Screen):
                 "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
                 "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
                 "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
+            },
+            "results": {
+                "interaction_top_n": _i("#cfg-interaction-top-n", 20),
             },
             "local": {
                 "enable_score_floor": self.query_one("#cfg-score-floor-enable", Switch).value,
