@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.9.0 — 2026-05-04
+
+### Added
+
+- **Pose Interaction Viewer** — after docking completes, an "Analyse Interactions" button in the results viewer triggers a second user-triggered Kaggle CPU kernel that runs PLIP on the top-N poses; the kernel uploads `receptor_prep.pdb` + `plip_poses.sdf` + `scores_top_n.csv`, runs per-compound PLIP analysis, writes `interactions.json`, and downloads it back; clicking "Open Interaction Viewer" generates a self-contained browser HTML with a 3Dmol.js receptor + ligand scene, per-interaction cylinders, six interaction-type toggles (H-bond, hydrophobic, π-stack, π-cation, salt bridge, halogen), a sidebar residue table, compound dropdown, and a "predicted pose — not experimentally validated" disclaimer
+- **`receptor_prep.pdb` saved alongside PDBQT** — `prep_receptor()` now copies the pdbfixer-cleaned PDB to `receptor_prep.pdb` in the output directory; path is persisted in `resume.json` so the PLIP runner can locate it for any run
+- **Configurable interaction top-N** — `[results] interaction_top_n = 20` in `config.toml`; editable from Settings under a new Results section; controls how many compounds are sent to the PLIP kernel
+
+---
+
 ## v1.8.1 — 2026-05-04
 
 ### Fixed

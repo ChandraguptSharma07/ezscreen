@@ -39,6 +39,9 @@ DEFAULTS: dict[str, Any] = {
         "mmff_max_iters": 0,
         "prep_on_kaggle": True,
     },
+    "results": {
+        "interaction_top_n": 20,
+    },
 }
 
 

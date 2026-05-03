@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import webbrowser
 from pathlib import Path
 
@@ -45,10 +46,12 @@ class ResultsScreen(Screen):
                     "[#6e7681]Select a hit to see details.[/#6e7681]",
                     id="compound-info",
                 )
-                yield Button("Open 3D Viewer",  id="btn-3d",     variant="default")
-                yield Button("Open Report",      id="btn-report", variant="default")
-                yield Button("Cluster Hits",     id="btn-cluster", variant="default")
+                yield Button("Open 3D Viewer",        id="btn-3d",        variant="default")
+                yield Button("Open Report",            id="btn-report",    variant="default")
+                yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
+                yield Button("Analyse Interactions",   id="btn-plip",      variant="default")
                 yield Static("", id="cluster-result")
+                yield Static("", id="plip-result")
                 yield Label("Validate Setup", classes="section-title", id="validate-label")
                 yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
                 yield Button(
@@ -61,6 +64,7 @@ class ResultsScreen(Screen):
         self.query_one("#btn-3d").display      = False
         self.query_one("#btn-report").display  = False
         self.query_one("#btn-cluster").display = False
+        self.query_one("#btn-plip").display    = False
         table = self.query_one("#hits-table", DataTable)
         table.add_column("Info")
         table.add_row("Loading results…")
@@ -99,6 +103,7 @@ class ResultsScreen(Screen):
 
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
+        self.app.call_from_thread(self._refresh_plip_button)
 
     def _populate_error(self, msg: str) -> None:
         table = self.query_one("#hits-table", DataTable)
@@ -164,6 +169,8 @@ class ResultsScreen(Screen):
             self._open_report()
         elif event.button.id == "btn-cluster":
             self._run_clustering()
+        elif event.button.id == "btn-plip":
+            self._handle_plip()
         elif event.button.id == "btn-validate":
             self._run_benchmark()
 
@@ -277,6 +284,84 @@ class ResultsScreen(Screen):
         ]
         self.query_one("#cluster-result", Static).update("\n".join(lines))
         self.app.notify(f"{result.n_clusters} clusters. Centroids saved.", timeout=4)
+
+    def _refresh_plip_button(self) -> None:
+        has_results = (self._output / "scores.csv").exists()
+        btn = self.query_one("#btn-plip")
+        btn.display = has_results
+        if (self._output / "interactions_top_n.json").exists():
+            btn.label = "Open Interaction Viewer"
+        else:
+            btn.label = "Analyse Interactions"
+
+    def _handle_plip(self) -> None:
+        interactions_json = self._output / "interactions_top_n.json"
+        work_dir = self._output.parent
+
+        # Check receptor PDB availability
+        resume_json = work_dir / "resume.json"
+        has_receptor_pdb = False
+        if resume_json.exists():
+            info = json.loads(resume_json.read_text())
+            p = info.get("receptor_pdb")
+            has_receptor_pdb = bool(p and Path(p).exists())
+        if not has_receptor_pdb:
+            fallback = work_dir / "receptor" / "receptor_prep.pdb"
+            has_receptor_pdb = fallback.exists()
+
+        if not has_receptor_pdb:
+            self.query_one("#plip-result", Static).update(
+                "[#f85149]Interaction analysis unavailable — receptor PDB not saved for this run (pre-dates v1.9.0)[/#f85149]"
+            )
+            return
+
+        if interactions_json.exists():
+            self._open_interaction_viewer(work_dir)
+            return
+
+        self.query_one("#btn-plip").disabled = True
+        self.query_one("#btn-plip").label = "Analysing..."
+        self.query_one("#plip-result", Static).update("[#e3b341]Running PLIP on Kaggle...[/#e3b341]")
+
+        run_id = self._run_id
+
+        def _worker() -> None:
+            from ezscreen.backends.kaggle.plip_runner import run_plip_analysis
+            try:
+                result = run_plip_analysis(run_id, work_dir)
+                self.app.call_from_thread(self._on_plip_done, result, work_dir)
+            except Exception as exc:
+                self.app.call_from_thread(self._on_plip_error, str(exc))
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_plip_done(self, result: dict, work_dir: Path) -> None:
+        btn = self.query_one("#btn-plip")
+        btn.disabled = False
+        if result["status"] == "complete":
+            btn.label = "Open Interaction Viewer"
+            self.query_one("#plip-result", Static).update("[#3fb950]PLIP complete[/#3fb950]")
+            self._open_interaction_viewer(work_dir)
+        else:
+            btn.label = "Analyse Interactions"
+            self.query_one("#plip-result", Static).update(
+                f"[#f85149]PLIP failed: {result.get('error', 'unknown error')}[/#f85149]"
+            )
+
+    def _on_plip_error(self, msg: str) -> None:
+        self.query_one("#btn-plip").disabled = False
+        self.query_one("#btn-plip").label = "Analyse Interactions"
+        self.query_one("#plip-result", Static).update(f"[#f85149]PLIP error: {msg}[/#f85149]")
+
+    def _open_interaction_viewer(self, work_dir: Path) -> None:
+        from ezscreen.results.pose_inspector import generate_viewer
+        try:
+            html_path = generate_viewer(work_dir)
+            webbrowser.open(html_path.as_uri())
+            self.app.notify("Interaction viewer opened in browser.", timeout=3)
+        except Exception as exc:
+            self.app.notify(f"Viewer generation failed: {exc}", severity="error", timeout=8)
 
     def _run_benchmark(self) -> None:
         actives_str = self.query_one("#actives-input", Input).value.strip()

@@ -372,8 +372,12 @@ def prep_receptor(
     except Exception as exc:
         raise ReceptorPrepError(f"Meeko error: {exc}") from exc
 
+    receptor_pdb = output_dir / "receptor_prep.pdb"
+    shutil.copy2(fixed, receptor_pdb)
+
     return {
         "pdbqt_path": pdbqt,
+        "receptor_pdb_path": receptor_pdb,
         "fixed_pdb_path": fixed,
         "report": {
             "chains_selected": chains,
