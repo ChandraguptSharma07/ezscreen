@@ -557,9 +557,9 @@ class RunWizardScreen(Screen):
                         safe = acct["name"].replace(" ", "-").lower()
                         try:
                             raw   = self.query_one(f"#acct-shards-{safe}", Input).value.strip()
-                            count = int(raw) if raw else 0
+                            count = int(raw) if raw else None  # None = auto, 0 = exclude, N = explicit
                         except Exception:
-                            count = 0
+                            count = None
                         assignments.append({"account": acct, "shard_count": count})
                     self._ctx["account_assignments"] = assignments
                 else:
@@ -737,8 +737,9 @@ class RunWizardScreen(Screen):
 
             # Ligand prep
             account_assignments = ctx.get("account_assignments")
-            if account_assignments and len(account_assignments) > 1:
-                n_shards_target = sum(a["shard_count"] or 1 for a in account_assignments)
+            _active = [a for a in (account_assignments or []) if a["shard_count"] != 0]
+            if _active and len(_active) > 1:
+                n_shards_target = sum(a["shard_count"] or 1 for a in _active)
             else:
                 n_shards_target = None
 
@@ -752,8 +753,12 @@ class RunWizardScreen(Screen):
                 )
                 log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['prep_passed']:,} ligands prepped)[/#6e7681]")
             else:
-                log("[#79c0ff]Sharding ligands for Kaggle prep...[/#79c0ff]")
-                lig_result = ligand_prep.shard_raw(
+                _prep_on_kaggle = bool(_prep_cfg.get("prep_on_kaggle", True))
+                if _prep_on_kaggle:
+                    log("[#79c0ff]Sharding ligands for Kaggle prep...[/#79c0ff]")
+                else:
+                    log("[#79c0ff]Prepping ligands locally before upload...[/#79c0ff]")
+                lig_result = (ligand_prep.shard_raw if _prep_on_kaggle else ligand_prep.prep_ligands)(
                     input_path=ligand_input,
                     output_dir=work_dir / "shards",
                     n_shards=n_shards_target,
@@ -787,12 +792,14 @@ class RunWizardScreen(Screen):
                 )
             else:
                 account_assignments = ctx.get("account_assignments")
-                if account_assignments and len(account_assignments) > 1:
+                _active_assignments = [a for a in (account_assignments or []) if a["shard_count"] != 0]
+                if _active_assignments and len(_active_assignments) > 1:
                     # Multi-account Kaggle path
                     log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
-                    for a in account_assignments:
+                    for a in _active_assignments:
                         n = a["shard_count"] or 1
                         log(f"[#6e7681]  {a['account']['name']}: {n} notebook(s)[/#6e7681]")
+                    account_assignments = _active_assignments
                     result = kaggle_runner.run_multi_account_screening(
                         run_id=run_id,
                         receptor_pdbqt=receptor_pdbqt,
@@ -805,6 +812,7 @@ class RunWizardScreen(Screen):
                         ph=cfg["run"].get("default_ph", 7.4),
                         retry_limit=cfg["run"].get("shard_retry_limit", 3),
                         accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
+                        prep_on_kaggle=_prep_on_kaggle,
                     )
                 else:
                     # Single-account Kaggle path
@@ -838,10 +846,11 @@ class RunWizardScreen(Screen):
                         ph=cfg["run"].get("default_ph", 7.4),
                         search_mode=ctx["search_params"].get("search_mode", "balance"),
                         enumerate_tautomers=False,
-                        prep_on_kaggle=True,
+                        prep_on_kaggle=_prep_on_kaggle,
                         max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
                         max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                         max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
+                        mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
                         gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4x2" else "",
                     )
                     notebook_path = work_dir / "notebook.ipynb"

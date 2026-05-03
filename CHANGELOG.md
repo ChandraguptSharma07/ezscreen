@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.8.1 — 2026-05-04
+
+### Fixed
+
+- **poses.sdf wrote 0 poses** — cell 8's inner `except Exception: pass` silently swallowed every Meeko conversion failure; added per-compound error logging and a two-path fallback: Meeko ≥ 0.5 path first, obabel fallback if that fails; `obabel` is now installed in cell 2 alongside meeko and gemmi so the fallback is always available
+- **Accounts set to 0 received 1 shard each** — blank input and explicit `0` both stored `shard_count=0`; the runner then applied `0 or 1 = 1` giving every excluded account one notebook; blank input now stores `None` (auto), `0` means explicitly excluded; `run_multi_account_screening()` filters out `shard_count=0` accounts before any notebook count calculation; added guard returning a clear error if all accounts are excluded
+
+### Added
+
+- **Configurable 3D prep location** — Settings screen now has a "Run 3D prep on Kaggle GPU" toggle under Ligand Pre-filter (default on); when off, ETKDGv3 + MMFF + Meeko runs locally and PDBQT shards are uploaded to Kaggle; persisted as `[prep] prep_on_kaggle` in `config.toml`; both single-account and multi-account paths respect the setting
+- **`lig_id` SDF property** — docked pose SDF entries now carry an explicit `> <lig_id>` property alongside `_Name` and `score`, enabling reliable correlation between `poses.sdf` and `scores.csv`
+
+### Fixed (template)
+
+- **`mmff_max_iters` missing from single-account template render** — single-account Kaggle path in `run_wizard.py` was not passing `mmff_max_iters` to the Jinja2 template render, so the notebook always used the template default rather than the configured value; multi-account path in `runner.py` was already passing it correctly
+
+---
+
 ## v1.8.0 — 2026-05-03
 
 ### Added

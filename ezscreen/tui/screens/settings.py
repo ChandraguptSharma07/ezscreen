@@ -63,6 +63,8 @@ class SettingsScreen(Screen):
             yield Input(id="cfg-max-mw", placeholder="700.0")
             yield Label("Max rotatable bonds", classes="form-label")
             yield Input(id="cfg-max-rb", placeholder="20")
+            yield Label("Run 3D prep on Kaggle GPU (disable to prep locally before upload)", classes="form-label")
+            yield Switch(id="cfg-prep-on-kaggle")
             yield Label("MMFF minimisation", classes="form-label")
             yield Switch(id="cfg-mmff-converge", name="Run to convergence (maxIters=0, faster)")
             yield Label("Fixed MMFF iterations (ignored when convergence mode on)", classes="form-label")
@@ -118,6 +120,7 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-max-ha", Input).value = str(pc.get("max_heavy_atoms",     70))
         self.query_one("#cfg-max-mw", Input).value = str(pc.get("max_mw",           700.0))
         self.query_one("#cfg-max-rb", Input).value = str(pc.get("max_rotatable_bonds", 20))
+        self.query_one("#cfg-prep-on-kaggle", Switch).value = bool(pc.get("prep_on_kaggle", True))
         mmff = int(pc.get("mmff_max_iters", 0))
         self.query_one("#cfg-mmff-converge", Switch).value = (mmff == 0)
         self.query_one("#cfg-mmff-iters", Input).value = str(mmff if mmff > 0 else 200)
@@ -184,6 +187,7 @@ class SettingsScreen(Screen):
                 "max_heavy_atoms":        _i("#cfg-max-ha", 70),
                 "max_mw":                 _f("#cfg-max-mw", 700.0),
                 "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
+                "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
                 "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
             },
             "local": {

@@ -37,6 +37,7 @@ DEFAULTS: dict[str, Any] = {
         "max_mw": 700.0,
         "max_rotatable_bonds": 20,
         "mmff_max_iters": 0,
+        "prep_on_kaggle": True,
     },
 }
 

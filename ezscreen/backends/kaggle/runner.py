@@ -530,6 +530,7 @@ def run_multi_account_screening(
     ph: float = 7.4,
     retry_limit: int = 3,
     accelerator: str = "nvidiaTeslaP100",
+    prep_on_kaggle: bool = True,
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -544,13 +545,17 @@ def run_multi_account_screening(
 
     n_shards = len(shard_paths)
 
-    # Notebook count per account (0 → 1)
+    # shard_count semantics: None = auto (1 notebook), 0 = excluded, N > 0 = explicit
+    account_assignments = [a for a in account_assignments if a["shard_count"] != 0]
+    if not account_assignments:
+        return {"status": "failed", "error": "No active accounts — all accounts were set to 0 (excluded)"}
+
     notebook_counts = [a["shard_count"] or 1 for a in account_assignments]
     total_notebooks = sum(notebook_counts)
 
     console.print(
         f"  [dim]{n_shards} shard(s) → {total_notebooks} notebook(s) "
-        f"across {len(account_assignments)} account(s)[/dim]"
+        f"across {len(account_assignments)} active account(s)[/dim]"
     )
 
     # Distribute shards in contiguous blocks across all notebooks
@@ -663,7 +668,7 @@ def run_multi_account_screening(
                 ph=ph,
                 search_mode=search_mode,
                 enumerate_tautomers=False,
-                prep_on_kaggle=True,
+                prep_on_kaggle=prep_on_kaggle,
                 max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
                 max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                 max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
