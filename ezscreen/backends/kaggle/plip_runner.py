@@ -65,7 +65,16 @@ def _upload_plip_dataset(
     try:
         kaggle.api.dataset_create_new(str(dataset_dir), public=False, quiet=True)
     except Exception as exc:
-        raise RuntimeError(f"PLIP dataset upload failed: {exc}") from exc
+        msg = str(exc).lower()
+        if any(k in msg for k in ("already", "exists", "409", "403")):
+            try:
+                kaggle.api.dataset_create_version(
+                    str(dataset_dir), version_notes="ezscreen retry", quiet=True
+                )
+            except Exception as exc2:
+                raise RuntimeError(f"PLIP dataset update failed: {exc2}") from exc2
+        else:
+            raise RuntimeError(f"PLIP dataset upload failed: {exc}") from exc
 
     return f"{username}/{slug}"
 
@@ -186,10 +195,22 @@ def run_plip_analysis(run_id: str, work_dir: Path) -> dict[str, Any]:
     writer_sdf.close()
     console.print(f"  [dim]{written}/{len(top_ids)} poses extracted for PLIP[/dim]")
 
-    # Get Kaggle username from env if not in resume.json
+    # Get Kaggle username — try env var then credentials file
     if not username:
         import os
         username = os.environ.get("KAGGLE_USERNAME", "")
+    if not username:
+        for cred_path in [
+            Path.home() / ".kaggle" / "kaggle.json",
+            Path.home() / ".ezscreen" / "kaggle.json",
+        ]:
+            if cred_path.exists():
+                try:
+                    username = json.loads(cred_path.read_text()).get("username", "")
+                    if username:
+                        break
+                except Exception:
+                    pass
     if not username:
         return {"status": "failed", "interactions_path": None, "error": "Kaggle username not found — run auth setup"}
 
