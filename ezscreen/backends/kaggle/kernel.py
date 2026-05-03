@@ -66,7 +66,7 @@ def push_kernel(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": True,
+        "enable_gpu": accelerator != "none",
         "accelerator": accelerator,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
