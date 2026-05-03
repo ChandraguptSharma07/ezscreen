@@ -233,7 +233,7 @@
     "            if AllChem.EmbedMolecule(_mol_h, _params) == -1:\n",
     "                _prep_failed += 1\n",
     "                continue\n",
-    "            AllChem.MMFFOptimizeMolecule(_mol_h, maxIters=200)\n",
+    "            AllChem.MMFFOptimizeMolecule(_mol_h, maxIters=<< mmff_max_iters >>)\n",
     "        except Exception:\n",
     "            _prep_failed += 1\n",
     "            continue\n",

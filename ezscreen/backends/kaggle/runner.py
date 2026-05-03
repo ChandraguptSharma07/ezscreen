@@ -664,6 +664,7 @@ def run_multi_account_screening(
                 max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
                 max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                 max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
+                mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
                 gpu_ids="0,1" if accelerator == "nvidiaTeslaT4x2" else "",
             )
             nb_path = nb_dir / "notebook.ipynb"

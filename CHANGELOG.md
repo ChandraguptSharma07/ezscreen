@@ -1,18 +1,33 @@
 # Changelog
 
-## v1.9.0 — 2026-04-24
+## v1.8.0 — 2026-05-03
 
 ### Added
 
+- **Multi-account Kaggle submission** — `run_multi_account_screening()` in `ezscreen/backends/kaggle/runner.py`; splits shard list across configured accounts using `_split_shards()` (respects per-account `shard_count`; 0 = auto-distribute evenly); submits one dataset+kernel per account sequentially under `_KAGGLE_API_LOCK` to prevent env-var races; polls all kernels concurrently via `ThreadPoolExecutor`; downloads and merges results with `merge_shard_results`
+- **Account shard assignment UI in Run Wizard step 4** — when ≥ 2 Kaggle accounts are configured and local mode is off, a dynamic list of account rows appears, each with a numeric input for shard count (blank = auto); the section hides automatically when the "Run locally" toggle is enabled
+- **`_KAGGLE_API_LOCK`** global lock in `runner.py` serialises all `os.environ` credential switches and `authenticate()` calls so concurrent threads never clobber each other's credentials
 - **Prep-on-Kaggle** — ligand 3D embedding and PDBQT conversion now runs inside the Kaggle notebook instead of locally; `shard_raw()` in `ligands.py` shards raw SMILES for upload, then the notebook runs ETKDGv3 + MMFF + Meeko on the GPU instance; cuts local CPU time to near-zero for large libraries
 - **GPU type selection** — Run Wizard step 4 now shows a radio button to pick between P100 (16 GB, default) and T4 × 2 (32 GB, uses both GPUs via `--gpu_ids 0,1`); selection propagates to `kernel-metadata.json` via the new `accelerator` parameter on `push_kernel()`
 - **Docking failure log** — each Kaggle notebook now writes `failed_docking.csv` alongside `scores.csv`; records every ligand that had a valid output PDBQT but was rejected, with `reason` (`score_ceiling`, `score_floor`, `no_remark`, `unparseable_score`, `non_finite_score`) and the raw score string; included in `output.zip`
 - **`unscored_reasons.csv`** — merger collects `failed_docking.csv` from all shard dirs and combines it with compounds that got no output PDBQT at all (`no_pose`) and GPU-size-filtered entries (`gpu_size_filter`) into a single file in the run output directory
 - **Ligand pre-filter settings** — Settings screen now exposes GPU size filter toggle, max heavy atoms, max MW, and max rotatable bonds; values persisted under `[prep]` in `config.toml`
 - **Score ceiling setting** — score ceiling (default 0.0 kcal/mol) is now configurable in Settings alongside the existing floor; both applied consistently by the merger
+- **Configurable score floor** — Settings screen now exposes an enable/disable toggle and a custom threshold (default −15.0 kcal/mol); read at runtime by both `run_local_screening` and `merge_shard_results`
+- **Local docking performance settings** — exhaustiveness and CPU core count are now configurable in Settings and persisted under `[local]` in `config.toml`
+- **Per-run exhaustiveness in Run Wizard** — an Exhaustiveness input appears in Step 4 when local mode is on; search depth radio buttons (UniDock-specific) are hidden for local runs since they have no effect on Vina
+- **MMFF minimisation mode** — Settings screen now exposes a "Run MMFF to convergence" toggle (default on) and a fixed iteration count input; convergence mode (`maxIters=0`) is 1.62× faster than the previous hardcoded `maxIters=200` on typical drug-like libraries with no change in pass rate; value persisted under `[prep] mmff_max_iters` in `config.toml` and applied in both the Kaggle notebook template and the local prep path
 
 ### Fixed
 
+- **Local docking returned 0 hits** — `run_local_screening` was passing PDBQT shard files to `_sdf_to_pdbqt` which called `Chem.SDMolSupplier` on them, yielding no molecules; replaced with `_split_pdbqt_shard` that reads the multi-molecule PDBQT shard directly, splits on `TORSDOF` boundaries, and writes individual ligand files for Vina; SMILES enrichment now reads from `index.csv` written by `ligand_prep` instead of trying to parse the PDBQT as SDF
+- **Local Vina used only 1 CPU core** — `--cpu 1` changed to `--cpu 0` so Vina auto-detects all available cores; default exhaustiveness lowered from 8 to 4 for local mode
+- **No SMILES or real names in local results** — `_load_smiles_index` was keying on the human name instead of the lig_id; `ligand_prep` now injects `REMARK lig_id <id>` into every PDBQT block so `_split_pdbqt_shard` can correlate blocks back to `index.csv`; rows now carry both `name` and `smiles` columns
+- **Clustering crashed with "max() arg is an empty sequence"** — `_show_cluster_result` and `_cluster_section_html` both called `max(result.sizes)` without guarding against an empty list (no SMILES available); fixed with early return and a clear "No SMILES data" message
+- **Detail panel showed "—" for all local hits** — `results_viewer` was reading `row["name"]` but local CSV uses `row["ligand"]`; now falls back correctly
+- **`merger.py` score floor was hardcoded** — Kaggle merge path ignored the configurable score floor setting; now reads from `config.toml`
+- **CPU cores setting was not wired** — `cpu_cores` config key was added but never passed to Vina's `--cpu` flag; fixed by threading it through `_run_vina`
+- **Local docking backend never ran** — `run_wizard.py` step-options validation read `opt-admet` and `opt-depth` but skipped `opt-local`, so `ctx["run_locally"]` was never set and `_do_submit` always fell through to Kaggle; fixed by reading the switch in `_validate_step` and branching on `ctx["run_locally"]` in `_do_submit`
 - **Score regex silently dropped 89% of poses** — the `REMARK VINA RESULT` pattern `[-\d.]+` didn't match `nan`, `inf`, or scientific-notation overflow scores, so those PDBQTs were silently skipped; pattern updated to `\S+` with explicit float parse and `math.isfinite` check
 - **PDBFixer added terminal atoms that crashed Meeko** — `addMissingAtoms` and `addMissingHydrogens` were being called, causing PDBFixer to insert OXT and N-terminal H atoms that produced valence-5 carbons RDKit couldn't sanitize; both calls removed since Meeko assigns its own H and atom types from residue templates
 - **Blank chain IDs caused no chains detected** — PDB files with no chain identifier in column 22 returned an empty list from `get_chains()`; now returns `[" "]` so prep can continue
@@ -20,48 +35,10 @@
 - **Account assignment rows overlapped** — wizard account rows had no explicit height so Textual collapsed them together; fixed with `acct-row` CSS class setting `height: 3` and proper label width
 - **Account rows past "primary" were inaccessible** — account assignment section was a plain `Vertical` with no scroll, so overflow rows were clipped; replaced with `VerticalScroll` capped at 16 rows
 
----
-
-## v1.7.2 — 2026-04-17
-
-### Fixed
-
-- **Local docking returned 0 hits** — `run_local_screening` was passing PDBQT shard files to `_sdf_to_pdbqt` which called `Chem.SDMolSupplier` on them, yielding no molecules; replaced with `_split_pdbqt_shard` that reads the multi-molecule PDBQT shard directly, splits on `TORSDOF` boundaries, and writes individual ligand files for Vina; SMILES enrichment now reads from `index.csv` written by `ligand_prep` instead of trying to parse the PDBQT as SDF
-- **Local Vina used only 1 CPU core** — `--cpu 1` changed to `--cpu 0` so Vina auto-detects all available cores; default exhaustiveness lowered from 8 to 4 for local mode
-- **No SMILES or real names in local results** — `_load_smiles_index` was keying on the human name ("Indinavir") instead of the lig_id ("lig_00000"), so SMILES were never resolved; `ligand_prep` now injects `REMARK lig_id <id>` into every PDBQT block so `_split_pdbqt_shard` can correlate blocks back to `index.csv`; rows now carry both `name` and `smiles` columns
-- **Clustering crashed with "max() arg is an empty sequence"** — `_show_cluster_result` and `_cluster_section_html` both called `max(result.sizes)` without guarding against an empty list (no SMILES available); fixed with early return and a clear "No SMILES data" message
-- **Detail panel showed "—" for all local hits** — `results_viewer` was reading `row["name"]` but local CSV uses `row["ligand"]`; now falls back correctly
-- **`merger.py` score floor was hardcoded** — Kaggle merge path ignored the configurable score floor setting; now reads from `config.toml`
-- **CPU cores setting was not wired** — `cpu_cores` config key was added but never passed to Vina's `--cpu` flag; fixed by threading it through `_run_vina`
-
-### Added
-
-- **Configurable score floor** — Settings screen now exposes an enable/disable toggle and a custom threshold (default −15.0 kcal/mol); read at runtime by both `run_local_screening` and `merge_shard_results`
-- **Local docking performance settings** — exhaustiveness and CPU core count are now configurable in Settings and persisted under `[local]` in `config.toml`
-- **Per-run exhaustiveness in Run Wizard** — an Exhaustiveness input appears in Step 4 when local mode is on; search depth radio buttons (UniDock-specific) are hidden for local runs since they have no effect on Vina
-
----
-
-## v1.8.0 — 2026-04-17
-
-### Added
-
-- **Multi-account Kaggle submission** — `run_multi_account_screening()` in `ezscreen/backends/kaggle/runner.py`; splits shard list across configured accounts using `_split_shards()` (respects per-account `shard_count`; 0 = auto-distribute evenly); submits one dataset+kernel per account sequentially under `_KAGGLE_API_LOCK` to prevent env-var races; polls all kernels concurrently via `ThreadPoolExecutor`; downloads and merges results with `merge_shard_results`
-- **Account shard assignment UI in Run Wizard step 4** — when ≥ 2 Kaggle accounts are configured and local mode is off, a dynamic list of account rows appears, each with a numeric input for shard count (blank = auto); the section hides automatically when the "Run locally" toggle is enabled
-- `_KAGGLE_API_LOCK` global lock in `runner.py` serialises all `os.environ` credential switches and `authenticate()` calls so concurrent threads never clobber each other's credentials
-
 ### Changed
 
 - `run_wizard.py` submit path now branches: single account → existing `run_screening_job`; multiple accounts → new `run_multi_account_screening`; confirm summary shows assigned shard counts per account in the log before submission
-
----
-
-## v1.7.1 — 2026-04-17
-
-### Fixed
-
-- **Local docking backend never ran** — `run_wizard.py` step-options validation read `opt-admet` and `opt-depth` but skipped `opt-local`, so `ctx["run_locally"]` was never set and `_do_submit` always fell through to Kaggle; fixed by reading the switch in `_validate_step` and branching on `ctx["run_locally"]` in `_do_submit`
-- **Confirm summary missing backend** — added "Backend: Local CPU (AutoDock Vina) / Kaggle GPU" line to step-5 summary
+- Confirm summary now shows "Backend: Local CPU (AutoDock Vina) / Kaggle GPU" line
 
 ---
 
