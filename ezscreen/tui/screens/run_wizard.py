@@ -736,6 +736,7 @@ class RunWizardScreen(Screen):
                 ligand_input  = admet_out
 
             # Ligand prep
+            _prep_cfg = cfg.get("prep", {})
             account_assignments = ctx.get("account_assignments")
             _active = [a for a in (account_assignments or []) if a["shard_count"] != 0]
             if _active and len(_active) > 1:
@@ -831,7 +832,6 @@ class RunWizardScreen(Screen):
                         block_end_string="%>",
                         loader=jinja2.FileSystemLoader(str(template_path.parent)),
                     )
-                    _prep_cfg = cfg.get("prep", {})
                     _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
                     notebook_src = env.get_template(template_path.name).render(
                         ezscreen_version=__version__,
