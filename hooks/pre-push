@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+echo "pre-push: running ruff..."
+ruff check ezscreen tests
+
+echo "pre-push: running pytest..."
+pytest
+
+echo "pre-push: all checks passed."
