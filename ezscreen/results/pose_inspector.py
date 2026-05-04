@@ -81,8 +81,10 @@ const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor: "#0d1117" }});
 
 // Load receptor once
 viewer.addModel(RECEPTOR, "pdb");
-viewer.setStyle({{ model: 0 }}, {{ cartoon: {{ color: "#6e7681", opacity: 0.7 }} }});
-viewer.addSurface($3Dmol.SurfaceType.MS, {{ opacity: 0.12, color: "#58a6ff" }}, {{ model: 0 }});
+viewer.setStyle({{ model: 0 }}, {{ cartoon: {{ color: "spectrum", opacity: 0.85 }} }});
+viewer.addSurface($3Dmol.SurfaceType.MS, {{ opacity: 0.25, color: "#556677" }}, {{ model: 0 }});
+viewer.zoomTo({{ model: 0 }});
+viewer.render();
 
 let ligandModel   = null;
 let activeToggles = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
@@ -113,6 +115,7 @@ function clearLigand() {{
   if (ligandModel !== null) {{ viewer.removeModel(ligandModel); ligandModel = null; }}
   currentShapes.forEach(s => viewer.removeShape(s));
   currentShapes = [];
+  viewer.setStyle({{ model: 0 }}, {{ cartoon: {{ color: "spectrum", opacity: 0.85 }} }});
 }}
 
 function drawInteractions(interactions) {{
@@ -167,9 +170,18 @@ function selectCompound(lig_id) {{
     viewer.setStyle({{ model: ligandModel }}, {{ stick: {{ colorscheme: "default", radius: 0.2 }} }});
   }}
 
+  // Show binding site residue sidechains as thin sticks (whiteCarbon = standard for publications)
+  const bsResidues = [...new Set((compound.interactions || []).map(ix => ix.residue_number))];
+  if (bsResidues.length) {{
+    viewer.addStyle({{ model: 0, resi: bsResidues }}, {{ stick: {{ colorscheme: "whiteCarbon", radius: 0.12 }} }});
+  }}
+
   drawInteractions(compound.interactions || []);
   renderSidebar(compound);
-  viewer.zoomTo({{ model: ligandModel }});
+  // Center on ligand but keep the whole protein in the viewport
+  viewer.center({{ model: ligandModel }});
+  viewer.zoom(1.8);
+  viewer.render();
 }}
 
 function toggleType(type, checked) {{
