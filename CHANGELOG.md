@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.9.1 — 2026-05-04
+
+### Fixed
+
+- **PLIP dataset path** — Kaggle now mounts datasets under `/kaggle/input/datasets/<username>/` instead of `/kaggle/input/<slug>/`; notebook now searches `/kaggle/input` recursively for `receptor_prep.pdb` so it works regardless of mount structure
+- **PLIP install on Kaggle CPU** — `pip install plip` fails on the system Python (`/usr/bin/python3`) due to build backend errors; fixed by installing `openbabel-wheel` + `lxml` via pip and copying the plip source directly into site-packages via `shutil.copytree`, bypassing the build system entirely
+- **Receptor END record blocking ligand** — `receptor_prep.pdb` ends with an `END` record; appending ligand HETATM lines after it caused PLIP to see an empty complex; now strips `END`/`CONECT`/`MASTER` from the receptor and inserts `TER` before the ligand block
+- **PLIP `pistacking` attribute** — extraction code used `bs.pistacks` which does not exist in PLIP 2.x; corrected to `bs.pistacking`
+- **Hydrophobic contact distance** — `HydrophobicInteraction` uses `distance` not `dist`; was always showing `0.00 Å`; fixed with `getattr(hc, 'distance', getattr(hc, 'dist', 0.0))`
+- **PLIP dataset retry** — re-running PLIP on the same run uploaded a new version to an existing dataset slug; `dataset_create_new` was failing silently; now falls back to `dataset_create_version` when the dataset already exists
+- **Interaction viewer protein visibility** — receptor cartoon was near-invisible on dark background; updated to spectrum coloring with surface, binding site residue sticks via `addStyle`, and `center`+`zoom` instead of `zoomTo(ligand)` for proper pocket context
+
+---
+
 ## v1.9.0 — 2026-05-04
 
 ### Added
