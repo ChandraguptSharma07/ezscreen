@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import shutil
 import subprocess
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +132,9 @@ def box_from_residues(
 # P2Rank
 # ---------------------------------------------------------------------------
 
+_P2RANK_RELEASE = "https://github.com/rdk/p2rank/releases/download/2.5/p2rank_2.5.tar.gz"
+
+
 def _p2rank_exe() -> Path | None:
     for candidate in (P2RANK_DIR / "prank", P2RANK_DIR / "prank.sh"):
         if candidate.exists():
@@ -139,14 +143,50 @@ def _p2rank_exe() -> Path | None:
     return Path(found) if found else None
 
 
+def download_p2rank(progress_cb=None) -> Path:
+    """Download and unpack P2Rank into ~/.ezscreen/tools/p2rank/. Returns exe path."""
+    import tarfile
+    P2RANK_DIR.mkdir(parents=True, exist_ok=True)
+    archive = P2RANK_DIR.parent / "p2rank.tar.gz"
+
+    def _reporthook(count, block, total):
+        if progress_cb and total > 0:
+            progress_cb(min(count * block, total), total)
+
+    console.print("[dim]Downloading P2Rank 2.5...[/dim]")
+    urllib.request.urlretrieve(_P2RANK_RELEASE, archive, reporthook=_reporthook)
+
+    console.print("[dim]Unpacking P2Rank...[/dim]")
+    with tarfile.open(archive) as tf:
+        tf.extractall(P2RANK_DIR.parent)
+
+    # The tarball unpacks to p2rank_2.5/ — move contents into p2rank/
+    extracted = P2RANK_DIR.parent / "p2rank_2.5"
+    if extracted.exists() and extracted != P2RANK_DIR:
+        if P2RANK_DIR.exists():
+            shutil.rmtree(P2RANK_DIR)
+        extracted.rename(P2RANK_DIR)
+
+    archive.unlink(missing_ok=True)
+
+    exe = _p2rank_exe()
+    if exe is None:
+        raise RuntimeError("P2Rank downloaded but prank executable not found")
+    exe.chmod(exe.stat().st_mode | 0o111)
+    return exe
+
+
 def run_p2rank(
     pdb_path: Path, output_dir: Path, alphafold: bool = False
 ) -> list[dict[str, Any]]:
-    """Run P2Rank and return up to 3 pocket candidates. Empty list if unavailable."""
+    """Run P2Rank and return up to 3 pocket candidates. Downloads P2Rank if missing."""
     exe = _p2rank_exe()
     if exe is None:
-        console.print("[yellow]P2Rank not found — skipping pocket prediction[/yellow]")
-        return []
+        console.print("[dim]P2Rank not found — downloading...[/dim]")
+        try:
+            exe = download_p2rank()
+        except Exception as exc:
+            raise RuntimeError(f"P2Rank download failed: {exc}") from exc
 
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = [str(exe), "predict", "-f", str(pdb_path), "-o", str(output_dir)]

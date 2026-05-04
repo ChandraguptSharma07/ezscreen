@@ -437,6 +437,11 @@ class RunWizardScreen(Screen):
             pdb_path = self._ctx["pdb_path"]
             is_af    = self._ctx.get("is_alphafold", False)
             work_dir = Path.home() / ".ezscreen" / "tmp" / "wizard" / "p2rank"
+            if pocket._p2rank_exe() is None:
+                self.app.call_from_thread(
+                    self.query_one("#p2rank-status", Static).update,
+                    "[#e3b341]Downloading P2Rank (~50 MB, first run only)...[/#e3b341]",
+                )
             pockets  = pocket.run_p2rank(pdb_path, work_dir, alphafold=is_af)
             self._pockets = pockets
             self.app.call_from_thread(self._show_p2rank_results, pockets)
@@ -449,7 +454,8 @@ class RunWizardScreen(Screen):
     def _show_p2rank_results(self, pockets: list[dict]) -> None:
         if not pockets:
             self.query_one("#p2rank-status", Static).update(
-                "[#e3b341]No pockets found — will fall back to blind docking.[/#e3b341]"
+                "[#e3b341]P2Rank found no pockets for this structure — "
+                "try Active site residues or Blind docking.[/#e3b341]"
             )
             return
 
