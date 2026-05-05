@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.9.2 — 2026-05-05
+
+### Fixed
+
+- **P2Rank on Windows** — invoked Java directly instead of via `prank.bat` to bypass `JAVA_HOME` and Win32 execution issues; stripped leading/trailing whitespace from padded CSV column headers (P2Rank pads all headers with spaces, causing `KeyError` on every row and silently returning empty results); cleared stale output directory before each run; raised an explicit error on non-zero exit instead of returning empty results
+
+---
+
 ## v1.9.1 — 2026-05-04
 
 ### Fixed

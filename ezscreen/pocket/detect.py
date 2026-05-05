@@ -136,10 +136,16 @@ _P2RANK_RELEASE = "https://github.com/rdk/p2rank/releases/download/2.5/p2rank_2.
 
 
 def _p2rank_exe() -> Path | None:
-    for candidate in (P2RANK_DIR / "prank", P2RANK_DIR / "prank.sh"):
+    import sys
+    candidates = (
+        [P2RANK_DIR / "prank.bat", P2RANK_DIR / "prank", P2RANK_DIR / "prank.sh"]
+        if sys.platform == "win32"
+        else [P2RANK_DIR / "prank", P2RANK_DIR / "prank.sh"]
+    )
+    for candidate in candidates:
         if candidate.exists():
             return candidate
-    found = shutil.which("prank")
+    found = shutil.which("prank.bat" if sys.platform == "win32" else "prank")
     return Path(found) if found else None
 
 
@@ -180,6 +186,8 @@ def run_p2rank(
     pdb_path: Path, output_dir: Path, alphafold: bool = False
 ) -> list[dict[str, Any]]:
     """Run P2Rank and return up to 3 pocket candidates. Downloads P2Rank if missing."""
+    import sys
+
     exe = _p2rank_exe()
     if exe is None:
         console.print("[dim]P2Rank not found — downloading...[/dim]")
@@ -188,15 +196,39 @@ def run_p2rank(
         except Exception as exc:
             raise RuntimeError(f"P2Rank download failed: {exc}") from exc
 
+    # P2Rank requires Java — check upfront for a clear error message
+    java_bin = shutil.which("java")
+    if java_bin is None:
+        raise RuntimeError(
+            "Java not found. P2Rank requires Java 11+. "
+            "Install from https://adoptium.net and restart."
+        )
+
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [str(exe), "predict", "-f", str(pdb_path), "-o", str(output_dir)]
-    if alphafold:
-        cmd += ["-profile", "alphafold"]
+
+    if sys.platform == "win32":
+        # On Windows, invoke Java directly — avoids prank.bat path/JAVA_HOME issues
+        p2rank_jar = exe.parent / "bin" / "p2rank.jar"
+        lib_glob   = str(exe.parent / "bin" / "lib" / "*")
+        classpath  = f"{p2rank_jar};{lib_glob}"
+        cmd = [
+            java_bin, "-Xmx2048m", "-cp", classpath,
+            "cz.siret.prank.program.Main",
+            "predict", "-f", str(pdb_path), "-o", str(output_dir),
+        ]
+        if alphafold:
+            cmd += ["-profile", "alphafold"]
+    else:
+        cmd = [str(exe), "predict", "-f", str(pdb_path), "-o", str(output_dir)]
+        if alphafold:
+            cmd += ["-profile", "alphafold"]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        console.print(f"[yellow]P2Rank error: {result.stderr.strip()[:200]}[/yellow]")
-        return []
+        err = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"P2Rank exited with code {result.returncode}: {err[:300]}")
 
     csv_path: Path | None = None
     for f in output_dir.rglob("*_predictions.csv"):
@@ -207,7 +239,9 @@ def run_p2rank(
 
     pockets: list[dict[str, Any]] = []
     with csv_path.open() as f:
-        for i, row in enumerate(csv.DictReader(f)):
+        reader = csv.DictReader(f)
+        reader.fieldnames = [h.strip() for h in reader.fieldnames]
+        for i, row in enumerate(reader):
             if i >= 3:
                 break
             try:
