@@ -1,18 +1,5 @@
 # Changelog
 
-## v1.9.3 — 2026-05-05
-
-### Added
-
-- **2D/3D interaction viewer toggle** — toolbar now has `[3D]` and `[2D]` buttons; 2D mode replaces the main viewport with a publication-quality LIGPLOT-style diagram; 3D mode retains the full 3Dmol.js scene
-- **LIGPLOT-style 2D diagram** — uses RDKit to render the actual ligand 2D structure with interacting atoms highlighted; residue circles (coloured by AA class: hydrophobic/polar/positive/negative) are placed around the periphery with LIGPLOT glyphs: spiky sun for hydrophobic contacts, dashed arrow line for H-bonds, dashed circle+π for π-stacking, +/− annotation for salt bridges
-- **Site View / Full Compound toggle** — in 2D mode, "Site View" crops the RDKit SVG viewBox to the pharmacophore region (interacting atoms + one-hop neighbours + rings); "Full Compound" shows the entire ligand; coordinates are remapped via `transformPt()` so glyphs remain correctly anchored in both modes
-- **SVG export** — new "SVG" export button in toolbar downloads the 2D diagram as a vector SVG at any scale; 3D export fallback to PNG via `pngURI()` unchanged
-- **PNG export from 2D mode** — PNG export in 2D mode serialises the SVG to canvas at 2× scale for high-DPI outputs suitable for print
-- **RDKit 3D→2D atom matching** — interacting atoms from PLIP `ligand_coords` are matched to RDKit atom indices via 3D nearest-neighbor distance rather than fragile PLIP index parsing; avoids misalignment after SDF→PDB→SDF roundtrip
-
----
-
 ## v1.9.2 — 2026-05-05
 
 ### Fixed

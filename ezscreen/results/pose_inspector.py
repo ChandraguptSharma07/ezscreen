@@ -27,7 +27,20 @@ _ITYPE_RDKIT_COLOR = {
 
 _LIG_SVG_W  = 560   # width of RDKit ligand SVG
 _LIG_SVG_H  = 380   # height of RDKit ligand SVG
-_GLYPH_MAR  = 150   # px margin around ligand for residue glyphs
+_GLYPH_MAR  = 170   # px margin around ligand for residue glyphs
+
+
+def _strip_svg_inner(svg_text: str) -> tuple[str, str]:
+    """Return (inner_content, viewBox) with outer <svg> wrapper and bg rect removed."""
+    s = _re.sub(r"<\?xml[^?]*\?>\s*", "", svg_text)
+    s = _re.sub(r"<!DOCTYPE[^>]*>\s*", "", s)
+    vb_m = _re.search(r'viewBox="([^"]*)"', s)
+    vb   = vb_m.group(1) if vb_m else f"0 0 {_LIG_SVG_W} {_LIG_SVG_H}"
+    s = _re.sub(r"^\s*<svg[^>]*>", "", s.strip())
+    s = _re.sub(r"</svg>\s*$",      "", s.strip())
+    # Remove RDKit's white background rect (first <rect>, paired or self-closing)
+    s = _re.sub(r"<rect\b[^>]*(?:/>|>.*?</rect>)", "", s, count=1, flags=_re.DOTALL)
+    return s.strip(), vb
 
 
 # ── Python-side 2D enrichment ─────────────────────────────────────────────
@@ -88,22 +101,13 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
                 else:
                     per_ix_atom.append(None)
 
-            h_atoms  = list(interacting.keys())
-            h_colors = {
-                idx: _ITYPE_RDKIT_COLOR.get(t, (0.5, 0.5, 0.5))
-                for idx, t in interacting.items()
-            }
+            h_atoms = list(interacting.keys())
 
-            # --- Draw the full-compound SVG ---
+            # --- Draw the full-compound SVG (no highlight blobs; connection lines show interactions) ---
             drawer = rdMolDraw2D.MolDraw2DSVG(_LIG_SVG_W, _LIG_SVG_H)
             drawer.drawOptions().addStereoAnnotation = True
             drawer.drawOptions().padding = 0.12
-            drawer.DrawMolecule(
-                mol_2d,
-                highlightAtoms=h_atoms,
-                highlightAtomColors=h_colors,
-                highlightBonds=[],
-            )
+            drawer.DrawMolecule(mol_2d)
             drawer.FinishDrawing()
             svg_full = drawer.GetDrawingText()
 
@@ -168,12 +172,19 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
                 site_viewbox = [round(vx, 1), round(vy, 1),
                                 round(vw, 1), round(vh, 1)]
 
-            c["lig_svg_full"] = svg_full
-            c["lig_svg_site"] = svg_site
-            c["ix_atom_pts"]  = ix_atom_pts
-            c["site_viewbox"] = site_viewbox
-            c["svg_w"]        = _LIG_SVG_W
-            c["svg_h"]        = _LIG_SVG_H
+            inner_full, vb_full = _strip_svg_inner(svg_full)
+            inner_site, vb_site = _strip_svg_inner(svg_site)
+
+            c["lig_svg_full"]       = svg_full
+            c["lig_svg_site"]       = svg_site
+            c["lig_svg_inner_full"] = inner_full
+            c["lig_svg_inner_site"] = inner_site
+            c["lig_svg_vb_full"]    = vb_full
+            c["lig_svg_vb_site"]    = vb_site
+            c["ix_atom_pts"]        = ix_atom_pts
+            c["site_viewbox"]       = site_viewbox
+            c["svg_w"]              = _LIG_SVG_W
+            c["svg_h"]              = _LIG_SVG_H
 
         except Exception:
             pass
@@ -659,13 +670,21 @@ function transformPt(ax, ay, compound, useSite) {{
   ];
 }}
 
-function spikySvg(cx, cy, innerR, outerR, n, color) {{
-  const pts=[];
-  for (let i=0;i<n*2;i++) {{
-    const a=(i*Math.PI/n)-Math.PI/2, r=i%2===0?outerR:innerR;
-    pts.push(`${{(cx+r*Math.cos(a)).toFixed(1)}},${{(cy+r*Math.sin(a)).toFixed(1)}}`);
+function eyelashGlyph(cx, cy, atomX, atomY, r, n, color) {{
+  const ba = Math.atan2(cy-atomY, cx-atomX);
+  const span = Math.PI * 0.65;
+  const fa = ba - span/2, ta = ba + span/2;
+  let s = '';
+  for (let i=0; i<=n; i++) {{
+    const a = fa + (ta-fa)*i/n;
+    const x1=(cx+(r-4)*Math.cos(a)).toFixed(1), y1=(cy+(r-4)*Math.sin(a)).toFixed(1);
+    const x2=(cx+(r+11)*Math.cos(a)).toFixed(1), y2=(cy+(r+11)*Math.sin(a)).toFixed(1);
+    s += `<line x1="${{x1}}" y1="${{y1}}" x2="${{x2}}" y2="${{y2}}" stroke="${{color}}" stroke-width="2"/>`;
   }}
-  return `<path d="M${{pts.join('L')}}Z" fill="${{color}}22" stroke="${{color}}" stroke-width="1.2"/>`;
+  const x1=(cx+r*Math.cos(fa)).toFixed(1), y1=(cy+r*Math.sin(fa)).toFixed(1);
+  const x2=(cx+r*Math.cos(ta)).toFixed(1), y2=(cy+r*Math.sin(ta)).toFixed(1);
+  s += `<path d="M${{x1}},${{y1}} A${{r}},${{r}} 0 0,1 ${{x2}},${{y2}}" fill="none" stroke="${{color}}" stroke-width="2"/>`;
+  return s;
 }}
 
 function draw2DView(compound, useSite) {{
@@ -677,24 +696,47 @@ function draw2DView(compound, useSite) {{
     return;
   }}
 
-  const visible  = (compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
+  const visible = (compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
   if (!visible.length) {{
     wrap.innerHTML=`<p class="d2-placeholder">No visible interactions — check toggles</p>`;
     return;
   }}
 
-  const hasSvg   = !!compound.lig_svg_full;
-  const ligSvg   = useSite ? (compound.lig_svg_site||compound.lig_svg_full) : compound.lig_svg_full;
-  const OW       = LIG_W + 2*GM;
-  const OH       = LIG_H + 2*GM + 52;   // +52 for legend strip
-  const LIGCX    = GM + LIG_W/2;
-  const LIGCY    = GM + LIG_H/2;
+  // Inline SVG content (avoids white-box <image> artefact)
+  const ligInner = useSite
+    ? (compound.lig_svg_inner_site || compound.lig_svg_inner_full)
+    : compound.lig_svg_inner_full;
+  const ligVb = useSite
+    ? (compound.lig_svg_vb_site || compound.lig_svg_vb_full || `0 0 ${{LIG_W}} ${{LIG_H}}`)
+    : (compound.lig_svg_vb_full || `0 0 ${{LIG_W}} ${{LIG_H}}`);
+  const hasSvg = !!ligInner;
+
+  // Recolor bonds for dark mode (black bonds invisible on dark bg)
+  let svgContent = ligInner || '';
+  if (darkMode && svgContent) {{
+    svgContent = svgContent
+      .replace(/stroke:#000000/g, 'stroke:#c9d1d9')
+      .replace(/stroke:black/g,   'stroke:#c9d1d9');
+    svgContent = svgContent.replace(/fill:#([0-9a-fA-F]{{6}})/g, (m, h) => {{
+      const r=parseInt(h.slice(0,2),16), g=parseInt(h.slice(2,4),16), b=parseInt(h.slice(4,6),16);
+      return (r<40 && g<40 && b<40) ? 'fill:#c9d1d9' : m;
+    }});
+  }}
+
+  const OW    = LIG_W + 2*GM;
+  const OH    = LIG_H + 2*GM + 52;
+  const LIGCX = GM + LIG_W/2;
+  const LIGCY = GM + LIG_H/2;
+  const PUSH  = 140;
+  const NODER = 25;
+  const textFill = darkMode ? "#e6edf3" : "#1a1a1a";
+  const badgeBg  = darkMode ? "#161b22"  : "#ffffff";
 
   // --- Group interactions by residue ---
   const resMap = new Map();
-  visible.forEach((ix,i) => {{
-    const key = `${{ix.residue_name}}${{ix.residue_number}}`;
-    if (!resMap.has(key)) resMap.set(key,{{ix, type:ix.type, atomPts:[], allIx:[]}});
+  visible.forEach((ix, i) => {{
+    const key = `${{ix.residue_name}}${{ix.residue_number}}${{ix.chain}}`;
+    if (!resMap.has(key)) resMap.set(key, {{ix, type:ix.type, atomPts:[], allIx:[]}});
     const e = resMap.get(key);
     e.allIx.push(ix);
     const raw = compound.ix_atom_pts?.[i];
@@ -704,144 +746,190 @@ function draw2DView(compound, useSite) {{
     }}
   }});
 
-  // --- Compute glyph positions ---
-  const residues = [...resMap.values()].map((e,i,arr) => {{
+  // --- Compute glyph positions (radial push from mean atom position) ---
+  const residues = [...resMap.values()].map((e, i, arr) => {{
     let ax, ay;
     if (e.atomPts.length) {{
       ax = e.atomPts.reduce((s,p)=>s+p[0],0)/e.atomPts.length;
       ay = e.atomPts.reduce((s,p)=>s+p[1],0)/e.atomPts.length;
     }} else {{
-      // Ellipse fallback
       const angle = (i/arr.length)*2*Math.PI - Math.PI/2;
-      ax = LIGCX + (LIG_W*.44)*Math.cos(angle);
-      ay = LIGCY + (LIG_H*.44)*Math.sin(angle);
+      ax = LIGCX + (LIG_W*.42)*Math.cos(angle);
+      ay = LIGCY + (LIG_H*.42)*Math.sin(angle);
     }}
     let dx=ax-LIGCX, dy=ay-LIGCY;
     const len=Math.sqrt(dx*dx+dy*dy)||1;
     dx/=len; dy/=len;
-    const PUSH = 82;
     let gx=ax+dx*PUSH, gy=ay+dy*PUSH;
-    // Clamp inside outer SVG
-    gx=Math.max(28,Math.min(OW-28,gx));
-    gy=Math.max(28,Math.min(OH-72,gy));
+    gx=Math.max(NODER+10, Math.min(OW-NODER-10, gx));
+    gy=Math.max(NODER+10, Math.min(OH-52-NODER-10, gy));
     return {{...e, ax, ay, gx, gy}};
   }});
 
-  const textFill = darkMode?"#e6edf3":"#24292f";
+  // --- Simple collision spread (4 passes) ---
+  for (let pass=0; pass<4; pass++) {{
+    for (let a=0; a<residues.length; a++) {{
+      for (let b=a+1; b<residues.length; b++) {{
+        const dx=residues[b].gx-residues[a].gx, dy=residues[b].gy-residues[a].gy;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        const minD = NODER*2+22;
+        if (d < minD && d > 0.01) {{
+          const push=(minD-d)/2, nx=dx/d, ny=dy/d;
+          residues[a].gx -= nx*push; residues[a].gy -= ny*push;
+          residues[b].gx += nx*push; residues[b].gy += ny*push;
+          [residues[a], residues[b]].forEach(r => {{
+            r.gx=Math.max(NODER+10, Math.min(OW-NODER-10, r.gx));
+            r.gy=Math.max(NODER+10, Math.min(OH-52-NODER-10, r.gy));
+          }});
+        }}
+      }}
+    }}
+  }}
 
   // --- Build SVG ---
   let s = `<svg id="diagram2d-svg" xmlns="http://www.w3.org/2000/svg"
-    width="100%" height="100%"
-    viewBox="0 0 ${{OW}} ${{OH}}"
+    width="100%" height="100%" viewBox="0 0 ${{OW}} ${{OH}}"
     preserveAspectRatio="xMidYMid meet">`;
 
-  // Defs: arrowhead markers for H-bond and salt bridge
+  // Arrowhead markers (larger, crisper)
   s += `<defs>`;
   ["hbond","salt_bridge"].forEach(type => {{
-    s += `<marker id="d2a-${{type}}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-      <path d="M0,0 L0,6 L6,3 Z" fill="${{COLORS[type]}}" opacity=".9"/></marker>`;
+    s += `<marker id="d2a-${{type}}" markerWidth="9" markerHeight="9"
+            refX="8" refY="4.5" orient="auto">
+          <path d="M0,0 L0,9 L9,4.5 Z" fill="${{COLORS[type]}}" opacity=".95"/></marker>`;
   }});
   s += `</defs>`;
 
-  // Background
-  s += `<rect width="${{OW}}" height="${{OH}}" fill="${{darkMode?"#0d1117":"#f6f8fa"}}"/>`;
-
-  // Ligand SVG embedded as image
-  if (hasSvg && ligSvg) {{
-    const enc = 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(ligSvg);
-    s += `<image href="${{enc}}" x="${{GM}}" y="${{GM}}" width="${{LIG_W}}" height="${{LIG_H}}"/>`;
+  // Ligand structure inlined via <g transform> — avoids nested-SVG white-box artefact
+  if (hasSvg) {{
+    s += `<g transform="translate(${{GM}},${{GM}})">${{svgContent}}</g>`;
   }} else {{
     s += `<rect x="${{GM}}" y="${{GM}}" width="${{LIG_W}}" height="${{LIG_H}}"
-      rx="8" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4 3"/>
-    <text x="${{LIGCX}}" y="${{LIGCY}}" text-anchor="middle" fill="#8b949e" font-size="13"
-      font-family="system-ui">Install rdkit for 2D structure</text>`;
+            rx="8" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4 3"/>
+          <text x="${{LIGCX}}" y="${{LIGCY}}" text-anchor="middle"
+            fill="#8b949e" font-size="13" font-family="Arial,sans-serif">
+            Install rdkit for 2D structure</text>`;
   }}
 
   // --- Connection lines (drawn behind glyphs) ---
   residues.forEach(res => {{
-    const col     = COLORS[res.type]||"#888";
-    const isHydro = res.type==="hydrophobic";
-    const isHbond = res.type==="hbond"||res.type==="salt_bridge";
-    const dash    = isHydro?"stroke-dasharray='6 3'"
-                  : isHbond?"stroke-dasharray='6 3'"
-                  : "stroke-dasharray='4 2'";
-    const marker  = isHbond?`marker-end="url(#d2a-${{res.type}})"`:"";
-
+    const col     = COLORS[res.type] || "#888";
+    const isHydro = res.type === "hydrophobic";
+    const isHbond = res.type === "hbond" || res.type === "salt_bridge";
     const srcPts  = res.atomPts.length ? res.atomPts : [[res.ax, res.ay]];
     const uniq    = [...new Map(srcPts.map(p=>[p.join(','),p])).values()];
 
     uniq.forEach(([px,py]) => {{
       const ddx=res.gx-px, ddy=res.gy-py;
       const dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-      const ex=res.gx-(ddx/dl)*24, ey=res.gy-(ddy/dl)*24;
-      s += `<line x1="${{px.toFixed(1)}}" y1="${{py.toFixed(1)}}"
-              x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
-              stroke="${{col}}" stroke-width="1.4" opacity=".85"
-              ${{dash}} ${{marker}}/>`;
-    }});
 
-    // Distance label on H-bonds (skip hydrophobic which reports 0.0)
-    if (isHbond && res.ix.distance > 0.1) {{
-      const mx=(res.ax+res.gx)/2, my=(res.ay+res.gy)/2;
-      s += `<rect x="${{mx-18}}" y="${{my-8}}" width="36" height="14" rx="3"
-              fill="${{darkMode?"#161b22":"#eaeef2"}}" opacity=".9"/>
-            <text x="${{mx}}" y="${{my+4}}" text-anchor="middle"
-              fill="${{col}}" font-size="8" font-family="system-ui">
-              ${{res.ix.distance.toFixed(1)}}&nbsp;&Aring;
-            </text>`;
-    }}
+      if (isHydro) {{
+        const ex=res.gx-(ddx/dl)*(NODER+2), ey=res.gy-(ddy/dl)*(NODER+2);
+        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
+                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+                stroke="${{col}}" stroke-width="1.4" opacity=".45" stroke-dasharray="5 3"/>`;
+      }} else if (isHbond) {{
+        const ex=res.gx-(ddx/dl)*NODER, ey=res.gy-(ddy/dl)*NODER;
+        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
+                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+                stroke="${{col}}" stroke-width="2.2" stroke-dasharray="6 3.5"
+                marker-end="url(#d2a-${{res.type}})"/>`;
+        if (res.ix.distance > 0.1) {{
+          const mx=(Number(px)+res.gx)/2, my=(Number(py)+res.gy)/2;
+          s += `<rect x="${{(mx-18).toFixed(1)}}" y="${{(my-9).toFixed(1)}}"
+                  width="36" height="18" rx="5"
+                  fill="${{badgeBg}}" stroke="${{col}}" stroke-width="1.3"/>
+                <text x="${{mx.toFixed(1)}}" y="${{my.toFixed(1)}}" text-anchor="middle"
+                  dominant-baseline="middle" fill="${{col}}"
+                  font-size="9.5" font-weight="700" font-family="Arial,sans-serif">
+                  ${{res.ix.distance.toFixed(1)}}&thinsp;&Aring;
+                </text>`;
+        }}
+      }} else {{
+        const ex=res.gx-(ddx/dl)*(NODER+2), ey=res.gy-(ddy/dl)*(NODER+2);
+        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
+                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+                stroke="${{col}}" stroke-width="1.8" stroke-dasharray="4 2.5" opacity=".8"/>`;
+      }}
+    }});
   }});
 
   // --- Residue glyphs ---
   residues.forEach(res => {{
-    const {{gx,gy,ix,type}} = res;
-    const col   = COLORS[type]||"#888";
-    const aac   = aaColor(ix.residue_name);
+    const {{gx, gy, ix, type, ax, ay}} = res;
+    const col  = COLORS[type] || "#888";
+    const aac  = aaColor(ix.residue_name);
+    const srcX = res.atomPts.length ? res.atomPts[0][0] : ax;
+    const srcY = res.atomPts.length ? res.atomPts[0][1] : ay;
 
-    if (type==="hydrophobic") {{
-      // Classic LIGPLOT spiky-sun halo
-      s += spikySvg(gx, gy, 17, 28, 12, col);
-    }} else if (type==="pi_stack"||type==="pi_cation") {{
-      // Dashed circle + pi symbol
-      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
-        fill="${{col}}20" stroke="${{col}}" stroke-width="1.4" stroke-dasharray="4 2"/>
-      <text x="${{gx}}" y="${{gy+1}}" text-anchor="middle" dominant-baseline="middle"
-        fill="${{col}}" font-size="13" font-style="italic"
-        font-family="'Times New Roman',serif">&pi;</text>`;
-    }} else if (type==="halogen") {{
-      // Solid circle + X mark
-      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
-        fill="${{aac}}20" stroke="${{aac}}" stroke-width="1.4"/>
-      <text x="${{gx}}" y="${{gy+1}}" text-anchor="middle" dominant-baseline="middle"
-        fill="${{col}}" font-size="11" font-family="system-ui">X</text>`;
+    if (type === "hydrophobic") {{
+      s += eyelashGlyph(gx, gy, srcX, srcY, NODER, 9, col);
+    }} else if (type === "pi_stack" || type === "pi_cation") {{
+      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
+              fill="${{col}}15" stroke="${{col}}" stroke-width="2.2" stroke-dasharray="5 2.5"/>
+            <text x="${{gx.toFixed(1)}}" y="${{(gy+1).toFixed(1)}}" text-anchor="middle"
+              dominant-baseline="middle" fill="${{col}}" font-size="17" font-weight="bold"
+              font-style="italic" font-family="'Times New Roman',Georgia,serif">&pi;</text>`;
+    }} else if (type === "halogen") {{
+      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
+              fill="${{aac}}15" stroke="${{col}}" stroke-width="2.2"/>
+            <text x="${{gx.toFixed(1)}}" y="${{(gy+1).toFixed(1)}}" text-anchor="middle"
+              dominant-baseline="middle" fill="${{col}}" font-size="13" font-weight="bold"
+              font-family="Arial,sans-serif">X</text>`;
     }} else {{
-      // H-bond / salt-bridge: AA-type coloured circle
-      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
-        fill="${{aac}}20" stroke="${{aac}}" stroke-width="1.5"/>`;
-      if (type==="salt_bridge") {{
+      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
+              fill="${{aac}}18" stroke="${{col}}" stroke-width="2.4"/>`;
+      if (type === "salt_bridge") {{
         const sign = ["LYS","ARG","HIS"].includes(ix.residue_name) ? "+" : "−";
-        s += `<text x="${{gx+15}}" y="${{gy-13}}" fill="${{col}}" font-size="10"
-          font-family="system-ui" font-weight="bold">${{sign}}</text>`;
+        s += `<text x="${{(gx+NODER-4).toFixed(1)}}" y="${{(gy-NODER+6).toFixed(1)}}"
+                fill="${{col}}" font-size="14" font-weight="bold"
+                font-family="Arial,sans-serif">${{sign}}</text>`;
       }}
     }}
 
-    // Residue name + number on every glyph
-    s += `<text x="${{gx}}" y="${{gy-4}}" text-anchor="middle"
-        fill="${{textFill}}" font-size="8.5" font-weight="bold"
-        font-family="system-ui">${{ix.residue_name}}</text>
-      <text x="${{gx}}" y="${{gy+7}}" text-anchor="middle"
-        fill="#8b949e" font-size="7" font-family="system-ui">${{ix.residue_number}}</text>`;
+    if (type === "hydrophobic") {{
+      // Label sits outside the arc, away from the ligand
+      const ba   = Math.atan2(gy-srcY, gx-srcX);
+      const lx   = (gx + (NODER+14) * Math.cos(ba)).toFixed(1);
+      const ly   = (gy + (NODER+14) * Math.sin(ba)).toFixed(1);
+      const ly2  = (gy + (NODER+25) * Math.sin(ba)).toFixed(1);
+      s += `<text x="${{lx}}" y="${{ly}}" text-anchor="middle"
+              fill="${{textFill}}" font-size="9.5" font-weight="700"
+              font-family="Arial,Helvetica,sans-serif">
+              ${{ix.residue_name}}${{ix.residue_number}}
+            </text>
+            <text x="${{lx}}" y="${{ly2}}" text-anchor="middle"
+              fill="${{col}}" font-size="8.5" font-family="Arial,Helvetica,sans-serif">
+              (${{ix.chain}})
+            </text>`;
+    }} else {{
+      // AA name + number inside the circle, chain just below rim
+      s += `<text x="${{gx.toFixed(1)}}" y="${{(gy-4).toFixed(1)}}" text-anchor="middle"
+              dominant-baseline="middle" fill="${{textFill}}"
+              font-size="9" font-weight="700" font-family="Arial,Helvetica,sans-serif">
+              ${{ix.residue_name}}
+            </text>
+            <text x="${{gx.toFixed(1)}}" y="${{(gy+8).toFixed(1)}}" text-anchor="middle"
+              dominant-baseline="middle" fill="${{col}}"
+              font-size="8.5" font-family="Arial,Helvetica,sans-serif">
+              ${{ix.residue_number}}
+            </text>
+            <text x="${{gx.toFixed(1)}}" y="${{(gy+NODER+12).toFixed(1)}}" text-anchor="middle"
+              fill="#666" font-size="8" font-family="Arial,Helvetica,sans-serif">
+              (${{ix.chain}})
+            </text>`;
+    }}
   }});
 
-  // --- Legend strip ---
-  const LY  = LIG_H + 2*GM + 14;
-  const LX0 = 10;
-  const COL_W = Math.floor((OW-20) / Object.keys(COLORS).length);
-  Object.entries(COLORS).forEach(([type,color],i) => {{
+  // --- Legend ---
+  const LY  = OH - 38;
+  const LX0 = 16;
+  const COL_W = Math.floor((OW-32) / Object.keys(COLORS).length);
+  Object.entries(COLORS).forEach(([type,color], i) => {{
     const lx = LX0 + i*COL_W;
-    s += `<rect x="${{lx}}" y="${{LY}}" width="9" height="9" rx="2" fill="${{color}}"/>
-      <text x="${{lx+13}}" y="${{LY+8}}" fill="#8b949e" font-size="8"
-        font-family="system-ui">${{type.replace(/_/g,' ')}}</text>`;
+    s += `<rect x="${{lx}}" y="${{LY}}" width="10" height="10" rx="2" fill="${{color}}"/>
+          <text x="${{lx+14}}" y="${{LY+9}}" fill="#8b949e" font-size="8.5"
+            font-family="Arial,Helvetica,sans-serif">${{type.replace(/_/g,' ')}}</text>`;
   }});
 
   s += `</svg>`;
