@@ -8,6 +8,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+import requests as _req
+from kagglesdk.kernels.types.kernels_api_service import (
+    ApiListKernelSessionOutputRequest,
+)
 from rich.console import Console
 
 from ezscreen.backends.kaggle.dataset import upload_run_dataset
@@ -183,9 +187,6 @@ def _fetch_output_urls(kernel_ref: str) -> list:
         owner_slug = kaggle.api.config_values.get(kaggle.api.CONFIG_NAME_USER, "")
         kernel_slug = kernel_ref
     with kaggle.api.build_kaggle_client() as kc:
-        from kagglesdk.kernels.types.kernels_api_service import (
-            ApiListKernelSessionOutputRequest,
-        )
         req = ApiListKernelSessionOutputRequest()
         req.user_name   = owner_slug
         req.kernel_slug = kernel_slug
@@ -201,10 +202,6 @@ def _download_output(
     filtered_csv: Path | None = None,
     retries: int = 5,
 ) -> Path:
-    from concurrent.futures import ThreadPoolExecutor
-
-    import requests as _req
-
     out = work_dir / "output"
     out.mkdir(parents=True, exist_ok=True)
 

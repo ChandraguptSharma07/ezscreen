@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -166,8 +167,6 @@ def shard_raw(
     n_shards: int | None = None,
 ) -> dict[str, Any]:
     """Split input into raw SMILES shards without 3D prep — prep runs on Kaggle."""
-    import math
-
     from rdkit.Chem import MolToSmiles
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,8 +220,6 @@ def prep_ligands(
     shard_size: int = _SHARD_SIZE,
     n_shards: int | None = None,
 ) -> dict[str, Any]:
-    import math
-
     from rdkit.Chem import SDWriter
 
     output_dir.mkdir(parents=True, exist_ok=True)
