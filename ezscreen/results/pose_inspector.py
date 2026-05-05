@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re as _re
 from pathlib import Path
 
 _INTERACTION_COLORS = {
@@ -14,12 +15,181 @@ _INTERACTION_COLORS = {
 
 _3DMOL_CDN = "https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"
 
+# RDKit float tuples for DrawMolecule highlight colours
+_ITYPE_RDKIT_COLOR = {
+    "hbond":       (0.231, 0.510, 0.965),
+    "hydrophobic": (0.976, 0.451, 0.086),
+    "pi_stack":    (0.133, 0.773, 0.333),
+    "pi_cation":   (0.659, 0.333, 0.965),
+    "salt_bridge": (0.937, 0.318, 0.286),
+    "halogen":     (0.078, 0.718, 0.647),
+}
+
+_LIG_SVG_W  = 560   # width of RDKit ligand SVG
+_LIG_SVG_H  = 380   # height of RDKit ligand SVG
+_GLYPH_MAR  = 150   # px margin around ligand for residue glyphs
+
+
+# ── Python-side 2D enrichment ─────────────────────────────────────────────
+
+def _enrich_2d(compounds: list[dict]) -> list[dict]:
+    """Add RDKit 2D SVG and atom draw-coordinates to each compound dict."""
+    try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
+        from rdkit.Chem.Draw import rdMolDraw2D
+        import base64
+    except ImportError:
+        return compounds
+
+    for c in compounds:
+        if not c.get("sdf_b64") or c.get("plip_failed"):
+            continue
+        try:
+            sdf_text = base64.b64decode(c["sdf_b64"]).decode(errors="replace")
+
+            # --- 3-D mol: kept for coordinate matching only ---
+            mol_3d = Chem.MolFromMolBlock(sdf_text, removeHs=True)
+            if mol_3d is None or mol_3d.GetNumAtoms() == 0:
+                continue
+            conf_3d = mol_3d.GetConformer()
+            coords_3d = [
+                (conf_3d.GetAtomPosition(i).x,
+                 conf_3d.GetAtomPosition(i).y,
+                 conf_3d.GetAtomPosition(i).z)
+                for i in range(mol_3d.GetNumAtoms())
+            ]
+
+            def nearest_atom(lc: list) -> int:
+                best_i, best_d = 0, float("inf")
+                for i, c3 in enumerate(coords_3d):
+                    d = (lc[0]-c3[0])**2 + (lc[1]-c3[1])**2 + (lc[2]-c3[2])**2
+                    if d < best_d:
+                        best_d, best_i = d, i
+                return best_i
+
+            # --- 2-D mol: fresh copy with computed layout ---
+            mol_2d = Chem.MolFromMolBlock(sdf_text, removeHs=True)
+            AllChem.Compute2DCoords(mol_2d)
+            rdMolDraw2D.PrepareMolForDrawing(mol_2d)
+
+            # Map each interaction to the nearest atom in 3-D space
+            interactions = c.get("interactions", [])
+            per_ix_atom: list[int | None] = []
+            interacting: dict[int, str] = {}   # atom_idx -> first interaction type
+
+            for ix in interactions:
+                lc = ix.get("ligand_coords")
+                if lc:
+                    idx = nearest_atom(lc)
+                    per_ix_atom.append(idx)
+                    if idx not in interacting:
+                        interacting[idx] = ix["type"]
+                else:
+                    per_ix_atom.append(None)
+
+            h_atoms  = list(interacting.keys())
+            h_colors = {
+                idx: _ITYPE_RDKIT_COLOR.get(t, (0.5, 0.5, 0.5))
+                for idx, t in interacting.items()
+            }
+
+            # --- Draw the full-compound SVG ---
+            drawer = rdMolDraw2D.MolDraw2DSVG(_LIG_SVG_W, _LIG_SVG_H)
+            drawer.drawOptions().addStereoAnnotation = True
+            drawer.drawOptions().padding = 0.12
+            drawer.DrawMolecule(
+                mol_2d,
+                highlightAtoms=h_atoms,
+                highlightAtomColors=h_colors,
+                highlightBonds=[],
+            )
+            drawer.FinishDrawing()
+            svg_full = drawer.GetDrawingText()
+
+            # Transparent background (RDKit emits various white-background forms)
+            svg_full = _re.sub(
+                r"(style=['\"])background[^;'\"]*;?",
+                r"\1background:transparent;",
+                svg_full,
+            )
+
+            # --- Collect atom 2-D draw coordinates ---
+            atom_2d: dict[int, list[float]] = {}
+            for idx in h_atoms:
+                try:
+                    pt = drawer.GetDrawCoords(idx)
+                    atom_2d[idx] = [round(pt.x, 2), round(pt.y, 2)]
+                except Exception:
+                    pass
+
+            # Per-interaction 2D point (parallel to `interactions`)
+            ix_atom_pts: list[list[float] | None] = []
+            for idx in per_ix_atom:
+                if idx is not None and idx in atom_2d:
+                    ix_atom_pts.append(atom_2d[idx])
+                else:
+                    ix_atom_pts.append(None)
+
+            # --- Site SVG: crop viewBox to interacting region ---
+            svg_site     = svg_full
+            site_viewbox: list[float] | None = None
+            if atom_2d:
+                expanded: list[list[float]] = list(atom_2d.values())
+                for base_idx in list(interacting.keys()):
+                    for nb in mol_2d.GetAtomWithIdx(base_idx).GetNeighbors():
+                        try:
+                            pt = drawer.GetDrawCoords(nb.GetIdx())
+                            expanded.append([pt.x, pt.y])
+                        except Exception:
+                            pass
+                for ring in mol_2d.GetRingInfo().AtomRings():
+                    if any(ri in interacting for ri in ring):
+                        for ri in ring:
+                            try:
+                                pt = drawer.GetDrawCoords(ri)
+                                expanded.append([pt.x, pt.y])
+                            except Exception:
+                                pass
+
+                xs  = [p[0] for p in expanded]
+                ys  = [p[1] for p in expanded]
+                pad = 55.0
+                vx  = max(0.0, min(xs) - pad)
+                vy  = max(0.0, min(ys) - pad)
+                vw  = min(float(_LIG_SVG_W), max(xs) - min(xs) + 2 * pad)
+                vh  = min(float(_LIG_SVG_H), max(ys) - min(ys) + 2 * pad)
+
+                svg_site = _re.sub(
+                    r'viewBox="[^"]*"',
+                    f'viewBox="{vx:.1f} {vy:.1f} {vw:.1f} {vh:.1f}"',
+                    svg_full,
+                )
+                site_viewbox = [round(vx, 1), round(vy, 1),
+                                round(vw, 1), round(vh, 1)]
+
+            c["lig_svg_full"] = svg_full
+            c["lig_svg_site"] = svg_site
+            c["ix_atom_pts"]  = ix_atom_pts
+            c["site_viewbox"] = site_viewbox
+            c["svg_w"]        = _LIG_SVG_W
+            c["svg_h"]        = _LIG_SVG_H
+
+        except Exception:
+            pass
+
+    return compounds
+
+
+# ── HTML builder ──────────────────────────────────────────────────────────
 
 def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
-    # backslashes first, then backticks — order matters
     receptor_escaped = receptor_pdb_text.replace("\\", "\\\\").replace("`", "\\`")
     compounds_json   = json.dumps(compounds)
     colors_json      = json.dumps(_INTERACTION_COLORS)
+    lig_svg_w        = _LIG_SVG_W
+    lig_svg_h        = _LIG_SVG_H
+    glyph_mar        = _GLYPH_MAR
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -32,227 +202,130 @@ def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
 
 body {{
   font-family: system-ui, sans-serif;
-  background: #0d1117;
-  color: #c9d1d9;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  transition: background 0.2s, color 0.2s;
+  background: #0d1117; color: #c9d1d9;
+  display: flex; flex-direction: column;
+  height: 100vh; overflow: hidden;
+  transition: background .2s, color .2s;
 }}
-
-body.light {{
-  background: #f6f8fa;
-  color: #24292f;
-}}
+body.light {{ background: #f6f8fa; color: #24292f; }}
 
 #banner {{
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
-  padding: 4px 16px;
-  font-size: 11px;
-  color: #8b949e;
-  text-align: center;
-  flex-shrink: 0;
+  background: #161b22; border-bottom: 1px solid #30363d;
+  padding: 4px 16px; font-size: 11px; color: #8b949e;
+  text-align: center; flex-shrink: 0;
 }}
-
 body.light #banner {{ background: #eaeef2; border-color: #d0d7de; }}
 
 #toolbar {{
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
-  padding: 6px 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
+  background: #161b22; border-bottom: 1px solid #30363d;
+  padding: 6px 12px; display: flex; align-items: center;
+  gap: 6px; flex-wrap: wrap; flex-shrink: 0;
 }}
-
 body.light #toolbar {{ background: #eaeef2; border-color: #d0d7de; }}
 
 .tb-sep {{ width: 1px; height: 20px; background: #30363d; margin: 0 3px; flex-shrink: 0; }}
 body.light .tb-sep {{ background: #d0d7de; }}
-
 .tb-label {{ font-size: 11px; color: #8b949e; white-space: nowrap; }}
 
 .tb-btn {{
-  background: #21262d;
-  color: #c9d1d9;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.12s;
+  background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px;
+  padding: 4px 10px; font-size: 12px;
+  cursor: pointer; white-space: nowrap; transition: background .12s;
 }}
-
 .tb-btn:hover {{ background: #30363d; }}
-.tb-btn:disabled {{ opacity: 0.45; cursor: not-allowed; }}
-
-.tb-btn.active {{
-  background: #1f6feb;
-  border-color: #388bfd;
-  color: #fff;
-}}
+.tb-btn:disabled {{ opacity: .4; cursor: not-allowed; }}
+.tb-btn.active {{ background: #1f6feb; border-color: #388bfd; color: #fff; }}
 
 body.light .tb-btn {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
 body.light .tb-btn:hover {{ background: #f3f4f6; }}
 body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: #fff; }}
 
+/* view-toggle pair */
+.view-pair {{ display: flex; gap: 0; }}
+.view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
+.view-pair .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; }}
+
 #main {{ display: flex; flex: 1; overflow: hidden; }}
 
+/* 3D viewer */
+#viewer-wrap {{ flex: 1; display: flex; position: relative; }}
 #viewer {{ flex: 1; position: relative; }}
 
-#sidebar {{
-  width: 340px;
-  background: #161b22;
-  border-left: 1px solid #30363d;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+/* 2D diagram area */
+#diagram2d-wrap {{
+  flex: 1; display: none; align-items: center;
+  justify-content: center; overflow: hidden;
+  padding: 12px; position: relative;
 }}
 
+#diagram2d-wrap svg {{ max-width: 100%; max-height: 100%; }}
+
+.d2-placeholder {{
+  color: #8b949e; font-size: 14px; text-align: center; padding: 40px;
+}}
+
+/* Sidebar */
+#sidebar {{
+  width: 300px; background: #161b22;
+  border-left: 1px solid #30363d;
+  display: flex; flex-direction: column; overflow: hidden;
+}}
 body.light #sidebar {{ background: #f6f8fa; border-color: #d0d7de; }}
 
-#controls {{
+.sb-section {{
   padding: 10px 12px;
   border-bottom: 1px solid #30363d;
   flex-shrink: 0;
 }}
+body.light .sb-section {{ border-color: #d0d7de; }}
 
-body.light #controls {{ border-color: #d0d7de; }}
-
-#controls select {{
-  width: 100%;
-  background: #21262d;
-  color: #c9d1d9;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  padding: 6px;
-  font-size: 12px;
+.sb-section select {{
+  width: 100%; background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px;
+  padding: 6px; font-size: 12px;
+}}
+body.light .sb-section select {{
+  background: #fff; color: #24292f; border-color: #d0d7de;
 }}
 
-body.light #controls select {{
-  background: #fff;
-  color: #24292f;
-  border-color: #d0d7de;
+/* Site / full sub-toggle */
+#site-toggle {{
+  display: none; gap: 0; margin-top: 8px;
 }}
-
-#toggles {{
-  padding: 8px 12px;
-  border-bottom: 1px solid #30363d;
-  flex-shrink: 0;
-}}
-
-body.light #toggles {{ border-color: #d0d7de; }}
+#site-toggle .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; flex: 1; }}
+#site-toggle .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; flex: 1; }}
 
 .toggle-row {{
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 3px 0;
-  font-size: 12px;
-  cursor: pointer;
+  display: flex; align-items: center; gap: 7px;
+  margin: 3px 0; font-size: 12px; cursor: pointer;
 }}
-
 .toggle-row input {{ width: 13px; height: 13px; cursor: pointer; }}
 .color-dot {{ width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }}
 
-/* 2D diagram panel */
-#diagram-panel {{
-  border-bottom: 1px solid #30363d;
-  padding: 8px 12px 10px;
-  flex-shrink: 0;
-}}
-
-body.light #diagram-panel {{ border-color: #d0d7de; }}
-
-#diagram-panel .panel-header {{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}}
-
-.svg-export-btn {{
-  font-size: 11px;
-  color: #8b949e;
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-decoration: underline;
-  padding: 0;
-}}
-
-.svg-export-btn:hover {{ color: #c9d1d9; }}
-body.light .svg-export-btn:hover {{ color: #24292f; }}
-
-#diagram-container {{
-  width: 100%;
-  display: flex;
-  justify-content: center;
-}}
-
-.diagram-placeholder {{
-  font-size: 12px;
-  color: #8b949e;
-  text-align: center;
-  padding: 10px 0;
-  width: 100%;
-}}
-
-#ilist {{
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-  min-height: 0;
-}}
-
+#ilist {{ flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }}
 .i-row {{
-  background: #21262d;
-  border-radius: 6px;
-  margin: 3px 0;
-  padding: 7px 8px;
-  font-size: 12px;
+  background: #21262d; border-radius: 6px;
+  margin: 3px 0; padding: 7px 8px; font-size: 12px;
 }}
-
 body.light .i-row {{ background: #fff; border: 1px solid #d0d7de; }}
-
 .i-type {{ font-weight: 600; text-transform: capitalize; }}
 .i-detail {{ color: #8b949e; margin-top: 2px; font-size: 11px; }}
-
-#no-compound {{
-  padding: 16px;
-  color: #8b949e;
-  font-size: 13px;
-  text-align: center;
-}}
+#no-compound {{ padding: 16px; color: #8b949e; font-size: 13px; text-align: center; }}
 
 h3 {{
-  font-size: 11px;
-  font-weight: 600;
-  color: #8b949e;
-  letter-spacing: .05em;
-  text-transform: uppercase;
+  font-size: 11px; font-weight: 600; color: #8b949e;
+  letter-spacing: .05em; text-transform: uppercase;
 }}
 
-/* Record progress overlay */
+/* Record overlay */
 #record-overlay {{
-  display: none;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(0,0,0,0.78);
-  color: #fff;
-  padding: 12px 24px;
-  border-radius: 8px;
-  font-size: 13px;
-  z-index: 200;
-  pointer-events: none;
-  text-align: center;
+  display: none; position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: rgba(0,0,0,.78); color: #fff;
+  padding: 12px 24px; border-radius: 8px;
+  font-size: 13px; z-index: 200;
+  pointer-events: none; text-align: center;
 }}
 </style>
 </head>
@@ -261,225 +334,228 @@ h3 {{
 <div id="banner">
   Predicted pose — not experimentally validated &nbsp;&middot;&nbsp;
   Pipeline: UniDock &rarr; PLIP &rarr; SwiftScreen &nbsp;&middot;&nbsp;
-  Cite: UniDock (Yu et al. 2023) &nbsp;&middot;&nbsp; PLIP (Salentin et al. 2015, NAR)
+  Cite: UniDock (Yu&nbsp;et&nbsp;al.&nbsp;2023) &nbsp;&middot;&nbsp; PLIP (Salentin&nbsp;et&nbsp;al.&nbsp;2015,&nbsp;NAR)
 </div>
 
 <div id="toolbar">
   <span class="tb-label">Display</span>
-  <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light/dark background">Dark BG</button>
-  <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Show residue name labels on contact residues in 3D">Res Labels</button>
-  <button class="tb-btn" id="btn-dist"   onclick="toggleDistLabels()"  title="Show distance labels on interaction lines">Distances</button>
-  <button class="tb-btn" id="btn-hydro"  onclick="toggleHydrophob()"   title="Colour binding-pocket surface by Kyte-Doolittle hydrophobicity">Hydrophobicity</button>
+  <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light / dark background">Dark BG</button>
+  <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Residue name labels in 3D">Res Labels</button>
+  <button class="tb-btn" id="btn-dist"   onclick="toggleDistLabels()"  title="Distance labels on interaction lines">Distances</button>
+  <button class="tb-btn" id="btn-hydro"  onclick="toggleHydrophob()"   title="Kyte-Doolittle pocket surface">Hydrophobicity</button>
+
+  <div class="tb-sep"></div>
+
+  <span class="tb-label">View</span>
+  <div class="view-pair">
+    <button class="tb-btn active" id="btn-3d" onclick="switchMode('3d')">3D</button>
+    <button class="tb-btn"        id="btn-2d" onclick="switchMode('2d')">2D</button>
+  </div>
 
   <div class="tb-sep"></div>
 
   <span class="tb-label">Export</span>
-  <button class="tb-btn" onclick="exportPNG()"   title="Save current 3D view as PNG">Export PNG</button>
-  <button class="tb-btn" id="btn-video" onclick="exportVideo()" title="Record 360° rotation as WebM video (open in any video player)">Export 360&deg; Video</button>
+  <button class="tb-btn" id="btn-exp-png" onclick="exportPNG()"   title="Save current view as PNG">Export PNG</button>
+  <button class="tb-btn" id="btn-exp-vid" onclick="exportVideo()" title="360° rotation WebM (3D only)">Export 360&deg; Video</button>
+  <button class="tb-btn" id="btn-exp-svg" onclick="exportSVG()"   title="Download 2D diagram as SVG (2D mode only)" disabled>Export SVG</button>
 </div>
 
 <div id="main">
-  <div id="viewer">
-    <div id="record-overlay">Recording&hellip; <span id="record-pct">0%</span><br><small>Please wait</small></div>
+
+  <!-- ── 3D viewer ─────────────────────────────── -->
+  <div id="viewer-wrap">
+    <div id="viewer">
+      <div id="record-overlay">
+        Recording&hellip; <span id="record-pct">0%</span><br><small>Please wait</small>
+      </div>
+    </div>
   </div>
 
+  <!-- ── 2D diagram area ──────────────────────── -->
+  <div id="diagram2d-wrap">
+    <p class="d2-placeholder">Select a compound to view the 2D interaction map</p>
+  </div>
+
+  <!-- ── Sidebar ───────────────────────────────── -->
   <div id="sidebar">
-    <div id="controls">
+
+    <div class="sb-section">
       <h3 style="margin-bottom:6px">Compound</h3>
       <select id="compound-select" onchange="selectCompound(this.value)">
         <option value="">— select compound —</option>
       </select>
+      <!-- site / full sub-toggle (visible only in 2D mode) -->
+      <div id="site-toggle">
+        <button class="tb-btn active" id="btn-site" onclick="setSiteMode(true)">Site View</button>
+        <button class="tb-btn"        id="btn-full" onclick="setSiteMode(false)">Full Compound</button>
+      </div>
     </div>
 
-    <div id="toggles">
+    <div class="sb-section" id="toggles-section">
       <h3>Interaction Types</h3>
-      <!-- populated by JS -->
-    </div>
-
-    <div id="diagram-panel">
-      <div class="panel-header">
-        <h3>2D Interaction Map</h3>
-        <button class="svg-export-btn" onclick="exportSVG()" title="Download as SVG for Illustrator / Inkscape">&darr; SVG</button>
-      </div>
-      <div id="diagram-container">
-        <p class="diagram-placeholder">Select a compound above</p>
-      </div>
     </div>
 
     <div id="ilist">
       <div id="no-compound">Select a compound above</div>
     </div>
-  </div>
-</div>
+
+  </div><!-- /sidebar -->
+
+</div><!-- /main -->
 
 <script>
 const COMPOUNDS = {compounds_json};
 const COLORS    = {colors_json};
 const RECEPTOR  = `{receptor_escaped}`;
+const LIG_W     = {lig_svg_w};
+const LIG_H     = {lig_svg_h};
+const GM        = {glyph_mar};   // glyph margin around ligand SVG
 
-// Kyte-Doolittle scale (standard hydrophobicity)
+// ── Kyte-Doolittle ───────────────────────────────────────────────────────
 const KD = {{
-  ILE:4.5, VAL:4.2, LEU:3.8, PHE:2.8, CYS:2.5, MET:1.9, ALA:1.8,
-  GLY:-0.4, THR:-0.7, SER:-0.8, TRP:-0.9, TYR:-1.3, PRO:-1.6,
-  HIS:-3.2, GLU:-3.5, GLN:-3.5, ASP:-3.5, ASN:-3.5, LYS:-3.9, ARG:-4.5,
+  ILE:4.5,VAL:4.2,LEU:3.8,PHE:2.8,CYS:2.5,MET:1.9,ALA:1.8,
+  GLY:-0.4,THR:-0.7,SER:-0.8,TRP:-0.9,TYR:-1.3,PRO:-1.6,
+  HIS:-3.2,GLU:-3.5,GLN:-3.5,ASP:-3.5,ASN:-3.5,LYS:-3.9,ARG:-4.5,
 }};
-
 function kdHex(resn) {{
-  const score = KD[resn] ?? 0;
-  const t = Math.max(0, Math.min(1, (score + 4.5) / 9.0));
-  let r, g, b;
-  if (t < 0.5) {{
-    const s = t * 2;
-    r = Math.round(68  + (255 - 68)  * s);
-    g = Math.round(136 + (255 - 136) * s);
-    b = Math.round(204 + (255 - 204) * s);
-  }} else {{
-    const s = (t - 0.5) * 2;
-    r = 255;
-    g = Math.round(255 + (68  - 255) * s);
-    b = Math.round(255 + (68  - 255) * s);
-  }}
-  return '#' + [r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const t = Math.max(0, Math.min(1, ((KD[resn] ?? 0) + 4.5) / 9));
+  let r,g,b;
+  if (t < .5) {{ const s=t*2; r=Math.round(68+(255-68)*s); g=Math.round(136+(255-136)*s); b=Math.round(204+(255-204)*s); }}
+  else {{ const s=(t-.5)*2; r=255; g=Math.round(255+(68-255)*s); b=Math.round(255+(68-255)*s); }}
+  return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
 }}
 
-// ── State ──────────────────────────────────────────────────────────────────
+// ── Amino-acid character colours ────────────────────────────────────────
+const AA_CLS = {{
+  ALA:'hp',VAL:'hp',LEU:'hp',ILE:'hp',PRO:'hp',PHE:'hp',MET:'hp',TRP:'hp',
+  SER:'pol',THR:'pol',CYS:'pol',TYR:'pol',ASN:'pol',GLN:'pol',GLY:'pol',
+  LYS:'pos',ARG:'pos',HIS:'pos',
+  ASP:'neg',GLU:'neg',
+}};
+const AA_COL = {{ hp:'#f97316', pol:'#22c55e', pos:'#3b82f6', neg:'#ef4444' }};
+function aaColor(resn) {{ return AA_COL[AA_CLS[resn]] || '#8b949e'; }}
+
+// ── State ────────────────────────────────────────────────────────────────
 let darkMode       = true;
+let currentMode    = '3d';
+let siteMode       = true;
 let showResLabels  = false;
 let showDistLabels = false;
 let showHydrophob  = false;
 let ligandModel    = null;
-let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
+let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
 let currentShapes  = [];
 let distLabels     = [];
 let resLabels      = [];
 let hydrophobSurf  = null;
 let currentData    = null;
 
-// ── Viewer init ────────────────────────────────────────────────────────────
-const viewer = $3Dmol.createViewer("viewer", {{
-  backgroundColor: "#0d1117",
-  antialias: true,
-}});
-
-viewer.addModel(RECEPTOR, "pdb");
-viewer.setStyle({{ model: 0 }}, {{ cartoon: {{ color: "spectrum", opacity: 0.9 }} }});
-viewer.zoomTo({{ model: 0 }});
+// ── 3D Viewer init ───────────────────────────────────────────────────────
+const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
+viewer.addModel(RECEPTOR,"pdb");
+viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
+viewer.zoomTo({{model:0}});
 viewer.render();
 
-// Hover tooltip — receptor atoms show residue info; ligand atoms show atom type
-viewer.setHoverable({{}}, true,
+// Hover tooltips
+viewer.setHoverable({{}},true,
   function(atom) {{
     if (atom._label) return;
     const isLig = atom.model !== 0;
-    const text  = isLig
-      ? `${{atom.resn}} · ${{atom.atom}}`
-      : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}} · ${{atom.atom}}`;
-    atom._label = viewer.addLabel(text, {{
-      position:        atom,
-      backgroundColor: "rgba(13,17,23,0.88)",
-      fontColor:       "#ffffff",
-      fontSize:        11,
-      borderRadius:    4,
-      padding:         3,
-      inFront:         true,
-    }});
+    atom._label = viewer.addLabel(
+      isLig ? `${{atom.resn}} · ${{atom.atom}}` : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}} · ${{atom.atom}}`,
+      {{ position:atom, backgroundColor:"rgba(13,17,23,.88)", fontColor:"#fff",
+         fontSize:11, borderRadius:4, padding:3, inFront:true }}
+    );
     viewer.render();
   }},
   function(atom) {{
-    if (atom._label) {{
-      viewer.removeLabel(atom._label);
-      delete atom._label;
-      viewer.render();
-    }}
+    if (atom._label) {{ viewer.removeLabel(atom._label); delete atom._label; viewer.render(); }}
   }}
 );
 
-// ── Compound dropdown ──────────────────────────────────────────────────────
+// ── Compound dropdown ────────────────────────────────────────────────────
 const sel = document.getElementById("compound-select");
 COMPOUNDS.forEach(c => {{
-  const opt       = document.createElement("option");
-  opt.value       = c.lig_id;
-  opt.textContent = `#${{c.rank}}  ${{c.name || c.lig_id}}  (${{c.score}} kcal/mol)`;
-  sel.appendChild(opt);
+  const o = document.createElement("option");
+  o.value = c.lig_id;
+  o.textContent = `#${{c.rank}}  ${{c.name||c.lig_id}}  (${{c.score}} kcal/mol)`;
+  sel.appendChild(o);
 }});
 
-// ── Interaction type toggles ───────────────────────────────────────────────
-const togglesDiv = document.getElementById("toggles");
-Object.entries(COLORS).forEach(([type, color]) => {{
+// ── Interaction toggles ──────────────────────────────────────────────────
+const togglesDiv = document.getElementById("toggles-section");
+Object.entries(COLORS).forEach(([type,color]) => {{
   const row = document.createElement("label");
   row.className = "toggle-row";
-  row.innerHTML = `
-    <input type="checkbox" checked onchange="toggleType('${{type}}', this.checked)">
+  row.innerHTML = `<input type="checkbox" checked onchange="toggleType('${{type}}',this.checked)">
     <span class="color-dot" style="background:${{color}}"></span>
-    <span>${{type.replace(/_/g, " ")}}</span>`;
+    <span>${{type.replace(/_/g," ")}}</span>`;
   togglesDiv.appendChild(row);
 }});
 
-// ── Toolbar handlers ───────────────────────────────────────────────────────
-function toggleBackground() {{
-  darkMode = !darkMode;
-  viewer.setBackgroundColor(darkMode ? "#0d1117" : "#f6f8fa");
-  viewer.render();
-  document.body.classList.toggle("light", !darkMode);
-  const btn = document.getElementById("btn-bg");
-  btn.textContent = darkMode ? "Dark BG" : "Light BG";
-  btn.classList.toggle("active", !darkMode);
-  if (currentData) draw2DDiagram(currentData);
+// ── Mode switching ───────────────────────────────────────────────────────
+function switchMode(mode) {{
+  currentMode = mode;
+  const is3d  = mode === '3d';
+
+  document.getElementById("viewer-wrap").style.display    = is3d ? 'flex' : 'none';
+  document.getElementById("diagram2d-wrap").style.display = is3d ? 'none' : 'flex';
+  document.getElementById("site-toggle").style.display    = is3d ? 'none' : 'flex';
+
+  document.getElementById("btn-3d").classList.toggle("active", is3d);
+  document.getElementById("btn-2d").classList.toggle("active", !is3d);
+
+  // 3D-only display buttons
+  ["btn-bg","btn-labels","btn-dist","btn-hydro"].forEach(id => {{
+    const b = document.getElementById(id);
+    if (b) b.disabled = !is3d;
+  }});
+
+  document.getElementById("btn-exp-vid").disabled = !is3d;
+  document.getElementById("btn-exp-svg").disabled =  is3d;
+
+  if (!is3d && currentData) draw2DView(currentData, siteMode);
+  if ( is3d) viewer.render();
 }}
 
-function toggleResLabels() {{
-  showResLabels = !showResLabels;
-  document.getElementById("btn-labels").classList.toggle("active", showResLabels);
-  refreshResLabels();
+function setSiteMode(site) {{
+  siteMode = site;
+  document.getElementById("btn-site").classList.toggle("active",  site);
+  document.getElementById("btn-full").classList.toggle("active", !site);
+  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
-function toggleDistLabels() {{
-  showDistLabels = !showDistLabels;
-  document.getElementById("btn-dist").classList.toggle("active", showDistLabels);
-  refreshInteractions();
-}}
-
-function toggleHydrophob() {{
-  showHydrophob = !showHydrophob;
-  document.getElementById("btn-hydro").classList.toggle("active", showHydrophob);
-  refreshHydrophobSurface();
-}}
-
-// ── Core clear ────────────────────────────────────────────────────────────
+// ── 3D: clear ligand ────────────────────────────────────────────────────
 function clearLigand() {{
   if (ligandModel !== null) {{ viewer.removeModel(ligandModel); ligandModel = null; }}
-  currentShapes.forEach(s => viewer.removeShape(s)); currentShapes = [];
-  distLabels.forEach(l => viewer.removeLabel(l));    distLabels    = [];
-  resLabels.forEach(l  => viewer.removeLabel(l));    resLabels     = [];
-  if (hydrophobSurf !== null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf = null; }}
-  viewer.setStyle({{ model: 0 }}, {{ cartoon: {{ color: "spectrum", opacity: 0.9 }} }});
+  currentShapes.forEach(s=>viewer.removeShape(s)); currentShapes=[];
+  distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
+  resLabels.forEach(l=>viewer.removeLabel(l));     resLabels=[];
+  if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
+  viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
 }}
 
-// ── Interaction lines + distance labels ───────────────────────────────────
-function drawInteractions(interactions) {{
-  interactions.forEach(ix => {{
+// ── 3D: draw interactions ────────────────────────────────────────────────
+function drawInteractions(ixs) {{
+  ixs.forEach(ix => {{
     if (!activeToggles[ix.type]) return;
-    const color = COLORS[ix.type] || "#ffffff";
-
+    const color = COLORS[ix.type]||"#fff";
     currentShapes.push(viewer.addCylinder({{
-      start:  {{ x: ix.protein_coords[0], y: ix.protein_coords[1], z: ix.protein_coords[2] }},
-      end:    {{ x: ix.ligand_coords[0],  y: ix.ligand_coords[1],  z: ix.ligand_coords[2]  }},
-      radius: 0.1, color, opacity: 0.9, dashed: true,
+      start:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
+      end:  {{x:ix.ligand_coords[0], y:ix.ligand_coords[1], z:ix.ligand_coords[2] }},
+      radius:.1, color, opacity:.9, dashed:true,
     }}));
-
     if (showDistLabels) {{
-      const lbl = viewer.addLabel(`${{ix.distance.toFixed(1)}} Å`, {{
-        position: {{
-          x: (ix.protein_coords[0] + ix.ligand_coords[0]) / 2,
-          y: (ix.protein_coords[1] + ix.ligand_coords[1]) / 2,
-          z: (ix.protein_coords[2] + ix.ligand_coords[2]) / 2,
+      const lbl = viewer.addLabel(`${{ix.distance.toFixed(1)}} Å`,{{
+        position:{{
+          x:(ix.protein_coords[0]+ix.ligand_coords[0])/2,
+          y:(ix.protein_coords[1]+ix.ligand_coords[1])/2,
+          z:(ix.protein_coords[2]+ix.ligand_coords[2])/2,
         }},
-        fontSize:        10,
-        fontColor:       color,
-        backgroundColor: "rgba(13,17,23,0.75)",
-        borderRadius:    3,
-        padding:         2,
-        inFront:         true,
+        fontSize:10, fontColor:color,
+        backgroundColor:"rgba(13,17,23,.75)",
+        borderRadius:3, padding:2, inFront:true,
       }});
       distLabels.push(lbl);
     }}
@@ -488,293 +564,408 @@ function drawInteractions(interactions) {{
 }}
 
 function refreshInteractions() {{
-  currentShapes.forEach(s => viewer.removeShape(s)); currentShapes = [];
-  distLabels.forEach(l => viewer.removeLabel(l));    distLabels    = [];
-  if (currentData) drawInteractions(currentData.interactions || []);
+  currentShapes.forEach(s=>viewer.removeShape(s)); currentShapes=[];
+  distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
+  if (currentData) drawInteractions(currentData.interactions||[]);
 }}
 
-// ── Residue labels ────────────────────────────────────────────────────────
 function drawResidueLabels(compound) {{
   const seen = new Set();
-  (compound.interactions || []).forEach(ix => {{
+  (compound.interactions||[]).forEach(ix => {{
     const key = `${{ix.residue_name}}${{ix.residue_number}}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    resLabels.push(viewer.addLabel(`${{ix.residue_name}} ${{ix.residue_number}}`, {{
-      position:        {{ x: ix.protein_coords[0], y: ix.protein_coords[1], z: ix.protein_coords[2] }},
-      fontSize:        10,
-      fontColor:       "#f0f6fc",
-      backgroundColor: "rgba(0,0,0,0.65)",
-      borderRadius:    3,
-      padding:         2,
-      inFront:         false,
+    if (seen.has(key)) return; seen.add(key);
+    resLabels.push(viewer.addLabel(`${{ix.residue_name}} ${{ix.residue_number}}`,{{
+      position:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
+      fontSize:10, fontColor:"#f0f6fc",
+      backgroundColor:"rgba(0,0,0,.65)", borderRadius:3, padding:2, inFront:false,
     }}));
   }});
   viewer.render();
 }}
 
 function refreshResLabels() {{
-  resLabels.forEach(l => viewer.removeLabel(l)); resLabels = [];
+  resLabels.forEach(l=>viewer.removeLabel(l)); resLabels=[];
   if (currentData && showResLabels) drawResidueLabels(currentData);
   viewer.render();
 }}
 
-// ── Hydrophobicity surface (async — addSurface returns a Promise) ──────────
 async function refreshHydrophobSurface() {{
-  if (hydrophobSurf !== null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf = null; }}
-  if (!showHydrophob || !currentData) {{ viewer.render(); return; }}
-
-  const bsRes = [...new Set((currentData.interactions || []).map(ix => ix.residue_number))];
+  if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
+  if (!showHydrophob||!currentData) {{ viewer.render(); return; }}
+  const bsRes=[...new Set((currentData.interactions||[]).map(ix=>ix.residue_number))];
   if (!bsRes.length) return;
-
   hydrophobSurf = await viewer.addSurface(
     $3Dmol.SurfaceType.MS,
-    {{
-      opacity:   0.65,
-      colorfunc: (atom) => kdHex(atom.resn),
-    }},
-    {{ model: 0, resi: bsRes }}
+    {{ opacity:.65, colorfunc:(atom)=>kdHex(atom.resn) }},
+    {{ model:0, resi:bsRes }}
   );
   viewer.render();
 }}
 
-// ── Sidebar interaction list ───────────────────────────────────────────────
+// ── Toolbar toggles (3D) ─────────────────────────────────────────────────
+function toggleBackground() {{
+  darkMode=!darkMode;
+  viewer.setBackgroundColor(darkMode?"#0d1117":"#f6f8fa"); viewer.render();
+  document.body.classList.toggle("light",!darkMode);
+  const btn=document.getElementById("btn-bg");
+  btn.textContent=darkMode?"Dark BG":"Light BG";
+  btn.classList.toggle("active",!darkMode);
+  if (currentData&&currentMode==='2d') draw2DView(currentData,siteMode);
+}}
+function toggleResLabels() {{
+  showResLabels=!showResLabels;
+  document.getElementById("btn-labels").classList.toggle("active",showResLabels);
+  refreshResLabels();
+}}
+function toggleDistLabels() {{
+  showDistLabels=!showDistLabels;
+  document.getElementById("btn-dist").classList.toggle("active",showDistLabels);
+  refreshInteractions();
+}}
+function toggleHydrophob() {{
+  showHydrophob=!showHydrophob;
+  document.getElementById("btn-hydro").classList.toggle("active",showHydrophob);
+  refreshHydrophobSurface();
+}}
+
+// ── Sidebar ──────────────────────────────────────────────────────────────
 function renderSidebar(compound) {{
-  const list = document.getElementById("ilist");
-  list.innerHTML = "";
-
-  if (!compound || compound.plip_failed) {{
-    list.innerHTML = `<div id="no-compound" style="color:#f85149">${{
-      compound ? (compound.plip_error || "PLIP analysis failed") : "No data"
-    }}</div>`;
+  const list=document.getElementById("ilist");
+  list.innerHTML="";
+  if (!compound||compound.plip_failed) {{
+    list.innerHTML=`<div id="no-compound" style="color:#f85149">${{
+      compound?(compound.plip_error||"PLIP analysis failed"):"No data"}}</div>`;
     return;
   }}
-
-  const active = (compound.interactions || []).filter(ix => activeToggles[ix.type]);
-  if (!active.length) {{
-    list.innerHTML = `<div id="no-compound">No visible interactions (check toggles)</div>`;
-    return;
-  }}
-
+  const active=(compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
+  if (!active.length) {{ list.innerHTML=`<div id="no-compound">No visible interactions</div>`; return; }}
   active.forEach(ix => {{
-    const div = document.createElement("div");
-    div.className = "i-row";
-    const color = COLORS[ix.type] || "#ffffff";
-    div.innerHTML = `
-      <div class="i-type" style="color:${{color}}">${{ix.type.replace(/_/g, " ")}}</div>
-      <div class="i-detail">
-        ${{ix.residue_name}}&nbsp;${{ix.residue_number}} (${{ix.chain}})
-        &nbsp;&middot;&nbsp; ${{ix.distance.toFixed(2)}}&nbsp;&Aring;
-      </div>`;
+    const div=document.createElement("div"); div.className="i-row";
+    const color=COLORS[ix.type]||"#fff";
+    div.innerHTML=`<div class="i-type" style="color:${{color}}">${{ix.type.replace(/_/g," ")}}</div>
+      <div class="i-detail">${{ix.residue_name}}&nbsp;${{ix.residue_number}} (${{ix.chain}})
+        &nbsp;&middot;&nbsp; ${{ix.distance.toFixed(2)}}&nbsp;&Aring;</div>`;
     list.appendChild(div);
   }});
 }}
 
-// ── 2D interaction diagram (LIGPLOT-style SVG) ─────────────────────────────
-function draw2DDiagram(compound) {{
-  const container = document.getElementById("diagram-container");
-
-  if (!compound || !compound.interactions || !compound.interactions.length) {{
-    container.innerHTML = '<p class="diagram-placeholder">No interaction data</p>';
-    return;
-  }}
-
-  const visible = compound.interactions.filter(ix => activeToggles[ix.type]);
-  if (!visible.length) {{
-    container.innerHTML = '<p class="diagram-placeholder">No visible interactions</p>';
-    return;
-  }}
-
-  const resMap = new Map();
-  visible.forEach(ix => {{
-    const key = `${{ix.residue_name}}${{ix.residue_number}}`;
-    if (!resMap.has(key)) resMap.set(key, ix);
-  }});
-  const residues = [...resMap.values()];
-  const n = residues.length;
-
-  const W = 310, H = 230;
-  const cx = W / 2, cy = H / 2;
-  const ell_rx = W * 0.41, ell_ry = H * 0.40;
-
-  const positions = residues.map((_, i) => {{
-    const angle = (i / n) * 2 * Math.PI - Math.PI / 2;
-    return {{ x: cx + ell_rx * Math.cos(angle), y: cy + ell_ry * Math.sin(angle) }};
-  }});
-
-  const textFill  = darkMode ? "#e6edf3" : "#24292f";
-  const subFill   = "#8b949e";
-  const ligFill   = darkMode ? "#21262d" : "#fff";
-  const ligStroke = darkMode ? "#c9d1d9" : "#57606a";
-
-  let svg = `<svg id="svg2d" width="${{W}}" height="${{H}}" xmlns="http://www.w3.org/2000/svg"
-    style="overflow:visible">`;
-
-  svg += `<defs>`;
-  ["hbond", "salt_bridge"].forEach(type => {{
-    const c = COLORS[type];
-    svg += `<marker id="arr-${{type}}" markerWidth="5" markerHeight="5"
-        refX="4.5" refY="2.5" orient="auto">
-      <path d="M0,0 L0,5 L5,2.5 Z" fill="${{c}}" opacity="0.8"/>
-    </marker>`;
-  }});
-  svg += `</defs>`;
-
-  residues.forEach((res, i) => {{
-    const pos   = positions[i];
-    const color = COLORS[res.type] || "#888";
-    const isDashed = ["hydrophobic", "pi_stack", "pi_cation", "halogen"].includes(res.type);
-    const hasArrow = ["hbond", "salt_bridge"].includes(res.type);
-    const dashAttr  = isDashed ? 'stroke-dasharray="5 3"' : '';
-    const markerEnd = hasArrow ? `marker-end="url(#arr-${{res.type}})"` : '';
-
-    const dx = pos.x - cx, dy = pos.y - cy;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const ux = dx / dist, uy = dy / dist;
-    const x2 = pos.x - ux * 19;
-    const y2 = pos.y - uy * 19;
-
-    svg += `<line x1="${{cx}}" y1="${{cy}}" x2="${{x2}}" y2="${{y2}}"
-      stroke="${{color}}" stroke-width="1.4" opacity="0.8"
-      ${{dashAttr}} ${{markerEnd}}/>`;
-  }});
-
-  const ligName = (compound.name || compound.lig_id || "LIG").slice(0, 9);
-  svg += `
-    <rect x="${{cx - 26}}" y="${{cy - 13}}" width="52" height="26" rx="6"
-      fill="${{ligFill}}" stroke="${{ligStroke}}" stroke-width="1.5"/>
-    <text x="${{cx}}" y="${{cy + 4}}" text-anchor="middle"
-      fill="${{textFill}}" font-size="9" font-weight="bold"
-      font-family="system-ui">${{ligName}}</text>`;
-
-  residues.forEach((res, i) => {{
-    const pos   = positions[i];
-    const color = COLORS[res.type] || "#556677";
-    svg += `
-      <circle cx="${{pos.x}}" cy="${{pos.y}}" r="18"
-        fill="${{color}}25" stroke="${{color}}" stroke-width="1.5"/>
-      <text x="${{pos.x}}" y="${{pos.y - 2}}" text-anchor="middle"
-        fill="${{textFill}}" font-size="8" font-weight="bold"
-        font-family="system-ui">${{res.residue_name}}</text>
-      <text x="${{pos.x}}" y="${{pos.y + 9}}" text-anchor="middle"
-        fill="${{subFill}}" font-size="7" font-family="system-ui">${{res.residue_number}}</text>`;
-  }});
-
-  svg += `</svg>`;
-  container.innerHTML = svg;
+// ── 2D diagram ───────────────────────────────────────────────────────────
+function transformPt(ax, ay, compound, useSite) {{
+  if (!useSite || !compound.site_viewbox) return [ax + GM, ay + GM];
+  const [vx, vy, vw, vh] = compound.site_viewbox;
+  return [
+    (ax - vx) / vw * LIG_W + GM,
+    (ay - vy) / vh * LIG_H + GM,
+  ];
 }}
 
-// ── Main compound select ───────────────────────────────────────────────────
+function spikySvg(cx, cy, innerR, outerR, n, color) {{
+  const pts=[];
+  for (let i=0;i<n*2;i++) {{
+    const a=(i*Math.PI/n)-Math.PI/2, r=i%2===0?outerR:innerR;
+    pts.push(`${{(cx+r*Math.cos(a)).toFixed(1)}},${{(cy+r*Math.sin(a)).toFixed(1)}}`);
+  }}
+  return `<path d="M${{pts.join('L')}}Z" fill="${{color}}22" stroke="${{color}}" stroke-width="1.2"/>`;
+}}
+
+function draw2DView(compound, useSite) {{
+  const wrap = document.getElementById("diagram2d-wrap");
+
+  if (!compound || compound.plip_failed) {{
+    wrap.innerHTML=`<p class="d2-placeholder">${{
+      compound?(compound.plip_error||"PLIP failed"):"Select a compound above"}}</p>`;
+    return;
+  }}
+
+  const visible  = (compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
+  if (!visible.length) {{
+    wrap.innerHTML=`<p class="d2-placeholder">No visible interactions — check toggles</p>`;
+    return;
+  }}
+
+  const hasSvg   = !!compound.lig_svg_full;
+  const ligSvg   = useSite ? (compound.lig_svg_site||compound.lig_svg_full) : compound.lig_svg_full;
+  const OW       = LIG_W + 2*GM;
+  const OH       = LIG_H + 2*GM + 52;   // +52 for legend strip
+  const LIGCX    = GM + LIG_W/2;
+  const LIGCY    = GM + LIG_H/2;
+
+  // --- Group interactions by residue ---
+  const resMap = new Map();
+  visible.forEach((ix,i) => {{
+    const key = `${{ix.residue_name}}${{ix.residue_number}}`;
+    if (!resMap.has(key)) resMap.set(key,{{ix, type:ix.type, atomPts:[], allIx:[]}});
+    const e = resMap.get(key);
+    e.allIx.push(ix);
+    const raw = compound.ix_atom_pts?.[i];
+    if (raw) {{
+      const [tx,ty] = transformPt(raw[0], raw[1], compound, useSite);
+      e.atomPts.push([tx,ty]);
+    }}
+  }});
+
+  // --- Compute glyph positions ---
+  const residues = [...resMap.values()].map((e,i,arr) => {{
+    let ax, ay;
+    if (e.atomPts.length) {{
+      ax = e.atomPts.reduce((s,p)=>s+p[0],0)/e.atomPts.length;
+      ay = e.atomPts.reduce((s,p)=>s+p[1],0)/e.atomPts.length;
+    }} else {{
+      // Ellipse fallback
+      const angle = (i/arr.length)*2*Math.PI - Math.PI/2;
+      ax = LIGCX + (LIG_W*.44)*Math.cos(angle);
+      ay = LIGCY + (LIG_H*.44)*Math.sin(angle);
+    }}
+    let dx=ax-LIGCX, dy=ay-LIGCY;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    dx/=len; dy/=len;
+    const PUSH = 82;
+    let gx=ax+dx*PUSH, gy=ay+dy*PUSH;
+    // Clamp inside outer SVG
+    gx=Math.max(28,Math.min(OW-28,gx));
+    gy=Math.max(28,Math.min(OH-72,gy));
+    return {{...e, ax, ay, gx, gy}};
+  }});
+
+  const textFill = darkMode?"#e6edf3":"#24292f";
+
+  // --- Build SVG ---
+  let s = `<svg id="diagram2d-svg" xmlns="http://www.w3.org/2000/svg"
+    width="100%" height="100%"
+    viewBox="0 0 ${{OW}} ${{OH}}"
+    preserveAspectRatio="xMidYMid meet">`;
+
+  // Defs: arrowhead markers for H-bond and salt bridge
+  s += `<defs>`;
+  ["hbond","salt_bridge"].forEach(type => {{
+    s += `<marker id="d2a-${{type}}" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L6,3 Z" fill="${{COLORS[type]}}" opacity=".9"/></marker>`;
+  }});
+  s += `</defs>`;
+
+  // Background
+  s += `<rect width="${{OW}}" height="${{OH}}" fill="${{darkMode?"#0d1117":"#f6f8fa"}}"/>`;
+
+  // Ligand SVG embedded as image
+  if (hasSvg && ligSvg) {{
+    const enc = 'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(ligSvg);
+    s += `<image href="${{enc}}" x="${{GM}}" y="${{GM}}" width="${{LIG_W}}" height="${{LIG_H}}"/>`;
+  }} else {{
+    s += `<rect x="${{GM}}" y="${{GM}}" width="${{LIG_W}}" height="${{LIG_H}}"
+      rx="8" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4 3"/>
+    <text x="${{LIGCX}}" y="${{LIGCY}}" text-anchor="middle" fill="#8b949e" font-size="13"
+      font-family="system-ui">Install rdkit for 2D structure</text>`;
+  }}
+
+  // --- Connection lines (drawn behind glyphs) ---
+  residues.forEach(res => {{
+    const col     = COLORS[res.type]||"#888";
+    const isHydro = res.type==="hydrophobic";
+    const isHbond = res.type==="hbond"||res.type==="salt_bridge";
+    const dash    = isHydro?"stroke-dasharray='6 3'"
+                  : isHbond?"stroke-dasharray='6 3'"
+                  : "stroke-dasharray='4 2'";
+    const marker  = isHbond?`marker-end="url(#d2a-${{res.type}})"`:"";
+
+    const srcPts  = res.atomPts.length ? res.atomPts : [[res.ax, res.ay]];
+    const uniq    = [...new Map(srcPts.map(p=>[p.join(','),p])).values()];
+
+    uniq.forEach(([px,py]) => {{
+      const ddx=res.gx-px, ddy=res.gy-py;
+      const dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
+      const ex=res.gx-(ddx/dl)*24, ey=res.gy-(ddy/dl)*24;
+      s += `<line x1="${{px.toFixed(1)}}" y1="${{py.toFixed(1)}}"
+              x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+              stroke="${{col}}" stroke-width="1.4" opacity=".85"
+              ${{dash}} ${{marker}}/>`;
+    }});
+
+    // Distance label on H-bonds (skip hydrophobic which reports 0.0)
+    if (isHbond && res.ix.distance > 0.1) {{
+      const mx=(res.ax+res.gx)/2, my=(res.ay+res.gy)/2;
+      s += `<rect x="${{mx-18}}" y="${{my-8}}" width="36" height="14" rx="3"
+              fill="${{darkMode?"#161b22":"#eaeef2"}}" opacity=".9"/>
+            <text x="${{mx}}" y="${{my+4}}" text-anchor="middle"
+              fill="${{col}}" font-size="8" font-family="system-ui">
+              ${{res.ix.distance.toFixed(1)}}&nbsp;&Aring;
+            </text>`;
+    }}
+  }});
+
+  // --- Residue glyphs ---
+  residues.forEach(res => {{
+    const {{gx,gy,ix,type}} = res;
+    const col   = COLORS[type]||"#888";
+    const aac   = aaColor(ix.residue_name);
+
+    if (type==="hydrophobic") {{
+      // Classic LIGPLOT spiky-sun halo
+      s += spikySvg(gx, gy, 17, 28, 12, col);
+    }} else if (type==="pi_stack"||type==="pi_cation") {{
+      // Dashed circle + pi symbol
+      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
+        fill="${{col}}20" stroke="${{col}}" stroke-width="1.4" stroke-dasharray="4 2"/>
+      <text x="${{gx}}" y="${{gy+1}}" text-anchor="middle" dominant-baseline="middle"
+        fill="${{col}}" font-size="13" font-style="italic"
+        font-family="'Times New Roman',serif">&pi;</text>`;
+    }} else if (type==="halogen") {{
+      // Solid circle + X mark
+      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
+        fill="${{aac}}20" stroke="${{aac}}" stroke-width="1.4"/>
+      <text x="${{gx}}" y="${{gy+1}}" text-anchor="middle" dominant-baseline="middle"
+        fill="${{col}}" font-size="11" font-family="system-ui">X</text>`;
+    }} else {{
+      // H-bond / salt-bridge: AA-type coloured circle
+      s += `<circle cx="${{gx}}" cy="${{gy}}" r="20"
+        fill="${{aac}}20" stroke="${{aac}}" stroke-width="1.5"/>`;
+      if (type==="salt_bridge") {{
+        const sign = ["LYS","ARG","HIS"].includes(ix.residue_name) ? "+" : "−";
+        s += `<text x="${{gx+15}}" y="${{gy-13}}" fill="${{col}}" font-size="10"
+          font-family="system-ui" font-weight="bold">${{sign}}</text>`;
+      }}
+    }}
+
+    // Residue name + number on every glyph
+    s += `<text x="${{gx}}" y="${{gy-4}}" text-anchor="middle"
+        fill="${{textFill}}" font-size="8.5" font-weight="bold"
+        font-family="system-ui">${{ix.residue_name}}</text>
+      <text x="${{gx}}" y="${{gy+7}}" text-anchor="middle"
+        fill="#8b949e" font-size="7" font-family="system-ui">${{ix.residue_number}}</text>`;
+  }});
+
+  // --- Legend strip ---
+  const LY  = LIG_H + 2*GM + 14;
+  const LX0 = 10;
+  const COL_W = Math.floor((OW-20) / Object.keys(COLORS).length);
+  Object.entries(COLORS).forEach(([type,color],i) => {{
+    const lx = LX0 + i*COL_W;
+    s += `<rect x="${{lx}}" y="${{LY}}" width="9" height="9" rx="2" fill="${{color}}"/>
+      <text x="${{lx+13}}" y="${{LY+8}}" fill="#8b949e" font-size="8"
+        font-family="system-ui">${{type.replace(/_/g,' ')}}</text>`;
+  }});
+
+  s += `</svg>`;
+  wrap.innerHTML = s;
+}}
+
+// ── Main compound select ─────────────────────────────────────────────────
 async function selectCompound(lig_id) {{
   clearLigand();
   if (!lig_id) return;
-  const compound = COMPOUNDS.find(c => c.lig_id === lig_id);
+  const compound = COMPOUNDS.find(c=>c.lig_id===lig_id);
   if (!compound) return;
   currentData = compound;
 
+  // Disable site toggle if no viewbox crop available
+  document.getElementById("btn-site").disabled = !compound.site_viewbox;
+
+  // 3D
   if (compound.sdf_b64) {{
-    const sdf   = atob(compound.sdf_b64);
-    ligandModel = viewer.addModel(sdf, "sdf");
-    viewer.setStyle({{ model: ligandModel }}, {{
-      stick: {{ colorscheme: "default", radius: 0.18 }},
-    }});
+    const sdf = atob(compound.sdf_b64);
+    ligandModel = viewer.addModel(sdf,"sdf");
+    viewer.setStyle({{model:ligandModel}},{{stick:{{colorscheme:"default",radius:.18}}}});
   }}
-
-  const bsRes = [...new Set((compound.interactions || []).map(ix => ix.residue_number))];
+  const bsRes=[...new Set((compound.interactions||[]).map(ix=>ix.residue_number))];
   if (bsRes.length) {{
-    viewer.addStyle({{ model: 0, resi: bsRes }}, {{
-      stick: {{ colorscheme: "whiteCarbon", radius: 0.12 }},
-    }});
+    viewer.addStyle({{model:0,resi:bsRes}},{{stick:{{colorscheme:"whiteCarbon",radius:.12}}}});
   }}
-
-  drawInteractions(compound.interactions || []);
+  drawInteractions(compound.interactions||[]);
   if (showResLabels) drawResidueLabels(compound);
   await refreshHydrophobSurface();
 
   renderSidebar(compound);
-  draw2DDiagram(compound);
 
-  if (ligandModel !== null) {{
-    viewer.center({{ model: ligandModel }});
-    viewer.zoom(2.0);
+  if (currentMode==='3d') {{
+    if (ligandModel!==null) {{ viewer.center({{model:ligandModel}}); viewer.zoom(2.0); }}
+    viewer.render();
+  }} else {{
+    draw2DView(compound, siteMode);
   }}
-  viewer.render();
 }}
 
 function toggleType(type, checked) {{
-  activeToggles[type] = checked;
+  activeToggles[type]=checked;
   if (!currentData) return;
   refreshInteractions();
   renderSidebar(currentData);
-  draw2DDiagram(currentData);
+  if (currentMode==='2d') draw2DView(currentData, siteMode);
 }}
 
-// ── Export: PNG ────────────────────────────────────────────────────────────
+// ── Exports ──────────────────────────────────────────────────────────────
 function exportPNG() {{
-  const name = currentData ? (currentData.name || currentData.lig_id) : "pose";
-  const uri  = viewer.pngURI();
-  const a    = Object.assign(document.createElement("a"), {{ href: uri, download: `${{name}}_interaction.png` }});
-  a.click();
-}}
-
-// ── Export: 2D SVG ─────────────────────────────────────────────────────────
-function exportSVG() {{
-  const svgEl = document.getElementById("svg2d");
-  if (!svgEl) {{ alert("Select a compound first."); return; }}
-  const name  = currentData ? (currentData.name || currentData.lig_id) : "pose";
-  const blob  = new Blob([svgEl.outerHTML], {{ type: "image/svg+xml" }});
-  const url   = URL.createObjectURL(blob);
-  const a     = Object.assign(document.createElement("a"), {{ href: url, download: `${{name}}_2d_interactions.svg` }});
-  a.click();
-  URL.revokeObjectURL(url);
-}}
-
-// ── Export: 360° WebM video ────────────────────────────────────────────────
-function exportVideo() {{
-  const canvas = document.querySelector("#viewer canvas");
-  if (!canvas) {{ alert("3D canvas not ready."); return; }}
-
-  const mime = ["video/webm;codecs=vp9", "video/webm"].find(m => MediaRecorder.isTypeSupported(m));
-  if (!mime) {{ alert("WebM recording not supported in this browser. Try Chrome."); return; }}
-
-  const stream   = canvas.captureStream(30);
-  const recorder = new MediaRecorder(stream, {{ mimeType: mime }});
-  const chunks   = [];
-
-  recorder.ondataavailable = e => {{ if (e.data.size) chunks.push(e.data); }};
-  recorder.onstop = () => {{
-    const name = currentData ? (currentData.name || currentData.lig_id) : "pose";
-    const blob = new Blob(chunks, {{ type: "video/webm" }});
+  if (currentMode==='2d') {{
+    const svg = document.getElementById("diagram2d-svg");
+    if (!svg) {{ alert("Select a compound first."); return; }}
+    const name = currentData?(currentData.name||currentData.lig_id):"pose";
+    const str  = new XMLSerializer().serializeToString(svg);
+    const img  = new Image();
+    const blob = new Blob([str],{{type:'image/svg+xml'}});
     const url  = URL.createObjectURL(blob);
-    const a    = Object.assign(document.createElement("a"), {{ href: url, download: `${{name}}_360.webm` }});
+    img.onload = () => {{
+      const sc=2, cv=document.createElement('canvas');
+      cv.width=svg.viewBox.baseVal.width*sc||1680;
+      cv.height=svg.viewBox.baseVal.height*sc||1320;
+      const ctx=cv.getContext('2d');
+      ctx.scale(sc,sc);
+      ctx.fillStyle=darkMode?"#0d1117":"#f6f8fa";
+      ctx.fillRect(0,0,cv.width,cv.height);
+      ctx.drawImage(img,0,0);
+      cv.toBlob(b => {{
+        const a=Object.assign(document.createElement('a'),
+          {{href:URL.createObjectURL(b),download:`${{name}}_2d.png`}});
+        a.click();
+      }},'image/png');
+      URL.revokeObjectURL(url);
+    }};
+    img.src=url;
+  }} else {{
+    const name=currentData?(currentData.name||currentData.lig_id):"pose";
+    const a=Object.assign(document.createElement("a"),
+      {{href:viewer.pngURI(),download:`${{name}}_3d.png`}});
     a.click();
-    URL.revokeObjectURL(url);
-    document.getElementById("record-overlay").style.display = "none";
-    const btn = document.getElementById("btn-video");
-    btn.disabled    = false;
-    btn.textContent = "Export 360° Video";
-  }};
-
-  const overlay = document.getElementById("record-overlay");
-  overlay.style.display = "block";
-  const btn = document.getElementById("btn-video");
-  btn.disabled    = true;
-  btn.textContent = "Recording…";
-
-  recorder.start();
-
-  const totalSteps = 72;
-  let step = 0;
-
-  function tick() {{
-    if (step >= totalSteps) {{ recorder.stop(); return; }}
-    viewer.rotate(5, "y");
-    viewer.render();
-    document.getElementById("record-pct").textContent = Math.round((step / totalSteps) * 100) + "%";
-    step++;
-    setTimeout(tick, 50);
   }}
-  tick();
+}}
+
+function exportSVG() {{
+  const svg=document.getElementById("diagram2d-svg");
+  if (!svg) {{ alert("Select a compound first."); return; }}
+  const name=currentData?(currentData.name||currentData.lig_id):"pose";
+  const blob=new Blob([new XMLSerializer().serializeToString(svg)],
+    {{type:'image/svg+xml'}});
+  const a=Object.assign(document.createElement('a'),
+    {{href:URL.createObjectURL(blob),download:`${{name}}_2d_interactions.svg`}});
+  a.click();
+}}
+
+function exportVideo() {{
+  const canvas=document.querySelector("#viewer canvas");
+  if (!canvas) {{ alert("3D canvas not ready."); return; }}
+  const mime=["video/webm;codecs=vp9","video/webm"].find(m=>MediaRecorder.isTypeSupported(m));
+  if (!mime) {{ alert("WebM not supported — try Chrome."); return; }}
+  const rec=new MediaRecorder(canvas.captureStream(30),{{mimeType:mime}});
+  const chunks=[];
+  rec.ondataavailable=e=>{{if(e.data.size)chunks.push(e.data);}};
+  rec.onstop=()=>{{
+    const name=currentData?(currentData.name||currentData.lig_id):"pose";
+    const a=Object.assign(document.createElement('a'),{{
+      href:URL.createObjectURL(new Blob(chunks,{{type:'video/webm'}})),
+      download:`${{name}}_360.webm`}});
+    a.click();
+    document.getElementById("record-overlay").style.display="none";
+    const btn=document.getElementById("btn-exp-vid");
+    btn.disabled=false; btn.textContent="Export 360° Video";
+  }};
+  document.getElementById("record-overlay").style.display="block";
+  const btn=document.getElementById("btn-exp-vid");
+  btn.disabled=true; btn.textContent="Recording…";
+  rec.start();
+  let step=0;
+  (function tick(){{
+    if(step>=72){{rec.stop();return;}}
+    viewer.rotate(5,"y"); viewer.render();
+    document.getElementById("record-pct").textContent=Math.round(step/72*100)+"%";
+    step++; setTimeout(tick,50);
+  }})();
 }}
 
 viewer.render();
@@ -785,12 +976,14 @@ viewer.render();
 
 
 def generate_viewer(work_dir: Path) -> Path:
-    output_dir = work_dir / "output"
-    viewer_path = output_dir / "interaction_viewer.html"
+    output_dir    = work_dir / "output"
+    viewer_path   = output_dir / "interaction_viewer.html"
 
     interactions_json = output_dir / "interactions_top_n.json"
     if not interactions_json.exists():
-        raise FileNotFoundError("interactions_top_n.json not found — run PLIP analysis first")
+        raise FileNotFoundError(
+            "interactions_top_n.json not found — run PLIP analysis first"
+        )
 
     receptor_pdb: Path | None = None
     resume_json = work_dir / "resume.json"
@@ -807,8 +1000,9 @@ def generate_viewer(work_dir: Path) -> Path:
             receptor_pdb = candidate
 
     receptor_text = receptor_pdb.read_text() if receptor_pdb else ""
+    compounds     = json.loads(interactions_json.read_text())
+    compounds     = _enrich_2d(compounds)
 
-    compounds = json.loads(interactions_json.read_text())
     html = _build_html(compounds, receptor_text)
     viewer_path.write_text(html, encoding="utf-8")
     return viewer_path
