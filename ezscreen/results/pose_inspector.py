@@ -48,10 +48,11 @@ def _strip_svg_inner(svg_text: str) -> tuple[str, str]:
 def _enrich_2d(compounds: list[dict]) -> list[dict]:
     """Add RDKit 2D SVG and atom draw-coordinates to each compound dict."""
     try:
+        import base64
+
         from rdkit import Chem
         from rdkit.Chem import AllChem
         from rdkit.Chem.Draw import rdMolDraw2D
-        import base64
     except ImportError:
         return compounds
 
@@ -846,7 +847,7 @@ function draw2DView(compound, useSite) {{
   residues.forEach(res => {{
     const col     = COLORS[res.type] || "#888";
     const isHbond = res.type === "hbond" || res.type === "salt_bridge";
-    
+
     // Find nearest atom point to the finalized glyph position
     let px = LIGCX, py = LIGCY;
     if (res.atomPts.length > 0) {{
@@ -864,7 +865,7 @@ function draw2DView(compound, useSite) {{
       px = LIGCX + Math.cos(angle) * (LIG_W * 0.42);
       py = LIGCY + Math.sin(angle) * (LIG_H * 0.42);
     }}
-    
+
     const ddx=res.gx-px, ddy=res.gy-py;
     const dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
 
@@ -918,7 +919,7 @@ function draw2DView(compound, useSite) {{
     const {{gx, gy, ix, type}} = res;
     const col = COLORS[type] || "#888";
     const aac = aaColor(ix.residue_name);
-    
+
     // Eyelash faces the nearest atom (same logic as connection line)
     let srcX = LIGCX, srcY = LIGCY;
     if (res.atomPts.length > 0) {{
