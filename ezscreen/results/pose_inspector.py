@@ -517,11 +517,14 @@ function switchMode(mode) {{
   document.getElementById("btn-3d").classList.toggle("active", is3d);
   document.getElementById("btn-2d").classList.toggle("active", !is3d);
 
-  // 3D-only display buttons
-  ["btn-bg","btn-labels","btn-dist","btn-hydro"].forEach(id => {{
+  // Certain buttons only active in 3D
+  ["btn-labels","btn-hydro"].forEach(id => {{
     const b = document.getElementById(id);
     if (b) b.disabled = !is3d;
   }});
+  // Dark BG and Distances work in both modes
+  document.getElementById("btn-bg").disabled = false;
+  document.getElementById("btn-dist").disabled = false;
 
   document.getElementById("btn-exp-vid").disabled = !is3d;
   document.getElementById("btn-exp-svg").disabled =  is3d;
@@ -632,6 +635,7 @@ function toggleDistLabels() {{
   showDistLabels=!showDistLabels;
   document.getElementById("btn-dist").classList.toggle("active",showDistLabels);
   refreshInteractions();
+  if (currentData&&currentMode==='2d') draw2DView(currentData,siteMode);
 }}
 function toggleHydrophob() {{
   showHydrophob=!showHydrophob;
@@ -664,9 +668,12 @@ function renderSidebar(compound) {{
 function transformPt(ax, ay, compound, useSite) {{
   if (!useSite || !compound.site_viewbox) return [ax + GM, ay + GM];
   const [vx, vy, vw, vh] = compound.site_viewbox;
+  const siteScale = Math.min(LIG_W / vw, LIG_H / vh);
+  const siteDx = (LIG_W - vw * siteScale) / 2;
+  const siteDy = (LIG_H - vh * siteScale) / 2;
   return [
-    (ax - vx) / vw * LIG_W + GM,
-    (ay - vy) / vh * LIG_H + GM,
+    (ax - vx) * siteScale + siteDx + GM,
+    (ay - vy) * siteScale + siteDy + GM,
   ];
 }}
 
@@ -732,14 +739,15 @@ function draw2DView(compound, useSite) {{
   const textFill = darkMode ? "#e6edf3" : "#1a1a1a";
   const badgeBg  = darkMode ? "#161b22"  : "#ffffff";
 
-  // --- Group interactions by residue ---
+  // --- Group interactions by residue (iterate ALL interactions to keep ix_atom_pts indices correct) ---
   const resMap = new Map();
-  visible.forEach((ix, i) => {{
+  (compound.interactions||[]).forEach((ix, origI) => {{
+    if (!activeToggles[ix.type]) return;
     const key = `${{ix.residue_name}}${{ix.residue_number}}${{ix.chain}}`;
     if (!resMap.has(key)) resMap.set(key, {{ix, type:ix.type, atomPts:[], allIx:[]}});
     const e = resMap.get(key);
     e.allIx.push(ix);
-    const raw = compound.ix_atom_pts?.[i];
+    const raw = compound.ix_atom_pts?.[origI];
     if (raw) {{
       const [tx,ty] = transformPt(raw[0], raw[1], compound, useSite);
       e.atomPts.push([tx,ty]);
@@ -753,38 +761,71 @@ function draw2DView(compound, useSite) {{
       ax = e.atomPts.reduce((s,p)=>s+p[0],0)/e.atomPts.length;
       ay = e.atomPts.reduce((s,p)=>s+p[1],0)/e.atomPts.length;
     }} else {{
-      const angle = (i/arr.length)*2*Math.PI - Math.PI/2;
-      ax = LIGCX + (LIG_W*.42)*Math.cos(angle);
-      ay = LIGCY + (LIG_H*.42)*Math.sin(angle);
+      ax = LIGCX;
+      ay = LIGCY;
     }}
-    let dx=ax-LIGCX, dy=ay-LIGCY;
-    const len=Math.sqrt(dx*dx+dy*dy)||1;
-    dx/=len; dy/=len;
-    let gx=ax+dx*PUSH, gy=ay+dy*PUSH;
-    gx=Math.max(NODER+10, Math.min(OW-NODER-10, gx));
-    gy=Math.max(NODER+10, Math.min(OH-52-NODER-10, gy));
-    return {{...e, ax, ay, gx, gy}};
+    let dx = ax - LIGCX;
+    let dy = ay - LIGCY;
+    if (dx === 0 && dy === 0) {{
+      const angle = (i/arr.length)*2*Math.PI - Math.PI/2;
+      dx = Math.cos(angle);
+      dy = Math.sin(angle);
+    }}
+    const r_atom = Math.sqrt(dx*dx + dy*dy);
+    const initialAngle = Math.atan2(dy, dx);
+    return {{...e, ax, ay, r_atom, angle: initialAngle}};
   }});
 
-  // --- Simple collision spread (4 passes) ---
-  for (let pass=0; pass<4; pass++) {{
+  // --- Enforce angular separation ---
+  const MIN_SEP = 0.40; // radians (~23 degrees)
+  residues.sort((a,b) => a.angle - b.angle);
+  for (let pass=0; pass<10; pass++) {{
+    for (let i=0; i<residues.length; i++) {{
+      let j = (i + 1) % residues.length;
+      let diff = residues[j].angle - residues[i].angle;
+      if (diff < 0) diff += 2*Math.PI;
+      if (diff < MIN_SEP) {{
+        let push = (MIN_SEP - diff) / 2;
+        residues[i].angle -= push;
+        residues[j].angle += push;
+        if (residues[i].angle < -Math.PI) residues[i].angle += 2*Math.PI;
+        if (residues[j].angle > Math.PI) residues[j].angle -= 2*Math.PI;
+      }}
+    }}
+    residues.sort((a,b) => a.angle - b.angle);
+  }}
+
+  // --- Compute base gx, gy ---
+  residues.forEach(r => {{
+    let r_glyph = r.r_atom + PUSH;
+    r_glyph = Math.max(r_glyph, 180); // Ensure minimum distance from center
+    r.gx = LIGCX + Math.cos(r.angle) * r_glyph;
+    r.gy = LIGCY + Math.sin(r.angle) * r_glyph;
+  }});
+
+  // --- Collision spread (to fix labels/glyphs overlapping radially or closely) ---
+  // Using an elliptical distance since labels drop down below the glyph
+  for (let pass=0; pass<10; pass++) {{
     for (let a=0; a<residues.length; a++) {{
       for (let b=a+1; b<residues.length; b++) {{
         const dx=residues[b].gx-residues[a].gx, dy=residues[b].gy-residues[a].gy;
-        const d=Math.sqrt(dx*dx+dy*dy);
-        const minD = NODER*2+22;
+        // scale dy slightly to require more vertical distance than horizontal
+        const d=Math.sqrt(dx*dx + (dy*1.3)*(dy*1.3));
+        const minD = NODER*2 + 55; // increased padding for label clearance
         if (d < minD && d > 0.01) {{
-          const push=(minD-d)/2, nx=dx/d, ny=dy/d;
+          const push=(minD-d)/2, nx=dx/d, ny=dy/d; // use unscaled d for displacement direction
           residues[a].gx -= nx*push; residues[a].gy -= ny*push;
           residues[b].gx += nx*push; residues[b].gy += ny*push;
-          [residues[a], residues[b]].forEach(r => {{
-            r.gx=Math.max(NODER+10, Math.min(OW-NODER-10, r.gx));
-            r.gy=Math.max(NODER+10, Math.min(OH-52-NODER-10, r.gy));
-          }});
         }}
       }}
     }}
   }}
+
+  // --- Final clamp to SVG boundaries ---
+  residues.forEach(r => {{
+    r.gx=Math.max(NODER+30, Math.min(OW-NODER-30, r.gx));
+    r.gy=Math.max(NODER+30, Math.min(OH-52-NODER-30, r.gy));
+  }});
 
   // --- Build SVG ---
   let s = `<svg id="diagram2d-svg" xmlns="http://www.w3.org/2000/svg"
@@ -800,9 +841,70 @@ function draw2DView(compound, useSite) {{
   }});
   s += `</defs>`;
 
-  // Ligand structure inlined via <g transform> — avoids nested-SVG white-box artefact
+
+  // --- Connection lines: one per residue, from nearest ligand atom ---
+  residues.forEach(res => {{
+    const col     = COLORS[res.type] || "#888";
+    const isHbond = res.type === "hbond" || res.type === "salt_bridge";
+    
+    // Find nearest atom point to the finalized glyph position
+    let px = LIGCX, py = LIGCY;
+    if (res.atomPts.length > 0) {{
+      let minDist = Infinity;
+      res.atomPts.forEach(p => {{
+        const dSq = (p[0]-res.gx)**2 + (p[1]-res.gy)**2;
+        if (dSq < minDist) {{
+          minDist = dSq;
+          px = p[0];
+          py = p[1];
+        }}
+      }});
+    }} else {{
+      const angle = res.angle;
+      px = LIGCX + Math.cos(angle) * (LIG_W * 0.42);
+      py = LIGCY + Math.sin(angle) * (LIG_H * 0.42);
+    }}
+    
+    const ddx=res.gx-px, ddy=res.gy-py;
+    const dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
+
+    if (isHbond) {{
+      const ex=res.gx-(ddx/dl)*NODER, ey=res.gy-(ddy/dl)*NODER;
+      s += `<line x1="${{px.toFixed(1)}}" y1="${{py.toFixed(1)}}"
+              x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+              stroke="${{col}}" stroke-width="2.2" stroke-dasharray="6 3.5"
+              marker-end="url(#d2a-${{res.type}})"/>`;
+    }} else {{
+      const ex=res.gx-(ddx/dl)*(NODER+2), ey=res.gy-(ddy/dl)*(NODER+2);
+      s += `<line x1="${{px.toFixed(1)}}" y1="${{py.toFixed(1)}}"
+              x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
+              stroke="${{col}}" stroke-width="1.4" opacity=".5" stroke-dasharray="5 3"/>`;
+    }}
+
+    if (showDistLabels && res.ix.distance > 0.1) {{
+      const mx=(px+res.gx)/2, my=(py+res.gy)/2;
+      s += `<rect x="${{(mx-18).toFixed(1)}}" y="${{(my-9).toFixed(1)}}"
+              width="36" height="18" rx="5"
+              fill="${{badgeBg}}" stroke="${{col}}" stroke-width="1.3"/>
+            <text x="${{mx.toFixed(1)}}" y="${{my.toFixed(1)}}" text-anchor="middle"
+              dominant-baseline="middle" fill="${{col}}"
+              font-size="9.5" font-weight="700" font-family="Arial,sans-serif">
+              ${{res.ix.distance.toFixed(1)}}&thinsp;&Aring;
+            </text>`;
+    }}
+  }});
+
+  // Ligand structure inlined via <g transform> — drawn on top of connection lines
   if (hasSvg) {{
-    s += `<g transform="translate(${{GM}},${{GM}})">${{svgContent}}</g>`;
+    if (useSite && compound.site_viewbox) {{
+      const [vx, vy, vw, vh] = compound.site_viewbox;
+      const siteScale = Math.min(LIG_W / vw, LIG_H / vh);
+      const siteDx = (LIG_W - vw * siteScale) / 2;
+      const siteDy = (LIG_H - vh * siteScale) / 2;
+      s += `<g transform="translate(${{GM + siteDx}},${{GM + siteDy}}) scale(${{siteScale}}) translate(${{-vx}},${{-vy}})">${{svgContent}}</g>`;
+    }} else {{
+      s += `<g transform="translate(${{GM}},${{GM}})">${{svgContent}}</g>`;
+    }}
   }} else {{
     s += `<rect x="${{GM}}" y="${{GM}}" width="${{LIG_W}}" height="${{LIG_H}}"
             rx="8" fill="none" stroke="#30363d" stroke-width="1" stroke-dasharray="4 3"/>
@@ -811,113 +913,71 @@ function draw2DView(compound, useSite) {{
             Install rdkit for 2D structure</text>`;
   }}
 
-  // --- Connection lines (drawn behind glyphs) ---
+  // --- Residue glyphs + labels ---
   residues.forEach(res => {{
-    const col     = COLORS[res.type] || "#888";
-    const isHydro = res.type === "hydrophobic";
-    const isHbond = res.type === "hbond" || res.type === "salt_bridge";
-    const srcPts  = res.atomPts.length ? res.atomPts : [[res.ax, res.ay]];
-    const uniq    = [...new Map(srcPts.map(p=>[p.join(','),p])).values()];
-
-    uniq.forEach(([px,py]) => {{
-      const ddx=res.gx-px, ddy=res.gy-py;
-      const dl=Math.sqrt(ddx*ddx+ddy*ddy)||1;
-
-      if (isHydro) {{
-        const ex=res.gx-(ddx/dl)*(NODER+2), ey=res.gy-(ddy/dl)*(NODER+2);
-        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
-                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
-                stroke="${{col}}" stroke-width="1.4" opacity=".45" stroke-dasharray="5 3"/>`;
-      }} else if (isHbond) {{
-        const ex=res.gx-(ddx/dl)*NODER, ey=res.gy-(ddy/dl)*NODER;
-        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
-                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
-                stroke="${{col}}" stroke-width="2.2" stroke-dasharray="6 3.5"
-                marker-end="url(#d2a-${{res.type}})"/>`;
-        if (res.ix.distance > 0.1) {{
-          const mx=(Number(px)+res.gx)/2, my=(Number(py)+res.gy)/2;
-          s += `<rect x="${{(mx-18).toFixed(1)}}" y="${{(my-9).toFixed(1)}}"
-                  width="36" height="18" rx="5"
-                  fill="${{badgeBg}}" stroke="${{col}}" stroke-width="1.3"/>
-                <text x="${{mx.toFixed(1)}}" y="${{my.toFixed(1)}}" text-anchor="middle"
-                  dominant-baseline="middle" fill="${{col}}"
-                  font-size="9.5" font-weight="700" font-family="Arial,sans-serif">
-                  ${{res.ix.distance.toFixed(1)}}&thinsp;&Aring;
-                </text>`;
+    const {{gx, gy, ix, type}} = res;
+    const col = COLORS[type] || "#888";
+    const aac = aaColor(ix.residue_name);
+    
+    // Eyelash faces the nearest atom (same logic as connection line)
+    let srcX = LIGCX, srcY = LIGCY;
+    if (res.atomPts.length > 0) {{
+      let minDist = Infinity;
+      res.atomPts.forEach(p => {{
+        const dSq = (p[0]-gx)**2 + (p[1]-gy)**2;
+        if (dSq < minDist) {{
+          minDist = dSq;
+          srcX = p[0];
+          srcY = p[1];
         }}
-      }} else {{
-        const ex=res.gx-(ddx/dl)*(NODER+2), ey=res.gy-(ddy/dl)*(NODER+2);
-        s += `<line x1="${{Number(px).toFixed(1)}}" y1="${{Number(py).toFixed(1)}}"
-                x2="${{ex.toFixed(1)}}" y2="${{ey.toFixed(1)}}"
-                stroke="${{col}}" stroke-width="1.8" stroke-dasharray="4 2.5" opacity=".8"/>`;
-      }}
-    }});
-  }});
-
-  // --- Residue glyphs ---
-  residues.forEach(res => {{
-    const {{gx, gy, ix, type, ax, ay}} = res;
-    const col  = COLORS[type] || "#888";
-    const aac  = aaColor(ix.residue_name);
-    const srcX = res.atomPts.length ? res.atomPts[0][0] : ax;
-    const srcY = res.atomPts.length ? res.atomPts[0][1] : ay;
-
-    if (type === "hydrophobic") {{
-      s += eyelashGlyph(gx, gy, srcX, srcY, NODER, 9, col);
-    }} else if (type === "pi_stack" || type === "pi_cation") {{
-      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
-              fill="${{col}}15" stroke="${{col}}" stroke-width="2.2" stroke-dasharray="5 2.5"/>
-            <text x="${{gx.toFixed(1)}}" y="${{(gy+1).toFixed(1)}}" text-anchor="middle"
-              dominant-baseline="middle" fill="${{col}}" font-size="17" font-weight="bold"
-              font-style="italic" font-family="'Times New Roman',Georgia,serif">&pi;</text>`;
-    }} else if (type === "halogen") {{
-      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
-              fill="${{aac}}15" stroke="${{col}}" stroke-width="2.2"/>
-            <text x="${{gx.toFixed(1)}}" y="${{(gy+1).toFixed(1)}}" text-anchor="middle"
-              dominant-baseline="middle" fill="${{col}}" font-size="13" font-weight="bold"
-              font-family="Arial,sans-serif">X</text>`;
+      }});
     }} else {{
-      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
-              fill="${{aac}}18" stroke="${{col}}" stroke-width="2.4"/>`;
-      if (type === "salt_bridge") {{
-        const sign = ["LYS","ARG","HIS"].includes(ix.residue_name) ? "+" : "−";
-        s += `<text x="${{(gx+NODER-4).toFixed(1)}}" y="${{(gy-NODER+6).toFixed(1)}}"
-                fill="${{col}}" font-size="14" font-weight="bold"
-                font-family="Arial,sans-serif">${{sign}}</text>`;
-      }}
+      const angle = res.angle;
+      srcX = LIGCX + Math.cos(angle) * (LIG_W * 0.42);
+      srcY = LIGCY + Math.sin(angle) * (LIG_H * 0.42);
     }}
 
+    // --- Glyph ---
     if (type === "hydrophobic") {{
-      // Label sits outside the arc, away from the ligand
-      const ba   = Math.atan2(gy-srcY, gx-srcX);
-      const lx   = (gx + (NODER+14) * Math.cos(ba)).toFixed(1);
-      const ly   = (gy + (NODER+14) * Math.sin(ba)).toFixed(1);
-      const ly2  = (gy + (NODER+25) * Math.sin(ba)).toFixed(1);
-      s += `<text x="${{lx}}" y="${{ly}}" text-anchor="middle"
-              fill="${{textFill}}" font-size="9.5" font-weight="700"
-              font-family="Arial,Helvetica,sans-serif">
-              ${{ix.residue_name}}${{ix.residue_number}}
-            </text>
-            <text x="${{lx}}" y="${{ly2}}" text-anchor="middle"
-              fill="${{col}}" font-size="8.5" font-family="Arial,Helvetica,sans-serif">
-              (${{ix.chain}})
-            </text>`;
+      s += eyelashGlyph(gx, gy, srcX, srcY, NODER, 9, col);
     }} else {{
-      // AA name + number inside the circle, chain just below rim
-      s += `<text x="${{gx.toFixed(1)}}" y="${{(gy-4).toFixed(1)}}" text-anchor="middle"
-              dominant-baseline="middle" fill="${{textFill}}"
-              font-size="9" font-weight="700" font-family="Arial,Helvetica,sans-serif">
-              ${{ix.residue_name}}
-            </text>
-            <text x="${{gx.toFixed(1)}}" y="${{(gy+8).toFixed(1)}}" text-anchor="middle"
-              dominant-baseline="middle" fill="${{col}}"
-              font-size="8.5" font-family="Arial,Helvetica,sans-serif">
-              ${{ix.residue_number}}
-            </text>
-            <text x="${{gx.toFixed(1)}}" y="${{(gy+NODER+12).toFixed(1)}}" text-anchor="middle"
-              fill="#666" font-size="8" font-family="Arial,Helvetica,sans-serif">
-              (${{ix.chain}})
-            </text>`;
+      let fillCol = aac + "22";
+      let dash = "";
+      if (type === "pi_stack" || type === "pi_cation") {{
+         fillCol = col + "15";
+         dash = ' stroke-dasharray="5 2.5"';
+      }} else if (type === "halogen") {{
+         fillCol = aac + "15";
+      }}
+      s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
+              fill="${{fillCol}}" stroke="${{col}}" stroke-width="2.2"${{dash}}/>`;
+    }}
+
+    // --- Inner Text (Name & Number inside the glyph area) ---
+    s += `<text x="${{gx.toFixed(1)}}" y="${{(gy-4).toFixed(1)}}" text-anchor="middle"
+            dominant-baseline="middle" fill="${{textFill}}"
+            font-size="9.5" font-weight="700" font-family="Arial,sans-serif">
+            ${{ix.residue_name}}
+          </text>
+          <text x="${{gx.toFixed(1)}}" y="${{(gy+7).toFixed(1)}}" text-anchor="middle"
+            dominant-baseline="middle" fill="${{col}}"
+            font-size="8.5" font-weight="600" font-family="Arial,sans-serif">
+            ${{ix.residue_number}} (${{ix.chain}})
+          </text>`;
+
+    // --- Symbols (Superscripts at top-right of the glyph) ---
+    let symbol = "";
+    if (type === "salt_bridge") {{
+      symbol = ["LYS","ARG","HIS"].includes(ix.residue_name) ? "+" : "−";
+    }} else if (type === "pi_stack" || type === "pi_cation") {{
+      symbol = "&pi;";
+    }} else if (type === "halogen") {{
+      symbol = "X";
+    }}
+    if (symbol) {{
+      s += `<text x="${{(gx+NODER-4).toFixed(1)}}" y="${{(gy-NODER+8).toFixed(1)}}"
+              fill="${{col}}" font-size="14" font-weight="bold"
+              font-family="'Times New Roman',Georgia,serif">${{symbol}}</text>`;
     }}
   }});
 
