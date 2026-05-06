@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.9.3 — 2026-05-06
+
+### Added
+
+- **Publication-quality 2D interaction diagram** — the interaction viewer now includes a full LIGPLOT-style radial SVG diagram alongside the 3D view; toggled via a 3D/2D button pair in the toolbar
+- **Eyelash glyphs for hydrophobic contacts** — LIGPLOT convention: an arc with radiating hash lines facing away from the ligand, oriented toward the nearest interacting atom
+- **Inline RDKit ligand structure** — the 2D ligand SVG is embedded via `<g transform>` rather than `<image>`; transparent background, no white-box artefact; bonds recoloured for dark mode automatically
+- **Site view / full compound toggle** — switches between a cropped viewBox centred on the binding site and the full ligand layout; both views available via sidebar sub-buttons in 2D mode
+- **Dark mode in 2D diagram** — Dark BG and Distances toggles now work in 2D mode (were previously disabled on mode switch); toggling redraws the diagram immediately
+- **Type symbols on glyphs** — π for π-stack / π-cation, ± for salt bridge, X for halogen; rendered as superscripts at the top-right rim of each residue circle
+- **Collision-spread layout** — 10-pass O(n²) force spread prevents overlapping glyphs; angular separation enforced before radial placement
+
+### Fixed
+
+- **SVG painter's model** — connection lines were drawn after the ligand SVG and appeared visually on top of bond paths; reordered so lines are emitted first and render behind the molecule
+- **Atom coordinate scaling** — `transformPt` was scaling x and y independently with separate `vw`/`vh` factors, stretching positions when the cropped viewBox is non-square; replaced with a uniform fit-inside scale (`Math.min(LIG_W/vw, LIG_H/vh)`) matching RDKit's own layout model
+- **`ix_atom_pts` index bug** — connection lines were indexed with the filtered visible-array counter; `ix_atom_pts` is parallel to the full `compound.interactions` array; fixed by iterating all interactions with `origI` and skipping toggled-off types without advancing the index
+- **Glyph labels unified** — hydrophobic residue labels previously used a sine-based direction calculation that produced near-zero offsets for horizontal glyphs; all residue types now show name + number + chain consistently inside the circle body
+
+---
+
 ## v1.9.2 — 2026-05-05
 
 ### Fixed
