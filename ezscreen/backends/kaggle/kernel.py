@@ -59,6 +59,9 @@ def push_kernel(
     # title must slugify to exactly the slug — replace hyphens with spaces so
     # Kaggle's slug derivation round-trips back to the same value
     title = slug.replace("-", " ")
+    # machine_shape selects the GPU type; "accelerator" in metadata is ignored by the SDK.
+    # Valid values come from the Kaggle CLI --accelerator flag (GPU_T4x2, GPU_P100, etc.)
+    _MACHINE_SHAPE = {"nvidiaTeslaT4": "GPU_T4x2"}
     meta = {
         "id": f"{username}/{slug}",
         "title": title,
@@ -67,7 +70,7 @@ def push_kernel(
         "kernel_type": "notebook",
         "is_private": True,
         "enable_gpu": accelerator != "none",
-        "accelerator": accelerator,
+        "machine_shape": _MACHINE_SHAPE.get(accelerator),
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],
