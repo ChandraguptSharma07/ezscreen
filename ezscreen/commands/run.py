@@ -51,7 +51,7 @@ def _work_dir(run_id: str) -> Path:
 
 def _step_receptor(ctx: dict) -> dict | object:
     raw = questionary.text(
-        "Receptor — PDB ID (e.g. 7L11) or path to a .pdb file:",
+        "Receptor — PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file:",
         default=ctx.get("receptor_raw", ""),
     ).ask()
     if raw is None:
@@ -60,7 +60,14 @@ def _step_receptor(ctx: dict) -> dict | object:
     raw = raw.strip()
     work_dir = ctx["work_dir"]
 
-    if len(raw) == 4 and raw.isalnum():
+    if raw.upper().startswith("AF:"):
+        from ezscreen.prep.alphafold import download_alphafold_structure
+        uid = raw[3:].strip().upper()
+        out = work_dir / "receptor_raw" / f"AF-{uid}-model.pdb"
+        pdb_path, _ = download_alphafold_structure(uid, out)
+        ctx["pdb_source"] = "alphafold"
+        ctx["pdb_id"]     = uid
+    elif len(raw) == 4 and raw.isalnum():
         console.print(f"  [dim]Fetching {raw.upper()} from RCSB...[/dim]")
         pdb_path = rec_prep.fetch_pdb(raw.upper(), work_dir / "receptor_raw")
         ctx["pdb_source"] = "rcsb"
@@ -253,7 +260,7 @@ def _step_ligands(ctx: dict) -> dict | object:
         return _step_ligands(ctx)
 
     raw = questionary.text(
-        "Path to SDF file or folder:",
+        "Path to SDF / SMILES / ISM file or folder:",
         default=ctx.get("ligand_raw", ""),
     ).ask()
     if raw is None:

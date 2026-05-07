@@ -136,7 +136,7 @@ def filter_library(
         cfg = FilterConfig()
 
     suffix = _Path(input_path).suffix.lower()
-    if suffix in (".smi", ".smiles"):
+    if suffix in (".smi", ".smiles", ".ism"):
         supplier = SmilesMolSupplier(str(input_path), delimiter="\t ", titleLine=False)
     else:
         supplier = SDMolSupplier(str(input_path), removeHs=False, sanitize=True)

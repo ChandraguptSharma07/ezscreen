@@ -67,7 +67,7 @@ class RunWizardScreen(Screen):
             with ContentSwitcher(initial="step-receptor", id="wizard-switcher"):
 
                 # ── Step 1: Receptor & Chains ─────────────────────────
-                with Vertical(id="step-receptor", classes="wizard-step"):
+                with VerticalScroll(id="step-receptor", classes="wizard-step"):
                     yield Label(
                         "PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file",
                         classes="form-label",
@@ -86,7 +86,7 @@ class RunWizardScreen(Screen):
                         yield Vertical(id="chain-list")
 
                 # ── Step 2: Binding Site ──────────────────────────────
-                with Vertical(id="step-site", classes="wizard-step"):
+                with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
                     with RadioSet(id="site-method"):
                         yield RadioButton("Co-crystal ligand",         id="rb-cocrystal")
@@ -126,7 +126,7 @@ class RunWizardScreen(Screen):
                 # ── Step 3: Ligand Library ────────────────────────────
                 with Vertical(id="step-ligands", classes="wizard-step"):
                     yield Label(
-                        "Ligand library  (.sdf, .smi, or .ism file)",
+                        "Ligand library  (.sdf, .smi, .smiles, or .ism file)",
                         classes="form-label",
                     )
                     with Horizontal(classes="form-row"):
@@ -135,7 +135,26 @@ class RunWizardScreen(Screen):
                     yield Static("", id="lig-status", classes="form-status")
 
                 # ── Step 4: Run Options ───────────────────────────────
-                with Vertical(id="step-options", classes="wizard-step"):
+                with VerticalScroll(id="step-options", classes="wizard-step"):
+                    yield Label("Compute backend", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
+                        " Slower than GPU for large libraries.[/#6e7681]"
+                    )
+                    yield Switch(id="opt-local", value=False)
+                    yield Label("Exhaustiveness (Vina)", id="lbl-exhaustiveness", classes="form-label")
+                    yield Input(id="opt-exhaustiveness", placeholder="4 (from settings)")
+                    yield Label("Kaggle GPU", id="lbl-gpu", classes="form-section")
+                    with RadioSet(id="opt-gpu-type"):
+                        yield RadioButton(
+                            "P100 (16 GB) ★ — standard, widest availability",
+                            id="rb-p100",
+                            value=True,
+                        )
+                        yield RadioButton(
+                            "T4 × 2 (32 GB) — more memory, uses both GPUs",
+                            id="rb-t4x2",
+                        )
                     yield Label("ADMET pre-filter", classes="form-section")
                     yield Static(
                         "[#6e7681]Remove obvious drug-like failures before docking"
@@ -157,27 +176,6 @@ class RunWizardScreen(Screen):
                             "Thorough   \u2014 flexible ligands, induced-fit targets",
                             id="rb-thorough",
                         )
-                    yield Label("Compute backend", classes="form-section")
-                    yield Static(
-                        "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
-                        " Slower than GPU for large libraries.[/#6e7681]"
-                    )
-                    yield Switch(id="opt-local", value=False)
-                    with Vertical(id="local-options-section"):
-                        yield Label("Exhaustiveness (Vina)", classes="form-label")
-                        yield Input(id="opt-exhaustiveness", placeholder="4 (from settings)")
-                    with Vertical(id="kaggle-gpu-section"):
-                        yield Label("Kaggle GPU", classes="form-section")
-                        with RadioSet(id="opt-gpu-type"):
-                            yield RadioButton(
-                                "P100 (16 GB) ★ — standard, widest availability",
-                                id="rb-p100",
-                                value=True,
-                            )
-                            yield RadioButton(
-                                "T4 × 2 (32 GB) — more memory, uses both GPUs",
-                                id="rb-t4x2",
-                            )
                     yield VerticalScroll(id="acct-assignment-section")
 
                 # ── Step 5: Confirm & Submit ──────────────────────────
@@ -203,8 +201,10 @@ class RunWizardScreen(Screen):
         self.query_one("#chain-section").display  = False
         for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
             self.query_one(f"#{sid}").display = False
-        self.query_one("#local-options-section").display = False
-        self.query_one("#kaggle-gpu-section").display = True
+        self.query_one("#lbl-exhaustiveness").display = False
+        self.query_one("#opt-exhaustiveness").display = False
+        self.query_one("#lbl-gpu").display = True
+        self.query_one("#opt-gpu-type").display = True
         self._load_defaults()
         self._populate_account_assignment()
 
@@ -245,8 +245,10 @@ class RunWizardScreen(Screen):
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "opt-local":
             local_on = event.value
-            self.query_one("#local-options-section").display = local_on
-            self.query_one("#kaggle-gpu-section").display = not local_on
+            self.query_one("#lbl-exhaustiveness").display = local_on
+            self.query_one("#opt-exhaustiveness").display = local_on
+            self.query_one("#lbl-gpu").display = not local_on
+            self.query_one("#opt-gpu-type").display = not local_on
             self.query_one("#lbl-depth").display = not local_on
             self.query_one("#opt-depth").display = not local_on
             acct_section = self.query_one("#acct-assignment-section", VerticalScroll)
