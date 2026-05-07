@@ -169,11 +169,21 @@ def _enrich_scores_with_identity(output_dir: Path) -> None:
         return
 
     fieldnames += ["name", "smiles"]
+
+    # Compute LE/BEI now that we have SMILES — mirrors what merge_shard_results does
+    # for multi-account runs, ensuring single-account runs get the same columns.
+    score_col = next(
+        (h for h in fieldnames if "score" in h.lower() or "affinity" in h.lower()),
+        None,
+    )
+    from ezscreen.results.merger import _add_efficiency_cols
+    rows, fieldnames = _add_efficiency_cols(rows, fieldnames, score_col)
+
     with scores_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
-    console.print(f"  [dim]Enriched scores.csv with compound identity ({enriched} rows)[/dim]")
+    console.print(f"  [dim]Enriched scores.csv with identity + LE/BEI ({enriched} rows)[/dim]")
 
 
 def _fetch_output_urls(kernel_ref: str) -> list:

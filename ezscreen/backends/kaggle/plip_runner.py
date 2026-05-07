@@ -163,6 +163,17 @@ def run_plip_analysis(run_id: str, work_dir: Path) -> dict[str, Any]:
     if not poses_sdf.exists():
         return {"status": "failed", "interactions_path": None, "error": "poses.sdf not found — run at least one Kaggle shard first"}
 
+    if poses_sdf.stat().st_size == 0:
+        return {
+            "status": "failed",
+            "interactions_path": None,
+            "error": (
+                "poses.sdf is empty — the Kaggle notebook wrote no 3D poses. "
+                "This is a Meeko/obabel SDF conversion failure in cell 8. "
+                "Re-run the docking kernel and check its log for SDF conversion errors."
+            ),
+        }
+
     # Slice top-N
     with scores_csv.open() as f:
         all_rows = list(csv.DictReader(f))
@@ -182,7 +193,10 @@ def run_plip_analysis(run_id: str, work_dir: Path) -> dict[str, Any]:
     # Extract matching poses from poses.sdf
     from rdkit import Chem
     plip_poses = plip_dir / "plip_poses.sdf"
-    supplier   = Chem.SDMolSupplier(str(poses_sdf), removeHs=False)
+    try:
+        supplier = Chem.SDMolSupplier(str(poses_sdf), removeHs=False)
+    except OSError as exc:
+        return {"status": "failed", "interactions_path": None, "error": f"poses.sdf is unreadable: {exc}"}
     writer_sdf = Chem.SDWriter(str(plip_poses))
     written    = 0
     for mol in supplier:
