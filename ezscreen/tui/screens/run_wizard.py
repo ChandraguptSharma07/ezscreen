@@ -546,7 +546,7 @@ class RunWizardScreen(Screen):
             self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
             gpu_btn = self.query_one("#opt-gpu-type", RadioSet).pressed_button
             self._ctx["gpu_type"] = (
-                "nvidiaTeslaT4x2"
+                "nvidiaTeslaT4"
                 if gpu_btn and "T4" in str(gpu_btn.label)
                 else "nvidiaTeslaP100"
             )
@@ -644,7 +644,7 @@ class RunWizardScreen(Screen):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
         else:
-            gpu_label = "T4 × 2" if ctx.get("gpu_type") == "nvidiaTeslaT4x2" else "P100"
+            gpu_label = "T4 × 2" if ctx.get("gpu_type") == "nvidiaTeslaT4" else "P100"
             backend = f"Kaggle GPU ({gpu_label})"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
@@ -859,7 +859,7 @@ class RunWizardScreen(Screen):
                         max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                         max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                         mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
-                        gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4x2" else "",
+                        gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4" else "",
                     )
                     notebook_path = work_dir / "notebook.ipynb"
                     notebook_path.write_text(notebook_src, encoding="utf-8")
