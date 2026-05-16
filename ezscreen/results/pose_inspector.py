@@ -1012,7 +1012,10 @@ async function selectCompound(lig_id) {{
   if (compound.sdf_b64) {{
     const sdf = atob(compound.sdf_b64);
     ligandModel = viewer.addModel(sdf,"sdf");
-    viewer.setStyle({{model:ligandModel}},{{stick:{{colorscheme:"default",radius:.18}}}});
+    viewer.setStyle({{model:ligandModel}},{{
+      stick:  {{colorscheme:"Jmol", radius:0.16}},
+      sphere: {{colorscheme:"Jmol", scale:0.25}},
+    }});
   }}
   const bsRes=[...new Set((compound.interactions||[]).map(ix=>ix.residue_number))];
   if (bsRes.length) {{
