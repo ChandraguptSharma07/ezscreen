@@ -43,6 +43,12 @@ def _handle_error(exc: Exception) -> None:
         raise KaggleRateLimitError(str(exc)) from exc
     if any(c in msg for c in ("500", "502", "503", "504")):
         raise KaggleServerError(str(exc)) from exc
+    # Empty/non-JSON response body — Kaggle's edge layer returned a 5xx-equivalent
+    # without a JSON body. Treat as a transient server error so callers can retry.
+    if "expecting value" in msg or "jsondecodeerror" in msg:
+        raise KaggleServerError(
+            f"Kaggle returned an empty response (likely transient server issue): {exc}"
+        ) from exc
     raise KaggleBadRequestError(str(exc)) from exc
 
 
@@ -105,10 +111,20 @@ def upload_run_dataset(
     }
     (dataset_dir / "dataset-metadata.json").write_text(json.dumps(meta, indent=2))
 
-    try:
-        api.dataset_create_new(str(dataset_dir), public=False, quiet=True)
-    except Exception as exc:
-        _handle_error(exc)
+    # Retry transient server errors (empty body, 5xx) — these happen sporadically
+    # at Kaggle's edge layer and almost always succeed on a second attempt.
+    import time
+    for attempt in range(5):
+        try:
+            api.dataset_create_new(str(dataset_dir), public=False, quiet=True)
+            break
+        except Exception as exc:
+            try:
+                _handle_error(exc)
+            except KaggleServerError:
+                if attempt == 4:
+                    raise
+                time.sleep(2 ** (attempt + 1))
 
     _save_manifest(manifest)
     return f"{username}/{slug}"
