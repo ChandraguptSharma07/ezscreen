@@ -59,10 +59,15 @@ def push_kernel(
     # title must slugify to exactly the slug — replace hyphens with spaces so
     # Kaggle's slug derivation round-trips back to the same value
     title = slug.replace("-", " ")
-    # Kaggle T4 sessions are always 2x T4 GPUs (never single T4). "NvidiaTeslaT4"
-    # is the documented kagglesdk machine_shape value; reading from JSON metadata
-    # is the same path that worked before.
-    _MACHINE_SHAPE = {"nvidiaTeslaT4": "NvidiaTeslaT4"}
+    # enable_gpu is deprecated in favour of machine_shape per kagglesdk. Sending
+    # enable_gpu=True alongside machine_shape="NvidiaTeslaT4" still produced P100,
+    # so the server appears to prefer the deprecated bool. Force enable_gpu=False
+    # and let machine_shape pick the device. T4 sessions are always 2x T4.
+    _MACHINE_SHAPE = {
+        "nvidiaTeslaT4": "NvidiaTeslaT4",
+        "nvidiaTeslaP100": "NvidiaTeslaP100",
+    }
+    machine_shape = _MACHINE_SHAPE.get(accelerator)
     meta = {
         "id": f"{username}/{slug}",
         "title": title,
@@ -70,13 +75,14 @@ def push_kernel(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": accelerator != "none",
-        "machine_shape": _MACHINE_SHAPE.get(accelerator),
+        "enable_gpu": False,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],
         "kernel_sources": [],
     }
+    if machine_shape:
+        meta["machine_shape"] = machine_shape
     (kernel_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
 
     def _push():
