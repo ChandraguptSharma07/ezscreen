@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.9.4 — 2026-05-16
+
+### Fixed
+
+- **T4×2 GPU allocation** — Kaggle's server honours the deprecated `enable_gpu` bool over `machine_shape`, causing P100 to be allocated regardless of the T4 selection; fixed by forcing `enable_gpu: false` and routing all GPU selection solely through `machine_shape` (`NvidiaTeslaT4` / `NvidiaTeslaP100`)
+- **UniDock v1.1.3 compatibility** — removed `--gpu_ids` flag (dropped in v1.1.3, caused exit=1 on every docking run); replaced `--gpu_batch` with `--ligand_index <txt_file>`; expanded stderr capture to 3000 chars so parse errors at the top of output are visible
+- **Dataset upload retry** — Kaggle occasionally returns an empty HTTP body on transient 5xx; mapped `JSONDecodeError` to `KaggleServerError` so `upload_run_dataset()` retries up to 5× with exponential backoff instead of failing permanently
+- **LE/BEI missing in single-account runs** — efficiency columns were only appended in the multi-account merger path; fixed so single-account results include LE and BEI
+- **Empty `poses.sdf` PLIP crash** — PLIP runner now checks that `poses.sdf` is non-empty before submitting the analysis kernel
+- **Meeko API break** — updated call sites for Meeko's changed public API
+- **Kaggle file-list truncation** — dataset file listing was being silently truncated; switched to paginated fetch
+- **`.ism` ADMET filter** — `.ism` files (Daylight SMILES) are now accepted alongside `.smi`
+- **`AF:UniProt` in CLI** — `ezscreen run` CLI command now accepts `AF:UniProt` receptor syntax, matching the TUI wizard
+- **GPU selector hidden in wizard** — the GPU type radio set was not visible on the options step in certain layout states; display logic corrected
+
+---
+
 ## v1.9.3 — 2026-05-06
 
 ### Added
