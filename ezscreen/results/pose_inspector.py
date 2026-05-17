@@ -260,6 +260,13 @@ body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: 
 }}
 body.light .tb-select {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
 
+.tb-color {{
+  width: 28px; height: 26px; padding: 0;
+  border: 1px solid #30363d; border-radius: 6px;
+  background: transparent; cursor: pointer;
+}}
+body.light .tb-color {{ border-color: #d0d7de; }}
+
 /* view-toggle pair */
 .view-pair {{ display: flex; gap: 0; }}
 .view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
@@ -383,6 +390,12 @@ h3 {{
 
   <div class="tb-sep"></div>
 
+  <span class="tb-label">Protein</span>
+  <button class="tb-btn active" id="btn-spectrum" onclick="toggleSpectrum()" title="Rainbow N-to-C colouring">Spectrum</button>
+  <input type="color" id="cartoon-color" class="tb-color" value="#8b949e" onchange="setCartoonColor(this.value)" title="Cartoon colour (used when Spectrum is off)" />
+
+  <div class="tb-sep"></div>
+
   <span class="tb-label">Display</span>
   <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light / dark background">Dark BG</button>
   <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Residue name labels in 3D">Res Labels</button>
@@ -492,6 +505,8 @@ let showDistLabels = false;
 let showHydrophob  = false;
 let showPocketSurf = false;
 let depthFog       = true;
+let useSpectrum    = true;
+let cartoonColor   = '#8b949e';
 let currentPreset  = 'publication';
 let ligandModel    = null;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
@@ -787,6 +802,32 @@ function toggleDepth() {{
   viewer.render();
 }}
 
+function cartoonStyle() {{
+  // Spectrum is the most informative default; a single colour is what people
+  // want for journal figures. Keep opacity high so it doesn't read as washed
+  // out behind the pocket sticks.
+  return useSpectrum
+    ? {{color:"spectrum", opacity:0.9}}
+    : {{color:cartoonColor, opacity:0.85}};
+}}
+
+function toggleSpectrum() {{
+  useSpectrum = !useSpectrum;
+  document.getElementById("btn-spectrum").classList.toggle("active", useSpectrum);
+  applyPreset(currentPreset);
+}}
+
+function setCartoonColor(hex) {{
+  cartoonColor = hex;
+  if (useSpectrum) {{
+    // Picking a colour implies the user wants a flat colour; switch off
+    // spectrum so the choice actually takes effect.
+    useSpectrum = false;
+    document.getElementById("btn-spectrum").classList.remove("active");
+  }}
+  applyPreset(currentPreset);
+}}
+
 // Three presets that swap how the receptor is drawn around the ligand.
 async function applyPreset(name) {{
   currentPreset = name;
@@ -795,7 +836,7 @@ async function applyPreset(name) {{
   viewer.setStyle({{model:0}}, {{}});
 
   if (name === 'publication') {{
-    viewer.setStyle({{model:0}}, {{cartoon:{{color:"#8b949e", opacity:0.45}}}});
+    viewer.setStyle({{model:0}}, {{cartoon: cartoonStyle()}});
     if (pocketResi.length) {{
       viewer.addStyle({{model:0, resi:pocketResi}},
         {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
