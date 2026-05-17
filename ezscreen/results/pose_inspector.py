@@ -1041,7 +1041,15 @@ async function selectCompound(lig_id) {{
   renderSidebar(compound);
 
   if (currentMode==='3d') {{
-    if (ligandModel!==null) {{ viewer.center({{model:ligandModel}}); viewer.zoom(2.0); }}
+    if (ligandModel!==null) {{
+      // Frame ligand + pocket together so the user sees the binding site in context,
+      // then nudge off-axis so it doesn't look like a flat schematic.
+      const sel = pocketResi.length
+        ? {{or:[{{model:ligandModel}}, {{model:0, resi:pocketResi}}]}}
+        : {{model:ligandModel}};
+      viewer.zoomTo(sel, 500);
+      viewer.rotate(15, "x");
+    }}
     viewer.render();
   }} else {{
     draw2DView(compound, siteMode);
