@@ -629,11 +629,27 @@ function drawInteractions(ixs) {{
   ixs.forEach(ix => {{
     if (!activeToggles[ix.type]) return;
     const color = COLORS[ix.type]||"#fff";
-    currentShapes.push(viewer.addCylinder({{
-      start:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
-      end:  {{x:ix.ligand_coords[0], y:ix.ligand_coords[1], z:ix.ligand_coords[2] }},
-      radius:.1, color, opacity:.9, dashed:true,
-    }}));
+
+    // H-bonds: if PLIP gave us the H atom, render donor–H solid + H–acceptor
+    // dashed, which is the convention every textbook uses. Otherwise fall
+    // back to a single dashed cylinder so older runs still display.
+    if (ix.type === 'hbond' && ix.h_coords && ix.donor_coords && ix.acceptor_coords) {{
+      const d = ix.donor_coords, h = ix.h_coords, a = ix.acceptor_coords;
+      currentShapes.push(viewer.addCylinder({{
+        start:{{x:d[0],y:d[1],z:d[2]}}, end:{{x:h[0],y:h[1],z:h[2]}},
+        radius:.06, color, opacity:.75, dashed:false,
+      }}));
+      currentShapes.push(viewer.addCylinder({{
+        start:{{x:h[0],y:h[1],z:h[2]}}, end:{{x:a[0],y:a[1],z:a[2]}},
+        radius:.1, color, opacity:.95, dashed:true,
+      }}));
+    }} else {{
+      currentShapes.push(viewer.addCylinder({{
+        start:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
+        end:  {{x:ix.ligand_coords[0], y:ix.ligand_coords[1], z:ix.ligand_coords[2] }},
+        radius:.1, color, opacity:.9, dashed:true,
+      }}));
+    }}
     if (showDistLabels) {{
       const lbl = viewer.addLabel(`${{ix.distance.toFixed(1)}} Å`,{{
         position:{{
