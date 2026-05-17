@@ -461,6 +461,7 @@ let distLabels     = [];
 let resLabels      = [];
 let hydrophobSurf  = null;
 let currentData    = null;
+let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -548,6 +549,7 @@ function clearLigand() {{
   distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
   resLabels.forEach(l=>viewer.removeLabel(l));     resLabels=[];
   if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
+  pocketResi = [];
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
 }}
 
@@ -1017,9 +1019,17 @@ async function selectCompound(lig_id) {{
       sphere: {{colorscheme:"Jmol", scale:0.25}},
     }});
   }}
-  const bsRes=[...new Set((compound.interactions||[]).map(ix=>ix.residue_number))];
-  if (bsRes.length) {{
-    viewer.addStyle({{model:0,resi:bsRes}},{{stick:{{colorscheme:"whiteCarbon",radius:.12}}}});
+  // Pull every residue with at least one atom inside 5 Å of the ligand — gives
+  // a fuller picture of the pocket than the PLIP-interaction residues alone.
+  if (ligandModel !== null) {{
+    const near = viewer.selectedAtoms({{
+      model:0, within:{{distance:5.0, sel:{{model:ligandModel}}}},
+    }});
+    pocketResi = [...new Set(near.map(a=>a.resi))];
+  }}
+  if (pocketResi.length) {{
+    viewer.addStyle({{model:0, resi:pocketResi}},
+      {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
   }}
   drawInteractions(compound.interactions||[]);
   if (showResLabels) drawResidueLabels(compound);
