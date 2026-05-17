@@ -256,9 +256,16 @@ body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: 
 .tb-select {{
   background: #21262d; color: #c9d1d9;
   border: 1px solid #30363d; border-radius: 6px;
-  padding: 4px 8px; font-size: 12px; cursor: pointer;
+  padding: 4px 26px 4px 10px; font-size: 12px;
+  cursor: pointer; min-width: 110px;
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%238b949e' d='M2 4l4 4 4-4z'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 10px;
 }}
-body.light .tb-select {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
+.tb-select:hover {{ border-color: #58a6ff; }}
+body.light .tb-select {{ background-color: #fff; color: #24292f; border-color: #d0d7de; }}
 
 .tb-color {{
   width: 28px; height: 26px; padding: 0;
@@ -391,8 +398,21 @@ h3 {{
   <div class="tb-sep"></div>
 
   <span class="tb-label">Protein</span>
+  <select id="protein-style" class="tb-select" onchange="setProteinStyle(this.value)" title="Protein representation">
+    <option value="cartoon" selected>Cartoon</option>
+    <option value="lines">Lines</option>
+  </select>
   <button class="tb-btn active" id="btn-spectrum" onclick="toggleSpectrum()" title="Rainbow N-to-C colouring">Spectrum</button>
-  <input type="color" id="cartoon-color" class="tb-color" value="#8b949e" onchange="setCartoonColor(this.value)" title="Cartoon colour (used when Spectrum is off)" />
+  <input type="color" id="cartoon-color" class="tb-color" value="#8b949e" onchange="setCartoonColor(this.value)" title="Protein colour (used when Spectrum is off)" />
+
+  <div class="tb-sep"></div>
+
+  <span class="tb-label">Ligand</span>
+  <select id="ligand-style" class="tb-select" onchange="setLigandStyle(this.value)" title="Ligand representation">
+    <option value="ballstick" selected>Ball &amp; stick</option>
+    <option value="sticks">Sticks</option>
+    <option value="cartoon">Cartoon</option>
+  </select>
 
   <div class="tb-sep"></div>
 
@@ -486,6 +506,25 @@ function kdHex(resn) {{
   return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
 }}
 
+// HSL → hex, used by the spectrum-cartoon colorfunc on the ligand.
+function hslToHex(h, s, l) {{
+  s /= 100; l /= 100;
+  const k = n => (n + h/30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const c = n => {{
+    const v = l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return Math.round(255 * v).toString(16).padStart(2, "0");
+  }};
+  return "#" + c(0) + c(8) + c(4);
+}}
+
+// Same rainbow ramp 3Dmol uses for cartoon spectrum: blue → green → red.
+function ligandSpectrumColor(atom) {{
+  const n = Math.max(1, ligandAtomCount - 1);
+  const t = Math.min(1, Math.max(0, (atom.index || 0) / n));
+  return hslToHex((1 - t) * 240, 70, 55);
+}}
+
 // ── Amino-acid character colours ────────────────────────────────────────
 const AA_CLS = {{
   ALA:'hp',VAL:'hp',LEU:'hp',ILE:'hp',PRO:'hp',PHE:'hp',MET:'hp',TRP:'hp',
@@ -507,6 +546,8 @@ let showPocketSurf = false;
 let depthFog       = true;
 let useSpectrum    = true;
 let cartoonColor   = '#8b949e';
+let proteinStyle   = 'cartoon';   // cartoon | tube | lines
+let ligandStyle    = 'ballstick'; // ballstick | sticks | spheres
 let currentPreset  = 'publication';
 let ligandModel    = null;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
@@ -518,6 +559,7 @@ let pocketSurf     = null;
 let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
+let ligandAtomCount = 0;          // for spectrum-cartoon gradient over the ligand
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -666,6 +708,7 @@ function clearLigand() {{
   if (pocketSurf!==null)    {{ viewer.removeSurface(pocketSurf);    pocketSurf=null;    }}
   clearPinnedLabels();
   pocketResi = [];
+  ligandAtomCount = 0;
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
   if (typeof updateInset === 'function') updateInset(null);
 }}
@@ -802,19 +845,54 @@ function toggleDepth() {{
   viewer.render();
 }}
 
-function cartoonStyle() {{
+function cartoonColorSpec() {{
   // Spectrum is the most informative default; a single colour is what people
   // want for journal figures. Keep opacity high so it doesn't read as washed
   // out behind the pocket sticks.
   return useSpectrum
     ? {{color:"spectrum", opacity:0.9}}
-    : {{color:cartoonColor, opacity:0.85}};
+    : {{color:cartoonColor, opacity:0.9}};
+}}
+
+// What to draw for the whole protein (model 0) before any pocket overlay.
+function proteinBaseStyle() {{
+  if (proteinStyle === 'lines') {{
+    // Thin sticks render as proper cylinders across browsers (raw GL lines
+    // are 1 px wide regardless of linewidth and vanish in print). 0.08 Å
+    // is the sweet spot — wireframe-thin but still visible.
+    const base = {{radius: 0.08, opacity: 0.9}};
+    return {{stick: useSpectrum
+      ? {{...base, colorscheme: "chainHetatm"}}
+      : {{...base, color: cartoonColor}}}};
+  }}
+  // default: smooth cartoon ribbon
+  return {{cartoon: cartoonColorSpec()}};
+}}
+
+// How to draw the docked ligand. "cartoon" borrows the spectrum colour ramp
+// that makes the protein cartoon read as polished, walked across the ligand
+// in atom-index order. Small joint spheres stay so the chemistry doesn't
+// dissolve into a single rainbow blur.
+function ligandStyleSpec() {{
+  if (ligandStyle === 'sticks') {{
+    return {{stick:{{colorscheme:"Jmol", radius:0.22}}}};
+  }}
+  if (ligandStyle === 'cartoon') {{
+    return {{
+      stick:  {{radius:0.22, colorfunc: ligandSpectrumColor}},
+      sphere: {{scale:0.14,  colorfunc: ligandSpectrumColor}},
+    }};
+  }}
+  return {{
+    stick:  {{colorscheme:"Jmol", radius:0.16}},
+    sphere: {{colorscheme:"Jmol", scale:0.28}},
+  }};
 }}
 
 function toggleSpectrum() {{
   useSpectrum = !useSpectrum;
   document.getElementById("btn-spectrum").classList.toggle("active", useSpectrum);
-  applyPreset(currentPreset);
+  rebuildScene();
 }}
 
 function setCartoonColor(hex) {{
@@ -825,40 +903,67 @@ function setCartoonColor(hex) {{
     useSpectrum = false;
     document.getElementById("btn-spectrum").classList.remove("active");
   }}
-  applyPreset(currentPreset);
+  rebuildScene();
 }}
 
-// Three presets that swap how the receptor is drawn around the ligand.
-async function applyPreset(name) {{
-  currentPreset = name;
-  // Wipe receptor styles and rebuild from scratch — additive styling gets
-  // messy fast when toggling between presets.
-  viewer.setStyle({{model:0}}, {{}});
+function setProteinStyle(s) {{ proteinStyle = s; rebuildScene(); }}
+function setLigandStyle(s)  {{ ligandStyle  = s; rebuildScene(); }}
 
-  if (name === 'publication') {{
-    viewer.setStyle({{model:0}}, {{cartoon: cartoonStyle()}});
-    if (pocketResi.length) {{
-      viewer.addStyle({{model:0, resi:pocketResi}},
-        {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
-    }}
-    showPocketSurf = false;
-  }} else if (name === 'sticks') {{
-    if (pocketResi.length) {{
-      viewer.addStyle({{model:0, resi:pocketResi}},
-        {{stick:{{colorscheme:"cyanCarbon", radius:0.22}}}});
-    }}
-    showPocketSurf = false;
-  }} else if (name === 'surface') {{
-    if (pocketResi.length) {{
-      viewer.addStyle({{model:0, resi:pocketResi}},
-        {{stick:{{colorscheme:"cyanCarbon", radius:0.18}}}});
-    }}
-    showPocketSurf = true;
+// Split pocket residues into the ones PLIP actually flagged as interacting
+// vs. the rest of the 5 Å shell. Thick sticks for contacts, hairline sticks
+// for context — keeps the pocket readable without losing nearby residues.
+function pocketSplit() {{
+  const interacting = new Set();
+  if (currentData && currentData.interactions) {{
+    currentData.interactions.forEach(ix => interacting.add(ix.residue_number));
+  }}
+  const ix    = pocketResi.filter(r =>  interacting.has(r));
+  const other = pocketResi.filter(r => !interacting.has(r));
+  return [ix, other];
+}}
+
+// Source of truth for what gets drawn in the main viewer. Called by the
+// dropdowns, the preset, the spectrum / colour pickers, and on every compound
+// switch. Reads only state — never the DOM — so it's easy to reason about.
+async function rebuildScene() {{
+  viewer.setStyle({{model:0}}, {{}});
+  viewer.setStyle({{model:0}}, proteinBaseStyle());
+
+  const [ixResi, otherResi] = pocketSplit();
+  // Context residues get hairline sticks unless we're hiding the protein
+  // entirely behind a surface, in which case they'd just visually fight.
+  if (otherResi.length && proteinStyle !== 'lines') {{
+    viewer.addStyle({{model:0, resi:otherResi}},
+      {{stick:{{colorscheme:"cyanCarbon", radius:0.06, opacity:0.7}}}});
+  }}
+  if (ixResi.length) {{
+    viewer.addStyle({{model:0, resi:ixResi}},
+      {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
+  }}
+
+  if (ligandModel !== null) {{
+    viewer.setStyle({{model:ligandModel}}, ligandStyleSpec());
   }}
 
   document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
   await refreshPocketSurface();
   viewer.render();
+}}
+
+// Presets are convenience macros: they set the dropdowns + surface toggle,
+// then ask the renderer to rebuild. The dropdowns remain the source of truth.
+async function applyPreset(name) {{
+  currentPreset = name;
+  if (name === 'publication') {{
+    proteinStyle = 'cartoon';  ligandStyle = 'ballstick'; showPocketSurf = false;
+  }} else if (name === 'sticks') {{
+    proteinStyle = 'lines';    ligandStyle = 'cartoon';   showPocketSurf = false;
+  }} else if (name === 'surface') {{
+    proteinStyle = 'cartoon';  ligandStyle = 'sticks';    showPocketSurf = true;
+  }}
+  document.getElementById("protein-style").value = proteinStyle;
+  document.getElementById("ligand-style").value  = ligandStyle;
+  await rebuildScene();
 }}
 
 function setPreset(name) {{ applyPreset(name); }}
@@ -869,7 +974,8 @@ function updateInset(compound) {{
     insetViewer.removeModel(insetLigandModel);
     insetLigandModel = null;
   }}
-  insetViewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.4}}}});
+  insetViewer.setStyle({{model:0}}, {{}});
+  insetViewer.setStyle({{model:0}}, proteinBaseStyle());
 
   if (!compound || !compound.sdf_b64) {{
     insetViewer.zoomTo({{model:0}});
@@ -878,16 +984,16 @@ function updateInset(compound) {{
   }}
 
   insetLigandModel = insetViewer.addModel(atob(compound.sdf_b64), "sdf");
-  insetViewer.setStyle({{model:insetLigandModel}},{{
-    stick:  {{colorscheme:"Jmol", radius:0.16}},
-    sphere: {{colorscheme:"Jmol", scale:0.25}},
-  }});
-  if (pocketResi.length) {{
-    insetViewer.addStyle({{model:0, resi:pocketResi}},
+  insetViewer.setStyle({{model:insetLigandModel}}, ligandStyleSpec());
+
+  const [ixResi] = pocketSplit();
+  if (ixResi.length) {{
+    insetViewer.addStyle({{model:0, resi:ixResi}},
       {{stick:{{colorscheme:"cyanCarbon", radius:0.18}}}});
   }}
-  const sel = pocketResi.length
-    ? {{or:[{{model:insetLigandModel}}, {{model:0, resi:pocketResi}}]}}
+
+  const sel = ixResi.length
+    ? {{or:[{{model:insetLigandModel}}, {{model:0, resi:ixResi}}]}}
     : {{model:insetLigandModel}};
   insetViewer.zoomTo(sel);
   insetViewer.rotate(90, "y");
@@ -1262,10 +1368,8 @@ async function selectCompound(lig_id) {{
   if (compound.sdf_b64) {{
     const sdf = atob(compound.sdf_b64);
     ligandModel = viewer.addModel(sdf,"sdf");
-    viewer.setStyle({{model:ligandModel}},{{
-      stick:  {{colorscheme:"Jmol", radius:0.16}},
-      sphere: {{colorscheme:"Jmol", scale:0.25}},
-    }});
+    ligandAtomCount = viewer.selectedAtoms({{model:ligandModel}}).length;
+    // Style is applied by rebuildScene() below, after pocket detection.
   }}
   // Pull every residue with at least one atom inside 5 Å of the ligand — gives
   // a fuller picture of the pocket than the PLIP-interaction residues alone.
@@ -1285,7 +1389,7 @@ async function selectCompound(lig_id) {{
     }}
     pocketResi = [...hit];
   }}
-  await applyPreset(currentPreset);
+  await rebuildScene();
   setupHover();
   drawInteractions(compound.interactions||[]);
   updateInset(compound);
