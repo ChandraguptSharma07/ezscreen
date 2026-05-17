@@ -462,6 +462,7 @@ let resLabels      = [];
 let hydrophobSurf  = null;
 let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
+let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -503,6 +504,36 @@ function setupHover() {{
       }}
     }}
   );
+
+  // Click to pin — same selection, toggles a persistent label.
+  viewer.setClickable(hoverSel, true, function(atom) {{
+    const key = `${{atom.model}}:${{atom.chain||''}}:${{atom.resi}}:${{atom.atom}}`;
+    if (pinnedLabels.has(key)) {{
+      viewer.removeLabel(pinnedLabels.get(key));
+      pinnedLabels.delete(key);
+      viewer.render();
+      return;
+    }}
+    const isLig = (ligandModel !== null && atom.model === ligandModel);
+    const text = isLig
+      ? `${{atom.resn}} · ${{atom.atom}}`
+      : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}}`;
+    const label = viewer.addLabel(text, {{
+      position: atom,
+      backgroundColor: darkMode ? "rgba(31,111,235,.95)" : "rgba(9,105,218,.95)",
+      fontColor: "#ffffff",
+      borderColor: darkMode ? "#388bfd" : "#0969da",
+      borderThickness: 1.5, fontSize: 12, borderRadius: 5, padding: 6,
+      inFront: true,
+    }});
+    pinnedLabels.set(key, label);
+    viewer.render();
+  }});
+}}
+
+function clearPinnedLabels() {{
+  pinnedLabels.forEach(l => viewer.removeLabel(l));
+  pinnedLabels.clear();
 }}
 
 // ── Compound dropdown ────────────────────────────────────────────────────
@@ -567,6 +598,7 @@ function clearLigand() {{
   distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
   resLabels.forEach(l=>viewer.removeLabel(l));     resLabels=[];
   if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
+  clearPinnedLabels();
   pocketResi = [];
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
 }}
