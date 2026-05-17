@@ -271,6 +271,23 @@ body.light .tb-select {{ background: #fff; color: #24292f; border-color: #d0d7de
 #viewer-wrap {{ flex: 1; display: flex; position: relative; }}
 #viewer {{ flex: 1; position: relative; }}
 
+/* Fixed 90° inset — sits in the corner, no mouse, gives the user a second angle on the pocket */
+#viewer-inset {{
+  position: absolute; top: 12px; right: 12px;
+  width: 220px; height: 220px;
+  background: rgba(13,17,23,.55);
+  border: 1px solid #30363d; border-radius: 8px;
+  overflow: hidden; pointer-events: none;
+  z-index: 10;
+}}
+body.light #viewer-inset {{ background: rgba(246,248,250,.7); border-color: #d0d7de; }}
+#viewer-inset .inset-label {{
+  position: absolute; top: 6px; left: 8px;
+  font-size: 10px; color: #8b949e;
+  font-family: system-ui, sans-serif; letter-spacing: .04em;
+  pointer-events: none;
+}}
+
 /* 2D diagram area */
 #diagram2d-wrap {{
   flex: 1; display: none; align-items: center;
@@ -399,6 +416,7 @@ h3 {{
         Recording&hellip; <span id="record-pct">0%</span><br><small>Please wait</small>
       </div>
     </div>
+    <div id="viewer-inset"><span class="inset-label">90&deg; view</span></div>
   </div>
 
   <!-- ── 2D diagram area ──────────────────────── -->
@@ -493,6 +511,15 @@ viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
 viewer.enableFog(true);
 viewer.zoomTo({{model:0}});
 viewer.render();
+
+// Secondary viewer pinned to a 90° rotation — useful for figure prep where
+// readers want to see both faces of the pocket without re-rendering.
+const insetViewer = $3Dmol.createViewer("viewer-inset", {{
+  backgroundColor: "#0d1117", backgroundAlpha: 0, antialias: true,
+}});
+insetViewer.addModel(RECEPTOR,"pdb");
+insetViewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.4}}}});
+let insetLigandModel = null;
 
 // Hover tooltips are wired up per-compound in setupHover() — at init time
 // there is nothing useful to label, and the cartoon ribbon swallows hover
@@ -625,6 +652,7 @@ function clearLigand() {{
   clearPinnedLabels();
   pocketResi = [];
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
+  if (typeof updateInset === 'function') updateInset(null);
 }}
 
 // ── 3D: draw interactions ────────────────────────────────────────────────
@@ -793,6 +821,37 @@ async function applyPreset(name) {{
 }}
 
 function setPreset(name) {{ applyPreset(name); }}
+
+function updateInset(compound) {{
+  // Always rebuild from scratch — the inset is small and the cost is trivial.
+  if (insetLigandModel !== null) {{
+    insetViewer.removeModel(insetLigandModel);
+    insetLigandModel = null;
+  }}
+  insetViewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.4}}}});
+
+  if (!compound || !compound.sdf_b64) {{
+    insetViewer.zoomTo({{model:0}});
+    insetViewer.render();
+    return;
+  }}
+
+  insetLigandModel = insetViewer.addModel(atob(compound.sdf_b64), "sdf");
+  insetViewer.setStyle({{model:insetLigandModel}},{{
+    stick:  {{colorscheme:"Jmol", radius:0.16}},
+    sphere: {{colorscheme:"Jmol", scale:0.25}},
+  }});
+  if (pocketResi.length) {{
+    insetViewer.addStyle({{model:0, resi:pocketResi}},
+      {{stick:{{colorscheme:"cyanCarbon", radius:0.18}}}});
+  }}
+  const sel = pocketResi.length
+    ? {{or:[{{model:insetLigandModel}}, {{model:0, resi:pocketResi}}]}}
+    : {{model:insetLigandModel}};
+  insetViewer.zoomTo(sel);
+  insetViewer.rotate(90, "y");
+  insetViewer.render();
+}}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
 function renderSidebar(compound) {{
@@ -1178,6 +1237,7 @@ async function selectCompound(lig_id) {{
   await applyPreset(currentPreset);
   setupHover();
   drawInteractions(compound.interactions||[]);
+  updateInset(compound);
   if (showResLabels) drawResidueLabels(compound);
   await refreshPocketSurface();
   await refreshHydrophobSurface();
