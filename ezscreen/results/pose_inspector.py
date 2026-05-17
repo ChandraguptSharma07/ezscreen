@@ -354,6 +354,7 @@ h3 {{
   <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light / dark background">Dark BG</button>
   <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Residue name labels in 3D">Res Labels</button>
   <button class="tb-btn" id="btn-dist"   onclick="toggleDistLabels()"  title="Distance labels on interaction lines">Distances</button>
+  <button class="tb-btn" id="btn-surf"   onclick="togglePocketSurf()"  title="Translucent surface of the pocket">Pocket Surface</button>
   <button class="tb-btn" id="btn-hydro"  onclick="toggleHydrophob()"   title="Kyte-Doolittle pocket surface">Hydrophobicity</button>
 
   <div class="tb-sep"></div>
@@ -454,12 +455,14 @@ let siteMode       = true;
 let showResLabels  = false;
 let showDistLabels = false;
 let showHydrophob  = false;
+let showPocketSurf = false;
 let ligandModel    = null;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
 let currentShapes  = [];
 let distLabels     = [];
 let resLabels      = [];
 let hydrophobSurf  = null;
+let pocketSurf     = null;
 let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
@@ -598,6 +601,7 @@ function clearLigand() {{
   distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
   resLabels.forEach(l=>viewer.removeLabel(l));     resLabels=[];
   if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
+  if (pocketSurf!==null)    {{ viewer.removeSurface(pocketSurf);    pocketSurf=null;    }}
   clearPinnedLabels();
   pocketResi = [];
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
@@ -656,6 +660,17 @@ function refreshResLabels() {{
   viewer.render();
 }}
 
+async function refreshPocketSurface() {{
+  if (pocketSurf !== null) {{ viewer.removeSurface(pocketSurf); pocketSurf = null; }}
+  if (!showPocketSurf || !pocketResi.length) {{ viewer.render(); return; }}
+  pocketSurf = await viewer.addSurface(
+    $3Dmol.SurfaceType.SES,
+    {{ opacity: 0.55, color: darkMode ? "#c9d1d9" : "#6e7681" }},
+    {{ model: 0, resi: pocketResi }},
+  );
+  viewer.render();
+}}
+
 async function refreshHydrophobSurface() {{
   if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
   if (!showHydrophob||!currentData) {{ viewer.render(); return; }}
@@ -678,6 +693,7 @@ function toggleBackground() {{
   btn.textContent=darkMode?"Dark BG":"Light BG";
   btn.classList.toggle("active",!darkMode);
   if (currentData&&currentMode==='2d') draw2DView(currentData,siteMode);
+  if (showPocketSurf) refreshPocketSurface();
 }}
 function toggleResLabels() {{
   showResLabels=!showResLabels;
@@ -694,6 +710,11 @@ function toggleHydrophob() {{
   showHydrophob=!showHydrophob;
   document.getElementById("btn-hydro").classList.toggle("active",showHydrophob);
   refreshHydrophobSurface();
+}}
+function togglePocketSurf() {{
+  showPocketSurf = !showPocketSurf;
+  document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
+  refreshPocketSurface();
 }}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -1087,6 +1108,7 @@ async function selectCompound(lig_id) {{
   setupHover();
   drawInteractions(compound.interactions||[]);
   if (showResLabels) drawResidueLabels(compound);
+  await refreshPocketSurface();
   await refreshHydrophobSurface();
 
   renderSidebar(compound);
