@@ -253,6 +253,13 @@ body.light .tb-btn {{ background: #fff; color: #24292f; border-color: #d0d7de; }
 body.light .tb-btn:hover {{ background: #f3f4f6; }}
 body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: #fff; }}
 
+.tb-select {{
+  background: #21262d; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px;
+  padding: 4px 8px; font-size: 12px; cursor: pointer;
+}}
+body.light .tb-select {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
+
 /* view-toggle pair */
 .view-pair {{ display: flex; gap: 0; }}
 .view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
@@ -350,6 +357,15 @@ h3 {{
 </div>
 
 <div id="toolbar">
+  <span class="tb-label">Preset</span>
+  <select id="preset-select" class="tb-select" onchange="setPreset(this.value)" title="Overall rendering style">
+    <option value="publication" selected>Publication</option>
+    <option value="sticks">Sticks only</option>
+    <option value="surface">Surface + ligand</option>
+  </select>
+
+  <div class="tb-sep"></div>
+
   <span class="tb-label">Display</span>
   <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light / dark background">Dark BG</button>
   <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Residue name labels in 3D">Res Labels</button>
@@ -456,6 +472,7 @@ let showResLabels  = false;
 let showDistLabels = false;
 let showHydrophob  = false;
 let showPocketSurf = false;
+let currentPreset  = 'publication';
 let ligandModel    = null;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
 let currentShapes  = [];
@@ -716,6 +733,41 @@ function togglePocketSurf() {{
   document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
   refreshPocketSurface();
 }}
+
+// Three presets that swap how the receptor is drawn around the ligand.
+async function applyPreset(name) {{
+  currentPreset = name;
+  // Wipe receptor styles and rebuild from scratch — additive styling gets
+  // messy fast when toggling between presets.
+  viewer.setStyle({{model:0}}, {{}});
+
+  if (name === 'publication') {{
+    viewer.setStyle({{model:0}}, {{cartoon:{{color:"#8b949e", opacity:0.45}}}});
+    if (pocketResi.length) {{
+      viewer.addStyle({{model:0, resi:pocketResi}},
+        {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
+    }}
+    showPocketSurf = false;
+  }} else if (name === 'sticks') {{
+    if (pocketResi.length) {{
+      viewer.addStyle({{model:0, resi:pocketResi}},
+        {{stick:{{colorscheme:"cyanCarbon", radius:0.22}}}});
+    }}
+    showPocketSurf = false;
+  }} else if (name === 'surface') {{
+    if (pocketResi.length) {{
+      viewer.addStyle({{model:0, resi:pocketResi}},
+        {{stick:{{colorscheme:"cyanCarbon", radius:0.18}}}});
+    }}
+    showPocketSurf = true;
+  }}
+
+  document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
+  await refreshPocketSurface();
+  viewer.render();
+}}
+
+function setPreset(name) {{ applyPreset(name); }}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
 function renderSidebar(compound) {{
@@ -1081,9 +1133,6 @@ async function selectCompound(lig_id) {{
   // Disable site toggle if no viewbox crop available
   document.getElementById("btn-site").disabled = !compound.site_viewbox;
 
-  // Mute the cartoon so it frames the pocket without competing for attention.
-  viewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.45}}}});
-
   // 3D
   if (compound.sdf_b64) {{
     const sdf = atob(compound.sdf_b64);
@@ -1101,10 +1150,7 @@ async function selectCompound(lig_id) {{
     }});
     pocketResi = [...new Set(near.map(a=>a.resi))];
   }}
-  if (pocketResi.length) {{
-    viewer.addStyle({{model:0, resi:pocketResi}},
-      {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
-  }}
+  await applyPreset(currentPreset);
   setupHover();
   drawInteractions(compound.interactions||[]);
   if (showResLabels) drawResidueLabels(compound);
