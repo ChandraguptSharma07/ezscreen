@@ -1010,6 +1010,9 @@ async function selectCompound(lig_id) {{
   // Disable site toggle if no viewbox crop available
   document.getElementById("btn-site").disabled = !compound.site_viewbox;
 
+  // Mute the cartoon so it frames the pocket without competing for attention.
+  viewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.45}}}});
+
   // 3D
   if (compound.sdf_b64) {{
     const sdf = atob(compound.sdf_b64);
