@@ -372,6 +372,7 @@ h3 {{
   <button class="tb-btn" id="btn-dist"   onclick="toggleDistLabels()"  title="Distance labels on interaction lines">Distances</button>
   <button class="tb-btn" id="btn-surf"   onclick="togglePocketSurf()"  title="Translucent surface of the pocket">Pocket Surface</button>
   <button class="tb-btn" id="btn-hydro"  onclick="toggleHydrophob()"   title="Kyte-Doolittle pocket surface">Hydrophobicity</button>
+  <button class="tb-btn active" id="btn-depth"  onclick="toggleDepth()" title="Depth fog — gives the pocket a sense of foreground / background">Depth</button>
 
   <div class="tb-sep"></div>
 
@@ -472,6 +473,7 @@ let showResLabels  = false;
 let showDistLabels = false;
 let showHydrophob  = false;
 let showPocketSurf = false;
+let depthFog       = true;
 let currentPreset  = 'publication';
 let ligandModel    = null;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
@@ -488,6 +490,7 @@ let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until cli
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
 viewer.addModel(RECEPTOR,"pdb");
 viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
+viewer.enableFog(true);
 viewer.zoomTo({{model:0}});
 viewer.render();
 
@@ -748,6 +751,12 @@ function togglePocketSurf() {{
   showPocketSurf = !showPocketSurf;
   document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
   refreshPocketSurface();
+}}
+function toggleDepth() {{
+  depthFog = !depthFog;
+  document.getElementById("btn-depth").classList.toggle("active", depthFog);
+  viewer.enableFog(depthFog);
+  viewer.render();
 }}
 
 // Three presets that swap how the receptor is drawn around the ligand.
