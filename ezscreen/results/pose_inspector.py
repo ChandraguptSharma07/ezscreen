@@ -470,22 +470,40 @@ viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
 viewer.zoomTo({{model:0}});
 viewer.render();
 
-// Hover tooltips
-viewer.setHoverable({{}},true,
-  function(atom) {{
-    if (atom._label) return;
-    const isLig = atom.model !== 0;
-    atom._label = viewer.addLabel(
-      isLig ? `${{atom.resn}} · ${{atom.atom}}` : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}} · ${{atom.atom}}`,
-      {{ position:atom, backgroundColor:"rgba(13,17,23,.88)", fontColor:"#fff",
-         fontSize:11, borderRadius:4, padding:3, inFront:true }}
-    );
-    viewer.render();
-  }},
-  function(atom) {{
-    if (atom._label) {{ viewer.removeLabel(atom._label); delete atom._label; viewer.render(); }}
-  }}
-);
+// Hover tooltips are wired up per-compound in setupHover() — at init time
+// there is nothing useful to label, and the cartoon ribbon swallows hover
+// events anyway which is why the old global handler felt unreliable.
+function setupHover() {{
+  const hoverSel = (ligandModel !== null && pocketResi.length)
+    ? {{or:[{{model:ligandModel}}, {{model:0, resi:pocketResi}}]}}
+    : (ligandModel !== null ? {{model:ligandModel}} : {{model:0, resi:pocketResi}});
+
+  viewer.setHoverable(hoverSel, 120,
+    function(atom) {{
+      if (atom._label) return;
+      const isLig = (ligandModel !== null && atom.model === ligandModel);
+      const text = isLig
+        ? `${{atom.resn}} · ${{atom.atom}}`
+        : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}} · ${{atom.atom}}`;
+      atom._label = viewer.addLabel(text, {{
+        position: atom,
+        backgroundColor: darkMode ? "rgba(13,17,23,.92)" : "rgba(255,255,255,.96)",
+        fontColor:       darkMode ? "#f0f6fc" : "#1a1a1a",
+        borderColor:     darkMode ? "#30363d" : "#d0d7de",
+        borderThickness: 1, fontSize: 12, borderRadius: 5, padding: 5,
+        inFront: true,
+      }});
+      viewer.render();
+    }},
+    function(atom) {{
+      if (atom._label) {{
+        viewer.removeLabel(atom._label);
+        delete atom._label;
+        viewer.render();
+      }}
+    }}
+  );
+}}
 
 // ── Compound dropdown ────────────────────────────────────────────────────
 const sel = document.getElementById("compound-select");
@@ -1034,6 +1052,7 @@ async function selectCompound(lig_id) {{
     viewer.addStyle({{model:0, resi:pocketResi}},
       {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
   }}
+  setupHover();
   drawInteractions(compound.interactions||[]);
   if (showResLabels) drawResidueLabels(compound);
   await refreshHydrophobSurface();
