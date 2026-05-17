@@ -1228,11 +1228,21 @@ async function selectCompound(lig_id) {{
   }}
   // Pull every residue with at least one atom inside 5 Å of the ligand — gives
   // a fuller picture of the pocket than the PLIP-interaction residues alone.
+  // Done by explicit distance scan because 3Dmol's `within` selector silently
+  // returned empty for cross-model queries here.
   if (ligandModel !== null) {{
-    const near = viewer.selectedAtoms({{
-      model:0, within:{{distance:5.0, sel:{{model:ligandModel}}}},
-    }});
-    pocketResi = [...new Set(near.map(a=>a.resi))];
+    const lig = viewer.selectedAtoms({{model: ligandModel}});
+    const rec = viewer.selectedAtoms({{model: 0}});
+    const D2  = 25.0;   // (5 Å)^2
+    const hit = new Set();
+    for (const r of rec) {{
+      if (hit.has(r.resi)) continue;
+      for (const l of lig) {{
+        const dx = r.x - l.x, dy = r.y - l.y, dz = r.z - l.z;
+        if (dx*dx + dy*dy + dz*dz <= D2) {{ hit.add(r.resi); break; }}
+      }}
+    }}
+    pocketResi = [...hit];
   }}
   await applyPreset(currentPreset);
   setupHover();
