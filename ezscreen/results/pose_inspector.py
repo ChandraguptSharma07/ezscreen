@@ -560,8 +560,10 @@ let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
 let ligandAtomCount = 0;          // for spectrum-cartoon gradient over the ligand
-let envelopeSurf   = null;        // SES surface highlight around the hovered residue
-let envelopeToken  = 0;           // race guard for the async addSurface call
+// Hover residue envelope is deferred to the Mol* migration. 3Dmol cannot
+// recolour part of a cartoon without re-meshing the segment, and every
+// separate-geometry attempt (box / sphere / surface) looked off, so we leave
+// hover at label-only for now.
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -583,37 +585,11 @@ let insetLigandModel = null;
 // Hover tooltips are wired up per-compound in setupHover() — at init time
 // there is nothing useful to label, and the cartoon ribbon swallows hover
 // events anyway which is why the old global handler felt unreliable.
-// Translucent SES surface wrapping just the hovered residue — the same kind
-// of highlight Mol* / RCSB uses. The selection is the residue, so 3Dmol
-// builds the surface in the right place without any manual coord math.
-async function showEnvelope(atom) {{
-  const myToken = ++envelopeToken;
-  if (envelopeSurf !== null) {{
-    viewer.removeSurface(envelopeSurf);
-    envelopeSurf = null;
-  }}
-  if (!atom || (ligandModel !== null && atom.model === ligandModel)) return;
-  const surf = await viewer.addSurface(
-    $3Dmol.SurfaceType.SES,
-    {{ opacity: 0.55, color: "#ec4899" }},
-    {{ model: atom.model, chain: atom.chain, resi: atom.resi }},
-  );
-  // If another hover or an unhover beat us to the punch, drop this one.
-  if (myToken !== envelopeToken) {{
-    viewer.removeSurface(surf);
-    return;
-  }}
-  envelopeSurf = surf;
-  viewer.render();
-}}
-
-function clearEnvelope() {{
-  envelopeToken++;
-  if (envelopeSurf !== null) {{
-    viewer.removeSurface(envelopeSurf);
-    envelopeSurf = null;
-  }}
-}}
+// showEnvelope / clearEnvelope are intentional no-ops here. Every attempt
+// at a residue highlight ran into 3Dmol limits (cartoon recolour re-meshes
+// the segment; separate geometries float wrong). Deferred to v1.9.5 (Mol*).
+function showEnvelope(_atom) {{ /* deferred — see header note */ }}
+function clearEnvelope() {{ /* deferred — see header note */ }}
 
 function setupHover() {{
   // Hover everywhere — cartoon ribbon included. The previous pocket-only
