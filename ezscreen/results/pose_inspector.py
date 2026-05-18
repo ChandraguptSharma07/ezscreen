@@ -560,7 +560,8 @@ let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
 let ligandAtomCount = 0;          // for spectrum-cartoon gradient over the ligand
-let envelopeShapes = [];          // translucent spheres around the hovered residue
+let envelopeSurf   = null;        // SES surface highlight around the hovered residue
+let envelopeToken  = 0;           // race guard for the async addSurface call
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -582,27 +583,36 @@ let insetLigandModel = null;
 // Hover tooltips are wired up per-compound in setupHover() — at init time
 // there is nothing useful to label, and the cartoon ribbon swallows hover
 // events anyway which is why the old global handler felt unreliable.
-// Translucent sphere cloud around every atom of the given residue. Cheap
-// to add/remove (~10 spheres) and gives the hovered residue a glowing
-// envelope so the label has an unambiguous target — much clearer than a
-// floating text label on its own.
-function showEnvelope(atom) {{
-  clearEnvelope();
+// Translucent SES surface wrapping just the hovered residue — the same kind
+// of highlight Mol* / RCSB uses. The selection is the residue, so 3Dmol
+// builds the surface in the right place without any manual coord math.
+async function showEnvelope(atom) {{
+  const myToken = ++envelopeToken;
+  if (envelopeSurf !== null) {{
+    viewer.removeSurface(envelopeSurf);
+    envelopeSurf = null;
+  }}
   if (!atom || (ligandModel !== null && atom.model === ligandModel)) return;
-  const atoms = viewer.selectedAtoms({{
-    model: atom.model, chain: atom.chain, resi: atom.resi,
-  }});
-  atoms.forEach(a => {{
-    envelopeShapes.push(viewer.addSphere({{
-      center: {{x:a.x, y:a.y, z:a.z}},
-      radius: 1.7, color: "#79c0ff", opacity: 0.22,
-    }}));
-  }});
+  const surf = await viewer.addSurface(
+    $3Dmol.SurfaceType.SES,
+    {{ opacity: 0.55, color: "#ec4899" }},
+    {{ model: atom.model, chain: atom.chain, resi: atom.resi }},
+  );
+  // If another hover or an unhover beat us to the punch, drop this one.
+  if (myToken !== envelopeToken) {{
+    viewer.removeSurface(surf);
+    return;
+  }}
+  envelopeSurf = surf;
+  viewer.render();
 }}
 
 function clearEnvelope() {{
-  envelopeShapes.forEach(s => viewer.removeShape(s));
-  envelopeShapes = [];
+  envelopeToken++;
+  if (envelopeSurf !== null) {{
+    viewer.removeSurface(envelopeSurf);
+    envelopeSurf = null;
+  }}
 }}
 
 function setupHover() {{
