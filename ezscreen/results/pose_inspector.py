@@ -13,7 +13,9 @@ _INTERACTION_COLORS = {
     "halogen":     "#14b8a6",
 }
 
-_3DMOL_CDN = "https://3Dmol.csb.pitt.edu/build/3Dmol-min.js"
+_MOLSTAR_VERSION = "4.4.0"
+_MOLSTAR_CSS = f"https://unpkg.com/molstar@{_MOLSTAR_VERSION}/build/viewer/molstar.css"
+_MOLSTAR_JS  = f"https://unpkg.com/molstar@{_MOLSTAR_VERSION}/build/viewer/molstar.js"
 
 # RDKit float tuples for DrawMolecule highlight colours
 _ITYPE_RDKIT_COLOR = {
@@ -62,7 +64,6 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
         try:
             sdf_text = base64.b64decode(c["sdf_b64"]).decode(errors="replace")
 
-            # --- 3-D mol: kept for coordinate matching only ---
             mol_3d = Chem.MolFromMolBlock(sdf_text, removeHs=True)
             if mol_3d is None or mol_3d.GetNumAtoms() == 0:
                 continue
@@ -82,15 +83,13 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
                         best_d, best_i = d, i
                 return best_i
 
-            # --- 2-D mol: fresh copy with computed layout ---
             mol_2d = Chem.MolFromMolBlock(sdf_text, removeHs=True)
             AllChem.Compute2DCoords(mol_2d)
             rdMolDraw2D.PrepareMolForDrawing(mol_2d)
 
-            # Map each interaction to the nearest atom in 3-D space
             interactions = c.get("interactions", [])
             per_ix_atom: list[int | None] = []
-            interacting: dict[int, str] = {}   # atom_idx -> first interaction type
+            interacting: dict[int, str] = {}
 
             for ix in interactions:
                 lc = ix.get("ligand_coords")
@@ -104,7 +103,6 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
 
             h_atoms = list(interacting.keys())
 
-            # --- Draw the full-compound SVG (no highlight blobs; connection lines show interactions) ---
             drawer = rdMolDraw2D.MolDraw2DSVG(_LIG_SVG_W, _LIG_SVG_H)
             drawer.drawOptions().addStereoAnnotation = True
             drawer.drawOptions().padding = 0.12
@@ -112,14 +110,12 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
             drawer.FinishDrawing()
             svg_full = drawer.GetDrawingText()
 
-            # Transparent background (RDKit emits various white-background forms)
             svg_full = _re.sub(
                 r"(style=['\"])background[^;'\"]*;?",
                 r"\1background:transparent;",
                 svg_full,
             )
 
-            # --- Collect atom 2-D draw coordinates ---
             atom_2d: dict[int, list[float]] = {}
             for idx in h_atoms:
                 try:
@@ -128,7 +124,6 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
                 except Exception:
                     pass
 
-            # Per-interaction 2D point (parallel to `interactions`)
             ix_atom_pts: list[list[float] | None] = []
             for idx in per_ix_atom:
                 if idx is not None and idx in atom_2d:
@@ -136,7 +131,6 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
                 else:
                     ix_atom_pts.append(None)
 
-            # --- Site SVG: crop viewBox to interacting region ---
             svg_site     = svg_full
             site_viewbox: list[float] | None = None
             if atom_2d:
@@ -193,7 +187,20 @@ def _enrich_2d(compounds: list[dict]) -> list[dict]:
     return compounds
 
 
-# ── HTML builder ──────────────────────────────────────────────────────────
+# ── HTML builder (Mol* — stage 1) ─────────────────────────────────────────
+#
+# This is the Mol*-based viewer scaffold. Stage 1 ships:
+#   • Mol* viewer with cartoon receptor + ligand auto-styled
+#   • Native hover residue highlight (the whole reason for the migration)
+#   • Compound dropdown that loads / removes the ligand structure
+#   • Sidebar: interaction-type toggles + per-compound interaction list
+#   • 3D / 2D mode switch (the 2D LIGPLOT diagram is unchanged from the
+#     prior viewer — same _enrich_2d data, same SVG generation code)
+#   • Light / dark BG toggle
+#
+# Later stages will rebuild on top of this: interaction cylinders (Mol* shape
+# API), click-to-pin selection, protein / ligand style controls, pocket
+# detection, surfaces, export PNG / WebM, 90° inset.
 
 def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
     receptor_escaped = receptor_pdb_text.replace("\\", "\\\\").replace("`", "\\`")
@@ -208,7 +215,8 @@ def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
 <head>
 <meta charset="UTF-8">
 <title>SwiftScreen — Interaction Viewer</title>
-<script src="{_3DMOL_CDN}"></script>
+<link rel="stylesheet" type="text/css" href="{_MOLSTAR_CSS}">
+<script type="text/javascript" src="{_MOLSTAR_JS}"></script>
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
@@ -248,74 +256,30 @@ body.light .tb-sep {{ background: #d0d7de; }}
 .tb-btn:hover {{ background: #30363d; }}
 .tb-btn:disabled {{ opacity: .4; cursor: not-allowed; }}
 .tb-btn.active {{ background: #1f6feb; border-color: #388bfd; color: #fff; }}
-
 body.light .tb-btn {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
 body.light .tb-btn:hover {{ background: #f3f4f6; }}
 body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: #fff; }}
 
-.tb-select {{
-  background: #21262d; color: #c9d1d9;
-  border: 1px solid #30363d; border-radius: 6px;
-  padding: 4px 26px 4px 10px; font-size: 12px;
-  cursor: pointer; min-width: 110px;
-  appearance: none; -webkit-appearance: none;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path fill='%238b949e' d='M2 4l4 4 4-4z'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  background-size: 10px;
-}}
-.tb-select:hover {{ border-color: #58a6ff; }}
-body.light .tb-select {{ background-color: #fff; color: #24292f; border-color: #d0d7de; }}
-
-.tb-color {{
-  width: 28px; height: 26px; padding: 0;
-  border: 1px solid #30363d; border-radius: 6px;
-  background: transparent; cursor: pointer;
-}}
-body.light .tb-color {{ border-color: #d0d7de; }}
-
-/* view-toggle pair */
 .view-pair {{ display: flex; gap: 0; }}
 .view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
 .view-pair .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; }}
 
-#main {{ display: flex; flex: 1; overflow: hidden; }}
+#main {{ display: flex; flex: 1; overflow: hidden; min-height: 0; }}
 
-/* 3D viewer */
-#viewer-wrap {{ flex: 1; display: flex; position: relative; }}
-#viewer {{ flex: 1; position: relative; }}
-
-/* Fixed 90° inset — sits in the corner, no mouse, gives the user a second angle on the pocket */
-#viewer-inset {{
-  position: absolute; top: 12px; right: 12px;
-  width: 220px; height: 220px;
-  background: rgba(13,17,23,.55);
-  border: 1px solid #30363d; border-radius: 8px;
-  overflow: hidden; pointer-events: none;
-  z-index: 10;
+#viewer {{
+  flex: 1; position: relative;
+  background: #0d1117;
 }}
-body.light #viewer-inset {{ background: rgba(246,248,250,.7); border-color: #d0d7de; }}
-#viewer-inset .inset-label {{
-  position: absolute; top: 6px; left: 8px;
-  font-size: 10px; color: #8b949e;
-  font-family: system-ui, sans-serif; letter-spacing: .04em;
-  pointer-events: none;
-}}
+body.light #viewer {{ background: #f6f8fa; }}
 
-/* 2D diagram area */
 #diagram2d-wrap {{
   flex: 1; display: none; align-items: center;
   justify-content: center; overflow: hidden;
   padding: 12px; position: relative;
 }}
-
 #diagram2d-wrap svg {{ max-width: 100%; max-height: 100%; }}
+.d2-placeholder {{ color: #8b949e; font-size: 14px; text-align: center; padding: 40px; }}
 
-.d2-placeholder {{
-  color: #8b949e; font-size: 14px; text-align: center; padding: 40px;
-}}
-
-/* Sidebar */
 #sidebar {{
   width: 300px; background: #161b22;
   border-left: 1px solid #30363d;
@@ -339,7 +303,6 @@ body.light .sb-section select {{
   background: #fff; color: #24292f; border-color: #d0d7de;
 }}
 
-/* Site / full sub-toggle */
 #site-toggle {{
   display: none; gap: 0; margin-top: 8px;
 }}
@@ -368,15 +331,12 @@ h3 {{
   letter-spacing: .05em; text-transform: uppercase;
 }}
 
-/* Record overlay */
-#record-overlay {{
-  display: none; position: absolute;
-  top: 50%; left: 50%; transform: translate(-50%,-50%);
-  background: rgba(0,0,0,.78); color: #fff;
-  padding: 12px 24px; border-radius: 8px;
-  font-size: 13px; z-index: 200;
-  pointer-events: none; text-align: center;
-}}
+/* Mol*-specific overrides so its viewport blends with our chrome */
+#viewer .msp-plugin {{ background: transparent; }}
+#viewer .msp-viewport {{ background: transparent !important; }}
+#viewer .msp-viewport-controls,
+#viewer .msp-viewport-top-left-controls,
+#viewer .msp-canvas-renderer-target-control {{ display: none !important; }}
 </style>
 </head>
 <body>
@@ -384,48 +344,10 @@ h3 {{
 <div id="banner">
   Predicted pose — not experimentally validated &nbsp;&middot;&nbsp;
   Pipeline: UniDock &rarr; PLIP &rarr; SwiftScreen &nbsp;&middot;&nbsp;
-  Cite: UniDock (Yu&nbsp;et&nbsp;al.&nbsp;2023) &nbsp;&middot;&nbsp; PLIP (Salentin&nbsp;et&nbsp;al.&nbsp;2015,&nbsp;NAR)
+  Viewer: Mol*&nbsp;{_MOLSTAR_VERSION}
 </div>
 
 <div id="toolbar">
-  <span class="tb-label">Preset</span>
-  <select id="preset-select" class="tb-select" onchange="setPreset(this.value)" title="Overall rendering style">
-    <option value="publication" selected>Publication</option>
-    <option value="sticks">Sticks only</option>
-    <option value="surface">Surface + ligand</option>
-  </select>
-
-  <div class="tb-sep"></div>
-
-  <span class="tb-label">Protein</span>
-  <select id="protein-style" class="tb-select" onchange="setProteinStyle(this.value)" title="Protein representation">
-    <option value="cartoon" selected>Cartoon</option>
-    <option value="lines">Lines</option>
-  </select>
-  <button class="tb-btn active" id="btn-spectrum" onclick="toggleSpectrum()" title="Rainbow N-to-C colouring">Spectrum</button>
-  <input type="color" id="cartoon-color" class="tb-color" value="#8b949e" onchange="setCartoonColor(this.value)" title="Protein colour (used when Spectrum is off)" />
-
-  <div class="tb-sep"></div>
-
-  <span class="tb-label">Ligand</span>
-  <select id="ligand-style" class="tb-select" onchange="setLigandStyle(this.value)" title="Ligand representation">
-    <option value="ballstick" selected>Ball &amp; stick</option>
-    <option value="sticks">Sticks</option>
-    <option value="cartoon">Cartoon</option>
-  </select>
-
-  <div class="tb-sep"></div>
-
-  <span class="tb-label">Display</span>
-  <button class="tb-btn" id="btn-bg"     onclick="toggleBackground()" title="Switch light / dark background">Dark BG</button>
-  <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()"  title="Residue name labels in 3D">Res Labels</button>
-  <button class="tb-btn" id="btn-dist"   onclick="toggleDistLabels()"  title="Distance labels on interaction lines">Distances</button>
-  <button class="tb-btn" id="btn-surf"   onclick="togglePocketSurf()"  title="Translucent surface of the pocket">Pocket Surface</button>
-  <button class="tb-btn" id="btn-hydro"  onclick="toggleHydrophob()"   title="Kyte-Doolittle pocket surface">Hydrophobicity</button>
-  <button class="tb-btn active" id="btn-depth"  onclick="toggleDepth()" title="Depth fog — gives the pocket a sense of foreground / background">Depth</button>
-
-  <div class="tb-sep"></div>
-
   <span class="tb-label">View</span>
   <div class="view-pair">
     <button class="tb-btn active" id="btn-3d" onclick="switchMode('3d')">3D</button>
@@ -434,38 +356,24 @@ h3 {{
 
   <div class="tb-sep"></div>
 
-  <span class="tb-label">Export</span>
-  <button class="tb-btn" id="btn-exp-png" onclick="exportPNG()"   title="Save current view as PNG">Export PNG</button>
-  <button class="tb-btn" id="btn-exp-vid" onclick="exportVideo()" title="360° rotation WebM (3D only)">Export 360&deg; Video</button>
-  <button class="tb-btn" id="btn-exp-svg" onclick="exportSVG()"   title="Download 2D diagram as SVG (2D mode only)" disabled>Export SVG</button>
+  <span class="tb-label">Display</span>
+  <button class="tb-btn" id="btn-bg"   onclick="toggleBackground()" title="Switch light / dark background">Light BG</button>
+  <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
+  <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
 </div>
 
 <div id="main">
-
-  <!-- ── 3D viewer ─────────────────────────────── -->
-  <div id="viewer-wrap">
-    <div id="viewer">
-      <div id="record-overlay">
-        Recording&hellip; <span id="record-pct">0%</span><br><small>Please wait</small>
-      </div>
-    </div>
-    <div id="viewer-inset"><span class="inset-label">90&deg; view</span></div>
-  </div>
-
-  <!-- ── 2D diagram area ──────────────────────── -->
+  <div id="viewer"></div>
   <div id="diagram2d-wrap">
     <p class="d2-placeholder">Select a compound to view the 2D interaction map</p>
   </div>
 
-  <!-- ── Sidebar ───────────────────────────────── -->
   <div id="sidebar">
-
     <div class="sb-section">
       <h3 style="margin-bottom:6px">Compound</h3>
       <select id="compound-select" onchange="selectCompound(this.value)">
         <option value="">— select compound —</option>
       </select>
-      <!-- site / full sub-toggle (visible only in 2D mode) -->
       <div id="site-toggle">
         <button class="tb-btn active" id="btn-site" onclick="setSiteMode(true)">Site View</button>
         <button class="tb-btn"        id="btn-full" onclick="setSiteMode(false)">Full Compound</button>
@@ -479,10 +387,8 @@ h3 {{
     <div id="ilist">
       <div id="no-compound">Select a compound above</div>
     </div>
-
-  </div><!-- /sidebar -->
-
-</div><!-- /main -->
+  </div>
+</div>
 
 <script>
 const COMPOUNDS = {compounds_json};
@@ -490,42 +396,9 @@ const COLORS    = {colors_json};
 const RECEPTOR  = `{receptor_escaped}`;
 const LIG_W     = {lig_svg_w};
 const LIG_H     = {lig_svg_h};
-const GM        = {glyph_mar};   // glyph margin around ligand SVG
+const GM        = {glyph_mar};
 
-// ── Kyte-Doolittle ───────────────────────────────────────────────────────
-const KD = {{
-  ILE:4.5,VAL:4.2,LEU:3.8,PHE:2.8,CYS:2.5,MET:1.9,ALA:1.8,
-  GLY:-0.4,THR:-0.7,SER:-0.8,TRP:-0.9,TYR:-1.3,PRO:-1.6,
-  HIS:-3.2,GLU:-3.5,GLN:-3.5,ASP:-3.5,ASN:-3.5,LYS:-3.9,ARG:-4.5,
-}};
-function kdHex(resn) {{
-  const t = Math.max(0, Math.min(1, ((KD[resn] ?? 0) + 4.5) / 9));
-  let r,g,b;
-  if (t < .5) {{ const s=t*2; r=Math.round(68+(255-68)*s); g=Math.round(136+(255-136)*s); b=Math.round(204+(255-204)*s); }}
-  else {{ const s=(t-.5)*2; r=255; g=Math.round(255+(68-255)*s); b=Math.round(255+(68-255)*s); }}
-  return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
-}}
-
-// HSL → hex, used by the spectrum-cartoon colorfunc on the ligand.
-function hslToHex(h, s, l) {{
-  s /= 100; l /= 100;
-  const k = n => (n + h/30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const c = n => {{
-    const v = l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-    return Math.round(255 * v).toString(16).padStart(2, "0");
-  }};
-  return "#" + c(0) + c(8) + c(4);
-}}
-
-// Same rainbow ramp 3Dmol uses for cartoon spectrum: blue → green → red.
-function ligandSpectrumColor(atom) {{
-  const n = Math.max(1, ligandAtomCount - 1);
-  const t = Math.min(1, Math.max(0, (atom.index || 0) / n));
-  return hslToHex((1 - t) * 240, 70, 55);
-}}
-
-// ── Amino-acid character colours ────────────────────────────────────────
+// Amino-acid colour classes (used by the 2D diagram glyphs).
 const AA_CLS = {{
   ALA:'hp',VAL:'hp',LEU:'hp',ILE:'hp',PRO:'hp',PHE:'hp',MET:'hp',TRP:'hp',
   SER:'pol',THR:'pol',CYS:'pol',TYR:'pol',ASN:'pol',GLN:'pol',GLY:'pol',
@@ -535,505 +408,184 @@ const AA_CLS = {{
 const AA_COL = {{ hp:'#f97316', pol:'#22c55e', pos:'#3b82f6', neg:'#ef4444' }};
 function aaColor(resn) {{ return AA_COL[AA_CLS[resn]] || '#8b949e'; }}
 
-// ── State ────────────────────────────────────────────────────────────────
+// State
+let molViewer      = null;
+let ligandStruct   = null;   // Hierarchy structure entry for the current ligand
+let currentData    = null;
 let darkMode       = true;
 let currentMode    = '3d';
 let siteMode       = true;
-let showResLabels  = false;
 let showDistLabels = false;
-let showHydrophob  = false;
-let showPocketSurf = false;
-let depthFog       = true;
-let useSpectrum    = true;
-let cartoonColor   = '#8b949e';
-let proteinStyle   = 'cartoon';   // cartoon | tube | lines
-let ligandStyle    = 'ballstick'; // ballstick | sticks | spheres
-let currentPreset  = 'publication';
-let ligandModel    = null;
-let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k=>[k,true]));
-let currentShapes  = [];
-let distLabels     = [];
-let resLabels      = [];
-let hydrophobSurf  = null;
-let pocketSurf     = null;
-let currentData    = null;
-let pocketResi     = [];   // residue numbers within 5 Å of current ligand
-let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
-let ligandAtomCount = 0;          // for spectrum-cartoon gradient over the ligand
-// Hover residue envelope is deferred to the Mol* migration. 3Dmol cannot
-// recolour part of a cartoon without re-meshing the segment, and every
-// separate-geometry attempt (box / sphere / surface) looked off, so we leave
-// hover at label-only for now.
+let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
+let viewerReady    = false;
+const pendingTasks = [];
 
-// ── 3D Viewer init ───────────────────────────────────────────────────────
-const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
-viewer.addModel(RECEPTOR,"pdb");
-viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
-viewer.enableFog(true);
-viewer.zoomTo({{model:0}});
-viewer.render();
+function whenReady(fn) {{
+  if (viewerReady) fn();
+  else pendingTasks.push(fn);
+}}
 
-// Secondary viewer pinned to a 90° rotation — useful for figure prep where
-// readers want to see both faces of the pocket without re-rendering.
-const insetViewer = $3Dmol.createViewer("viewer-inset", {{
-  backgroundColor: "#0d1117", backgroundAlpha: 0, antialias: true,
-}});
-insetViewer.addModel(RECEPTOR,"pdb");
-insetViewer.setStyle({{model:0}},{{cartoon:{{color:"#8b949e", opacity:0.4}}}});
-let insetLigandModel = null;
-
-// Hover tooltips are wired up per-compound in setupHover() — at init time
-// there is nothing useful to label, and the cartoon ribbon swallows hover
-// events anyway which is why the old global handler felt unreliable.
-// showEnvelope / clearEnvelope are intentional no-ops here. Every attempt
-// at a residue highlight ran into 3Dmol limits (cartoon recolour re-meshes
-// the segment; separate geometries float wrong). Deferred to v1.9.5 (Mol*).
-function showEnvelope(_atom) {{ /* deferred — see header note */ }}
-function clearEnvelope() {{ /* deferred — see header note */ }}
-
-function setupHover() {{
-  // Hover everywhere — cartoon ribbon included. The previous pocket-only
-  // scope meant residues outside the 5 Å shell were silent on hover, which
-  // was confusing because they're clearly part of the rendered protein.
-  const hoverSel = ligandModel !== null
-    ? {{or:[{{model:ligandModel}}, {{model:0}}]}}
-    : {{model:0}};
-
-  viewer.setHoverable(hoverSel, 120,
-    function(atom) {{
-      if (atom._label) return;
-      const isLig = (ligandModel !== null && atom.model === ligandModel);
-      const text = isLig
-        ? `${{atom.resn}} · ${{atom.atom}}`
-        : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}} · ${{atom.atom}}`;
-      atom._label = viewer.addLabel(text, {{
-        position: atom,
-        backgroundColor: darkMode ? "rgba(13,17,23,.92)" : "rgba(255,255,255,.96)",
-        fontColor:       darkMode ? "#f0f6fc" : "#1a1a1a",
-        borderColor:     darkMode ? "#30363d" : "#d0d7de",
-        borderThickness: 1, fontSize: 12, borderRadius: 5, padding: 5,
-        inFront: true,
-      }});
-      showEnvelope(atom);
-      viewer.render();
-    }},
-    function(atom) {{
-      if (atom._label) {{
-        viewer.removeLabel(atom._label);
-        delete atom._label;
-      }}
-      clearEnvelope();
-      viewer.render();
-    }}
-  );
-
-  // Click to pin — same selection, toggles a persistent label.
-  viewer.setClickable(hoverSel, true, function(atom) {{
-    const key = `${{atom.model}}:${{atom.chain||''}}:${{atom.resi}}:${{atom.atom}}`;
-    if (pinnedLabels.has(key)) {{
-      viewer.removeLabel(pinnedLabels.get(key));
-      pinnedLabels.delete(key);
-      viewer.render();
-      return;
-    }}
-    const isLig = (ligandModel !== null && atom.model === ligandModel);
-    const text = isLig
-      ? `${{atom.resn}} · ${{atom.atom}}`
-      : `${{atom.resn}} ${{atom.resi}} · Chain ${{atom.chain}}`;
-    const label = viewer.addLabel(text, {{
-      position: atom,
-      backgroundColor: darkMode ? "rgba(31,111,235,.95)" : "rgba(9,105,218,.95)",
-      fontColor: "#ffffff",
-      borderColor: darkMode ? "#388bfd" : "#0969da",
-      borderThickness: 1.5, fontSize: 12, borderRadius: 5, padding: 6,
-      inFront: true,
+// ── Mol* init ────────────────────────────────────────────────────────────
+(async () => {{
+  try {{
+    molViewer = await molstar.Viewer.create('viewer', {{
+      layoutIsExpanded: false,
+      layoutShowControls: false,
+      layoutShowRemoteState: false,
+      layoutShowSequence: false,
+      layoutShowLog: false,
+      layoutShowLeftPanel: false,
+      viewportShowExpand: false,
+      viewportShowSelectionMode: false,
+      viewportShowAnimation: false,
+      viewportShowControls: false,
+      viewportShowSettings: false,
+      pdbProvider: 'rcsb',
+      emdbProvider: 'rcsb',
     }});
-    pinnedLabels.set(key, label);
-    viewer.render();
-  }});
-}}
-
-function clearPinnedLabels() {{
-  pinnedLabels.forEach(l => viewer.removeLabel(l));
-  pinnedLabels.clear();
-}}
+    await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
+    viewerReady = true;
+    pendingTasks.splice(0).forEach(fn => fn());
+  }} catch (err) {{
+    console.error('Mol* init failed:', err);
+    document.getElementById('viewer').innerHTML =
+      `<div style="padding:24px;color:#f85149">Mol* failed to load: ${{err.message}}</div>`;
+  }}
+}})();
 
 // ── Compound dropdown ────────────────────────────────────────────────────
-const sel = document.getElementById("compound-select");
+const sel = document.getElementById('compound-select');
 COMPOUNDS.forEach(c => {{
-  const o = document.createElement("option");
+  const o = document.createElement('option');
   o.value = c.lig_id;
-  o.textContent = `#${{c.rank}}  ${{c.name||c.lig_id}}  (${{c.score}} kcal/mol)`;
+  o.textContent = `#${{c.rank}}  ${{c.name || c.lig_id}}  (${{c.score}} kcal/mol)`;
   sel.appendChild(o);
 }});
 
-// ── Interaction toggles ──────────────────────────────────────────────────
-const togglesDiv = document.getElementById("toggles-section");
-Object.entries(COLORS).forEach(([type,color]) => {{
-  const row = document.createElement("label");
-  row.className = "toggle-row";
-  row.innerHTML = `<input type="checkbox" checked onchange="toggleType('${{type}}',this.checked)">
+// ── Interaction-type toggles (filter both 3D list and 2D diagram) ────────
+const togDiv = document.getElementById('toggles-section');
+Object.entries(COLORS).forEach(([type, color]) => {{
+  const row = document.createElement('label');
+  row.className = 'toggle-row';
+  row.innerHTML = `<input type="checkbox" checked onchange="toggleType('${{type}}', this.checked)">
     <span class="color-dot" style="background:${{color}}"></span>
-    <span>${{type.replace(/_/g," ")}}</span>`;
-  togglesDiv.appendChild(row);
+    <span>${{type.replace(/_/g, ' ')}}</span>`;
+  togDiv.appendChild(row);
 }});
 
-// ── Mode switching ───────────────────────────────────────────────────────
-function switchMode(mode) {{
-  currentMode = mode;
-  const is3d  = mode === '3d';
-
-  document.getElementById("viewer-wrap").style.display    = is3d ? 'flex' : 'none';
-  document.getElementById("diagram2d-wrap").style.display = is3d ? 'none' : 'flex';
-  document.getElementById("site-toggle").style.display    = is3d ? 'none' : 'flex';
-
-  document.getElementById("btn-3d").classList.toggle("active", is3d);
-  document.getElementById("btn-2d").classList.toggle("active", !is3d);
-
-  // Certain buttons only active in 3D
-  ["btn-labels","btn-hydro"].forEach(id => {{
-    const b = document.getElementById(id);
-    if (b) b.disabled = !is3d;
-  }});
-  // Dark BG and Distances work in both modes
-  document.getElementById("btn-bg").disabled = false;
-  document.getElementById("btn-dist").disabled = false;
-
-  document.getElementById("btn-exp-vid").disabled = !is3d;
-  document.getElementById("btn-exp-svg").disabled =  is3d;
-
-  if (!is3d && currentData) draw2DView(currentData, siteMode);
-  if ( is3d) viewer.render();
+function toggleType(type, checked) {{
+  activeToggles[type] = checked;
+  if (!currentData) return;
+  renderSidebar(currentData);
+  if (currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
-function setSiteMode(site) {{
-  siteMode = site;
-  document.getElementById("btn-site").classList.toggle("active",  site);
-  document.getElementById("btn-full").classList.toggle("active", !site);
-  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+// ── Compound load / unload via Mol* hierarchy manager ────────────────────
+async function removeCurrentLigand() {{
+  if (ligandStruct === null || !molViewer) return;
+  try {{
+    await molViewer.plugin.managers.structure.hierarchy.remove([ligandStruct]);
+  }} catch (err) {{
+    console.warn('ligand removal failed:', err);
+  }}
+  ligandStruct = null;
 }}
 
-// ── 3D: clear ligand ────────────────────────────────────────────────────
-function clearLigand() {{
-  if (ligandModel !== null) {{ viewer.removeModel(ligandModel); ligandModel = null; }}
-  currentShapes.forEach(s=>viewer.removeShape(s)); currentShapes=[];
-  distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
-  resLabels.forEach(l=>viewer.removeLabel(l));     resLabels=[];
-  if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
-  if (pocketSurf!==null)    {{ viewer.removeSurface(pocketSurf);    pocketSurf=null;    }}
-  clearPinnedLabels();
-  clearEnvelope();
-  pocketResi = [];
-  ligandAtomCount = 0;
-  viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
-  if (typeof updateInset === 'function') updateInset(null);
-}}
+async function selectCompound(ligId) {{
+  whenReady(async () => {{
+    await removeCurrentLigand();
 
-// ── 3D: draw interactions ────────────────────────────────────────────────
-function drawInteractions(ixs) {{
-  ixs.forEach(ix => {{
-    if (!activeToggles[ix.type]) return;
-    const color = COLORS[ix.type]||"#fff";
-
-    // H-bonds: if PLIP gave us the H atom, render donor–H solid + H–acceptor
-    // dashed, which is the convention every textbook uses. Otherwise fall
-    // back to a single dashed cylinder so older runs still display.
-    if (ix.type === 'hbond' && ix.h_coords && ix.donor_coords && ix.acceptor_coords) {{
-      const d = ix.donor_coords, h = ix.h_coords, a = ix.acceptor_coords;
-      currentShapes.push(viewer.addCylinder({{
-        start:{{x:d[0],y:d[1],z:d[2]}}, end:{{x:h[0],y:h[1],z:h[2]}},
-        radius:.06, color, opacity:.75, dashed:false,
-      }}));
-      currentShapes.push(viewer.addCylinder({{
-        start:{{x:h[0],y:h[1],z:h[2]}}, end:{{x:a[0],y:a[1],z:a[2]}},
-        radius:.1, color, opacity:.95, dashed:true,
-      }}));
-    }} else {{
-      currentShapes.push(viewer.addCylinder({{
-        start:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
-        end:  {{x:ix.ligand_coords[0], y:ix.ligand_coords[1], z:ix.ligand_coords[2] }},
-        radius:.1, color, opacity:.9, dashed:true,
-      }}));
+    if (!ligId) {{
+      currentData = null;
+      renderSidebar(null);
+      document.getElementById('btn-site').disabled = true;
+      return;
     }}
-    if (showDistLabels) {{
-      const lbl = viewer.addLabel(`${{ix.distance.toFixed(1)}} Å`,{{
-        position:{{
-          x:(ix.protein_coords[0]+ix.ligand_coords[0])/2,
-          y:(ix.protein_coords[1]+ix.ligand_coords[1])/2,
-          z:(ix.protein_coords[2]+ix.ligand_coords[2])/2,
-        }},
-        fontSize:10, fontColor:color,
-        backgroundColor:"rgba(13,17,23,.75)",
-        borderRadius:3, padding:2, inFront:true,
-      }});
-      distLabels.push(lbl);
+
+    const compound = COMPOUNDS.find(c => c.lig_id === ligId);
+    currentData = compound;
+    document.getElementById('btn-site').disabled = !compound.site_viewbox;
+
+    if (compound && compound.sdf_b64) {{
+      const sdf  = atob(compound.sdf_b64);
+      const before = molViewer.plugin.managers.structure.hierarchy.current.structures.length;
+      await molViewer.loadStructureFromData(sdf, 'sdf', false);
+      const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
+      if (all.length > before) ligandStruct = all[all.length - 1];
+      // Frame the new ligand
+      molViewer.plugin.managers.camera.reset();
     }}
+
+    renderSidebar(compound);
+    if (currentMode === '2d') draw2DView(compound, siteMode);
   }});
-  viewer.render();
 }}
 
-function refreshInteractions() {{
-  currentShapes.forEach(s=>viewer.removeShape(s)); currentShapes=[];
-  distLabels.forEach(l=>viewer.removeLabel(l));    distLabels=[];
-  if (currentData) drawInteractions(currentData.interactions||[]);
-}}
-
-function drawResidueLabels(compound) {{
-  const seen = new Set();
-  (compound.interactions||[]).forEach(ix => {{
-    const key = `${{ix.residue_name}}${{ix.residue_number}}`;
-    if (seen.has(key)) return; seen.add(key);
-    resLabels.push(viewer.addLabel(`${{ix.residue_name}} ${{ix.residue_number}}`,{{
-      position:{{x:ix.protein_coords[0],y:ix.protein_coords[1],z:ix.protein_coords[2]}},
-      fontSize:10, fontColor:"#f0f6fc",
-      backgroundColor:"rgba(0,0,0,.65)", borderRadius:3, padding:2, inFront:false,
-    }}));
-  }});
-  viewer.render();
-}}
-
-function refreshResLabels() {{
-  resLabels.forEach(l=>viewer.removeLabel(l)); resLabels=[];
-  if (currentData && showResLabels) drawResidueLabels(currentData);
-  viewer.render();
-}}
-
-async function refreshPocketSurface() {{
-  if (pocketSurf !== null) {{ viewer.removeSurface(pocketSurf); pocketSurf = null; }}
-  if (!showPocketSurf || !pocketResi.length) {{ viewer.render(); return; }}
-  pocketSurf = await viewer.addSurface(
-    $3Dmol.SurfaceType.SES,
-    {{ opacity: 0.55, color: darkMode ? "#c9d1d9" : "#6e7681" }},
-    {{ model: 0, resi: pocketResi }},
-  );
-  viewer.render();
-}}
-
-async function refreshHydrophobSurface() {{
-  if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
-  if (!showHydrophob||!currentData) {{ viewer.render(); return; }}
-  const bsRes=[...new Set((currentData.interactions||[]).map(ix=>ix.residue_number))];
-  if (!bsRes.length) return;
-  hydrophobSurf = await viewer.addSurface(
-    $3Dmol.SurfaceType.MS,
-    {{ opacity:.65, colorfunc:(atom)=>kdHex(atom.resn) }},
-    {{ model:0, resi:bsRes }}
-  );
-  viewer.render();
-}}
-
-// ── Toolbar toggles (3D) ─────────────────────────────────────────────────
-function toggleBackground() {{
-  darkMode=!darkMode;
-  viewer.setBackgroundColor(darkMode?"#0d1117":"#f6f8fa"); viewer.render();
-  document.body.classList.toggle("light",!darkMode);
-  const btn=document.getElementById("btn-bg");
-  btn.textContent=darkMode?"Dark BG":"Light BG";
-  btn.classList.toggle("active",!darkMode);
-  if (currentData&&currentMode==='2d') draw2DView(currentData,siteMode);
-  if (showPocketSurf) refreshPocketSurface();
-}}
-function toggleResLabels() {{
-  showResLabels=!showResLabels;
-  document.getElementById("btn-labels").classList.toggle("active",showResLabels);
-  refreshResLabels();
-}}
-function toggleDistLabels() {{
-  showDistLabels=!showDistLabels;
-  document.getElementById("btn-dist").classList.toggle("active",showDistLabels);
-  refreshInteractions();
-  if (currentData&&currentMode==='2d') draw2DView(currentData,siteMode);
-}}
-function toggleHydrophob() {{
-  showHydrophob=!showHydrophob;
-  document.getElementById("btn-hydro").classList.toggle("active",showHydrophob);
-  refreshHydrophobSurface();
-}}
-function togglePocketSurf() {{
-  showPocketSurf = !showPocketSurf;
-  document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
-  refreshPocketSurface();
-}}
-function toggleDepth() {{
-  depthFog = !depthFog;
-  document.getElementById("btn-depth").classList.toggle("active", depthFog);
-  viewer.enableFog(depthFog);
-  viewer.render();
-}}
-
-function cartoonColorSpec() {{
-  // Spectrum is the most informative default; a single colour is what people
-  // want for journal figures. Keep opacity high so it doesn't read as washed
-  // out behind the pocket sticks.
-  return useSpectrum
-    ? {{color:"spectrum", opacity:0.9}}
-    : {{color:cartoonColor, opacity:0.9}};
-}}
-
-// What to draw for the whole protein (model 0) before any pocket overlay.
-function proteinBaseStyle() {{
-  if (proteinStyle === 'lines') {{
-    // Thin sticks render as proper cylinders across browsers (raw GL lines
-    // are 1 px wide regardless of linewidth and vanish in print). 0.08 Å
-    // is the sweet spot — wireframe-thin but still visible.
-    const base = {{radius: 0.08, opacity: 0.9}};
-    return {{stick: useSpectrum
-      ? {{...base, colorscheme: "chainHetatm"}}
-      : {{...base, color: cartoonColor}}}};
-  }}
-  // default: smooth cartoon ribbon
-  return {{cartoon: cartoonColorSpec()}};
-}}
-
-// How to draw the docked ligand. "cartoon" borrows the spectrum colour ramp
-// that makes the protein cartoon read as polished, walked across the ligand
-// in atom-index order. Small joint spheres stay so the chemistry doesn't
-// dissolve into a single rainbow blur.
-function ligandStyleSpec() {{
-  if (ligandStyle === 'sticks') {{
-    return {{stick:{{colorscheme:"Jmol", radius:0.22}}}};
-  }}
-  if (ligandStyle === 'cartoon') {{
-    return {{
-      stick:  {{radius:0.22, colorfunc: ligandSpectrumColor}},
-      sphere: {{scale:0.14,  colorfunc: ligandSpectrumColor}},
-    }};
-  }}
-  return {{
-    stick:  {{colorscheme:"Jmol", radius:0.16}},
-    sphere: {{colorscheme:"Jmol", scale:0.28}},
-  }};
-}}
-
-function toggleSpectrum() {{
-  useSpectrum = !useSpectrum;
-  document.getElementById("btn-spectrum").classList.toggle("active", useSpectrum);
-  rebuildScene();
-}}
-
-function setCartoonColor(hex) {{
-  cartoonColor = hex;
-  if (useSpectrum) {{
-    // Picking a colour implies the user wants a flat colour; switch off
-    // spectrum so the choice actually takes effect.
-    useSpectrum = false;
-    document.getElementById("btn-spectrum").classList.remove("active");
-  }}
-  rebuildScene();
-}}
-
-function setProteinStyle(s) {{ proteinStyle = s; rebuildScene(); }}
-function setLigandStyle(s)  {{ ligandStyle  = s; rebuildScene(); }}
-
-// Split pocket residues into the ones PLIP actually flagged as interacting
-// vs. the rest of the 5 Å shell. Thick sticks for contacts, hairline sticks
-// for context — keeps the pocket readable without losing nearby residues.
-function pocketSplit() {{
-  const interacting = new Set();
-  if (currentData && currentData.interactions) {{
-    currentData.interactions.forEach(ix => interacting.add(ix.residue_number));
-  }}
-  const ix    = pocketResi.filter(r =>  interacting.has(r));
-  const other = pocketResi.filter(r => !interacting.has(r));
-  return [ix, other];
-}}
-
-// Source of truth for what gets drawn in the main viewer. Called by the
-// dropdowns, the preset, the spectrum / colour pickers, and on every compound
-// switch. Reads only state — never the DOM — so it's easy to reason about.
-async function rebuildScene() {{
-  viewer.setStyle({{model:0}}, {{}});
-  viewer.setStyle({{model:0}}, proteinBaseStyle());
-
-  const [ixResi, otherResi] = pocketSplit();
-  // Context residues get hairline sticks unless we're hiding the protein
-  // entirely behind a surface, in which case they'd just visually fight.
-  if (otherResi.length && proteinStyle !== 'lines') {{
-    viewer.addStyle({{model:0, resi:otherResi}},
-      {{stick:{{colorscheme:"cyanCarbon", radius:0.06, opacity:0.7}}}});
-  }}
-  if (ixResi.length) {{
-    viewer.addStyle({{model:0, resi:ixResi}},
-      {{stick:{{colorscheme:"cyanCarbon", radius:0.20}}}});
-  }}
-
-  if (ligandModel !== null) {{
-    viewer.setStyle({{model:ligandModel}}, ligandStyleSpec());
-  }}
-
-  document.getElementById("btn-surf").classList.toggle("active", showPocketSurf);
-  await refreshPocketSurface();
-  viewer.render();
-}}
-
-// Presets are convenience macros: they set the dropdowns + surface toggle,
-// then ask the renderer to rebuild. The dropdowns remain the source of truth.
-async function applyPreset(name) {{
-  currentPreset = name;
-  if (name === 'publication') {{
-    proteinStyle = 'cartoon';  ligandStyle = 'ballstick'; showPocketSurf = false;
-  }} else if (name === 'sticks') {{
-    proteinStyle = 'lines';    ligandStyle = 'cartoon';   showPocketSurf = false;
-  }} else if (name === 'surface') {{
-    proteinStyle = 'cartoon';  ligandStyle = 'sticks';    showPocketSurf = true;
-  }}
-  document.getElementById("protein-style").value = proteinStyle;
-  document.getElementById("ligand-style").value  = ligandStyle;
-  await rebuildScene();
-}}
-
-function setPreset(name) {{ applyPreset(name); }}
-
-function updateInset(compound) {{
-  // Always rebuild from scratch — the inset is small and the cost is trivial.
-  if (insetLigandModel !== null) {{
-    insetViewer.removeModel(insetLigandModel);
-    insetLigandModel = null;
-  }}
-  insetViewer.setStyle({{model:0}}, {{}});
-  // The inset is a clean second-angle orientation view — keep it on cartoon
-  // even when the main view is in lines mode, otherwise the 220 px panel
-  // becomes an unreadable wireframe mess.
-  insetViewer.setStyle({{model:0}}, {{cartoon: cartoonColorSpec()}});
-
-  if (!compound || !compound.sdf_b64) {{
-    insetViewer.zoomTo({{model:0}});
-    insetViewer.render();
-    return;
-  }}
-
-  insetLigandModel = insetViewer.addModel(atob(compound.sdf_b64), "sdf");
-  insetViewer.setStyle({{model:insetLigandModel}}, ligandStyleSpec());
-
-  // No pocket sticks here — they were the source of the visual mess.
-  insetViewer.zoomTo({{model:insetLigandModel}});
-  insetViewer.zoom(0.7);   // pull back so the cartoon context is visible
-  insetViewer.rotate(90, "y");
-  insetViewer.render();
+function resetCamera() {{
+  whenReady(() => molViewer.plugin.managers.camera.reset());
 }}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
 function renderSidebar(compound) {{
-  const list=document.getElementById("ilist");
-  list.innerHTML="";
-  if (!compound||compound.plip_failed) {{
-    list.innerHTML=`<div id="no-compound" style="color:#f85149">${{
-      compound?(compound.plip_error||"PLIP analysis failed"):"No data"}}</div>`;
+  const list = document.getElementById('ilist');
+  list.innerHTML = '';
+  if (!compound || compound.plip_failed) {{
+    list.innerHTML = `<div id="no-compound" style="color:#f85149">${{
+      compound ? (compound.plip_error || 'PLIP analysis failed') : 'No data'}}</div>`;
     return;
   }}
-  const active=(compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
-  if (!active.length) {{ list.innerHTML=`<div id="no-compound">No visible interactions</div>`; return; }}
+  const active = (compound.interactions || []).filter(ix => activeToggles[ix.type]);
+  if (!active.length) {{
+    list.innerHTML = `<div id="no-compound">No visible interactions</div>`;
+    return;
+  }}
   active.forEach(ix => {{
-    const div=document.createElement("div"); div.className="i-row";
-    const color=COLORS[ix.type]||"#fff";
-    div.innerHTML=`<div class="i-type" style="color:${{color}}">${{ix.type.replace(/_/g," ")}}</div>
+    const div = document.createElement('div');
+    div.className = 'i-row';
+    const color = COLORS[ix.type] || '#fff';
+    div.innerHTML = `<div class="i-type" style="color:${{color}}">${{ix.type.replace(/_/g, ' ')}}</div>
       <div class="i-detail">${{ix.residue_name}}&nbsp;${{ix.residue_number}} (${{ix.chain}})
         &nbsp;&middot;&nbsp; ${{ix.distance.toFixed(2)}}&nbsp;&Aring;</div>`;
     list.appendChild(div);
   }});
 }}
 
-// ── 2D diagram ───────────────────────────────────────────────────────────
+// ── 3D / 2D mode switching ───────────────────────────────────────────────
+function switchMode(mode) {{
+  currentMode = mode;
+  const is3d  = mode === '3d';
+  document.getElementById('viewer').style.display          = is3d ? '' : 'none';
+  document.getElementById('diagram2d-wrap').style.display  = is3d ? 'none' : 'flex';
+  document.getElementById('site-toggle').style.display     = is3d ? 'none' : 'flex';
+  document.getElementById('btn-3d').classList.toggle('active',  is3d);
+  document.getElementById('btn-2d').classList.toggle('active', !is3d);
+  document.getElementById('btn-reset').disabled = !is3d;
+  if (!is3d && currentData) draw2DView(currentData, siteMode);
+}}
+
+function setSiteMode(site) {{
+  siteMode = site;
+  document.getElementById('btn-site').classList.toggle('active',  site);
+  document.getElementById('btn-full').classList.toggle('active', !site);
+  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+}}
+
+function toggleBackground() {{
+  darkMode = !darkMode;
+  document.body.classList.toggle('light', !darkMode);
+  const btn = document.getElementById('btn-bg');
+  btn.textContent = darkMode ? 'Light BG' : 'Dark BG';
+  btn.classList.toggle('active', !darkMode);
+  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+}}
+
+function toggleDistLabels() {{
+  showDistLabels = !showDistLabels;
+  document.getElementById('btn-dist').classList.toggle('active', showDistLabels);
+  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+}}
+
+// ── 2D diagram (preserved from prior viewer) ─────────────────────────────
 function transformPt(ax, ay, compound, useSite) {{
   if (!useSite || !compound.site_viewbox) return [ax + GM, ay + GM];
   const [vx, vy, vw, vh] = compound.site_viewbox;
@@ -1064,30 +616,25 @@ function eyelashGlyph(cx, cy, atomX, atomY, r, n, color) {{
 }}
 
 function draw2DView(compound, useSite) {{
-  const wrap = document.getElementById("diagram2d-wrap");
+  const wrap = document.getElementById('diagram2d-wrap');
 
   if (!compound || compound.plip_failed) {{
-    wrap.innerHTML=`<p class="d2-placeholder">${{
-      compound?(compound.plip_error||"PLIP failed"):"Select a compound above"}}</p>`;
+    wrap.innerHTML = `<p class="d2-placeholder">${{
+      compound ? (compound.plip_error || 'PLIP failed') : 'Select a compound above'}}</p>`;
     return;
   }}
 
-  const visible = (compound.interactions||[]).filter(ix=>activeToggles[ix.type]);
+  const visible = (compound.interactions || []).filter(ix => activeToggles[ix.type]);
   if (!visible.length) {{
-    wrap.innerHTML=`<p class="d2-placeholder">No visible interactions — check toggles</p>`;
+    wrap.innerHTML = `<p class="d2-placeholder">No visible interactions — check toggles</p>`;
     return;
   }}
 
-  // Inline SVG content (avoids white-box <image> artefact)
   const ligInner = useSite
     ? (compound.lig_svg_inner_site || compound.lig_svg_inner_full)
     : compound.lig_svg_inner_full;
-  const ligVb = useSite
-    ? (compound.lig_svg_vb_site || compound.lig_svg_vb_full || `0 0 ${{LIG_W}} ${{LIG_H}}`)
-    : (compound.lig_svg_vb_full || `0 0 ${{LIG_W}} ${{LIG_H}}`);
   const hasSvg = !!ligInner;
 
-  // Recolor bonds for dark mode (black bonds invisible on dark bg)
   let svgContent = ligInner || '';
   if (darkMode && svgContent) {{
     svgContent = svgContent
@@ -1108,9 +655,8 @@ function draw2DView(compound, useSite) {{
   const textFill = darkMode ? "#e6edf3" : "#1a1a1a";
   const badgeBg  = darkMode ? "#161b22"  : "#ffffff";
 
-  // --- Group interactions by residue (iterate ALL interactions to keep ix_atom_pts indices correct) ---
   const resMap = new Map();
-  (compound.interactions||[]).forEach((ix, origI) => {{
+  (compound.interactions || []).forEach((ix, origI) => {{
     if (!activeToggles[ix.type]) return;
     const key = `${{ix.residue_name}}${{ix.residue_number}}${{ix.chain}}`;
     if (!resMap.has(key)) resMap.set(key, {{ix, type:ix.type, atomPts:[], allIx:[]}});
@@ -1123,30 +669,24 @@ function draw2DView(compound, useSite) {{
     }}
   }});
 
-  // --- Compute glyph positions (radial push from mean atom position) ---
   const residues = [...resMap.values()].map((e, i, arr) => {{
     let ax, ay;
     if (e.atomPts.length) {{
       ax = e.atomPts.reduce((s,p)=>s+p[0],0)/e.atomPts.length;
       ay = e.atomPts.reduce((s,p)=>s+p[1],0)/e.atomPts.length;
     }} else {{
-      ax = LIGCX;
-      ay = LIGCY;
+      ax = LIGCX; ay = LIGCY;
     }}
-    let dx = ax - LIGCX;
-    let dy = ay - LIGCY;
+    let dx = ax - LIGCX, dy = ay - LIGCY;
     if (dx === 0 && dy === 0) {{
       const angle = (i/arr.length)*2*Math.PI - Math.PI/2;
-      dx = Math.cos(angle);
-      dy = Math.sin(angle);
+      dx = Math.cos(angle); dy = Math.sin(angle);
     }}
     const r_atom = Math.sqrt(dx*dx + dy*dy);
-    const initialAngle = Math.atan2(dy, dx);
-    return {{...e, ax, ay, r_atom, angle: initialAngle}};
+    return {{...e, ax, ay, r_atom, angle: Math.atan2(dy, dx)}};
   }});
 
-  // --- Enforce angular separation ---
-  const MIN_SEP = 0.40; // radians (~23 degrees)
+  const MIN_SEP = 0.40;
   residues.sort((a,b) => a.angle - b.angle);
   for (let pass=0; pass<10; pass++) {{
     for (let i=0; i<residues.length; i++) {{
@@ -1164,25 +704,20 @@ function draw2DView(compound, useSite) {{
     residues.sort((a,b) => a.angle - b.angle);
   }}
 
-  // --- Compute base gx, gy ---
   residues.forEach(r => {{
-    let r_glyph = r.r_atom + PUSH;
-    r_glyph = Math.max(r_glyph, 180); // Ensure minimum distance from center
+    let r_glyph = Math.max(r.r_atom + PUSH, 180);
     r.gx = LIGCX + Math.cos(r.angle) * r_glyph;
     r.gy = LIGCY + Math.sin(r.angle) * r_glyph;
   }});
 
-  // --- Collision spread (to fix labels/glyphs overlapping radially or closely) ---
-  // Using an elliptical distance since labels drop down below the glyph
   for (let pass=0; pass<10; pass++) {{
     for (let a=0; a<residues.length; a++) {{
       for (let b=a+1; b<residues.length; b++) {{
         const dx=residues[b].gx-residues[a].gx, dy=residues[b].gy-residues[a].gy;
-        // scale dy slightly to require more vertical distance than horizontal
         const d=Math.sqrt(dx*dx + (dy*1.3)*(dy*1.3));
-        const minD = NODER*2 + 55; // increased padding for label clearance
+        const minD = NODER*2 + 55;
         if (d < minD && d > 0.01) {{
-          const push=(minD-d)/2, nx=dx/d, ny=dy/d; // use unscaled d for displacement direction
+          const push=(minD-d)/2, nx=dx/d, ny=dy/d;
           residues[a].gx -= nx*push; residues[a].gy -= ny*push;
           residues[b].gx += nx*push; residues[b].gy += ny*push;
         }}
@@ -1190,18 +725,15 @@ function draw2DView(compound, useSite) {{
     }}
   }}
 
-  // --- Final clamp to SVG boundaries ---
   residues.forEach(r => {{
-    r.gx=Math.max(NODER+30, Math.min(OW-NODER-30, r.gx));
-    r.gy=Math.max(NODER+30, Math.min(OH-52-NODER-30, r.gy));
+    r.gx = Math.max(NODER+30, Math.min(OW-NODER-30, r.gx));
+    r.gy = Math.max(NODER+30, Math.min(OH-52-NODER-30, r.gy));
   }});
 
-  // --- Build SVG ---
   let s = `<svg id="diagram2d-svg" xmlns="http://www.w3.org/2000/svg"
     width="100%" height="100%" viewBox="0 0 ${{OW}} ${{OH}}"
     preserveAspectRatio="xMidYMid meet">`;
 
-  // Arrowhead markers (larger, crisper)
   s += `<defs>`;
   ["hbond","salt_bridge"].forEach(type => {{
     s += `<marker id="d2a-${{type}}" markerWidth="9" markerHeight="9"
@@ -1210,28 +742,20 @@ function draw2DView(compound, useSite) {{
   }});
   s += `</defs>`;
 
-
-  // --- Connection lines: one per residue, from nearest ligand atom ---
   residues.forEach(res => {{
     const col     = COLORS[res.type] || "#888";
     const isHbond = res.type === "hbond" || res.type === "salt_bridge";
 
-    // Find nearest atom point to the finalized glyph position
     let px = LIGCX, py = LIGCY;
     if (res.atomPts.length > 0) {{
       let minDist = Infinity;
       res.atomPts.forEach(p => {{
         const dSq = (p[0]-res.gx)**2 + (p[1]-res.gy)**2;
-        if (dSq < minDist) {{
-          minDist = dSq;
-          px = p[0];
-          py = p[1];
-        }}
+        if (dSq < minDist) {{ minDist = dSq; px = p[0]; py = p[1]; }}
       }});
     }} else {{
-      const angle = res.angle;
-      px = LIGCX + Math.cos(angle) * (LIG_W * 0.42);
-      py = LIGCY + Math.sin(angle) * (LIG_H * 0.42);
+      px = LIGCX + Math.cos(res.angle) * (LIG_W * 0.42);
+      py = LIGCY + Math.sin(res.angle) * (LIG_H * 0.42);
     }}
 
     const ddx=res.gx-px, ddy=res.gy-py;
@@ -1263,7 +787,6 @@ function draw2DView(compound, useSite) {{
     }}
   }});
 
-  // Ligand structure inlined via <g transform> — drawn on top of connection lines
   if (hasSvg) {{
     if (useSite && compound.site_viewbox) {{
       const [vx, vy, vw, vh] = compound.site_viewbox;
@@ -1282,47 +805,37 @@ function draw2DView(compound, useSite) {{
             Install rdkit for 2D structure</text>`;
   }}
 
-  // --- Residue glyphs + labels ---
   residues.forEach(res => {{
     const {{gx, gy, ix, type}} = res;
     const col = COLORS[type] || "#888";
     const aac = aaColor(ix.residue_name);
 
-    // Eyelash faces the nearest atom (same logic as connection line)
     let srcX = LIGCX, srcY = LIGCY;
     if (res.atomPts.length > 0) {{
       let minDist = Infinity;
       res.atomPts.forEach(p => {{
         const dSq = (p[0]-gx)**2 + (p[1]-gy)**2;
-        if (dSq < minDist) {{
-          minDist = dSq;
-          srcX = p[0];
-          srcY = p[1];
-        }}
+        if (dSq < minDist) {{ minDist = dSq; srcX = p[0]; srcY = p[1]; }}
       }});
     }} else {{
-      const angle = res.angle;
-      srcX = LIGCX + Math.cos(angle) * (LIG_W * 0.42);
-      srcY = LIGCY + Math.sin(angle) * (LIG_H * 0.42);
+      srcX = LIGCX + Math.cos(res.angle) * (LIG_W * 0.42);
+      srcY = LIGCY + Math.sin(res.angle) * (LIG_H * 0.42);
     }}
 
-    // --- Glyph ---
     if (type === "hydrophobic") {{
       s += eyelashGlyph(gx, gy, srcX, srcY, NODER, 9, col);
     }} else {{
       let fillCol = aac + "22";
       let dash = "";
       if (type === "pi_stack" || type === "pi_cation") {{
-         fillCol = col + "15";
-         dash = ' stroke-dasharray="5 2.5"';
+        fillCol = col + "15"; dash = ' stroke-dasharray="5 2.5"';
       }} else if (type === "halogen") {{
-         fillCol = aac + "15";
+        fillCol = aac + "15";
       }}
       s += `<circle cx="${{gx.toFixed(1)}}" cy="${{gy.toFixed(1)}}" r="${{NODER}}"
               fill="${{fillCol}}" stroke="${{col}}" stroke-width="2.2"${{dash}}/>`;
     }}
 
-    // --- Inner Text (Name & Number inside the glyph area) ---
     s += `<text x="${{gx.toFixed(1)}}" y="${{(gy-4).toFixed(1)}}" text-anchor="middle"
             dominant-baseline="middle" fill="${{textFill}}"
             font-size="9.5" font-weight="700" font-family="Arial,sans-serif">
@@ -1334,7 +847,6 @@ function draw2DView(compound, useSite) {{
             ${{ix.residue_number}} (${{ix.chain}})
           </text>`;
 
-    // --- Symbols (Superscripts at top-right of the glyph) ---
     let symbol = "";
     if (type === "salt_bridge") {{
       symbol = ["LYS","ARG","HIS"].includes(ix.residue_name) ? "+" : "−";
@@ -1350,7 +862,6 @@ function draw2DView(compound, useSite) {{
     }}
   }});
 
-  // --- Legend ---
   const LY  = OH - 38;
   const LX0 = 16;
   const COL_W = Math.floor((OW-32) / Object.keys(COLORS).length);
@@ -1364,155 +875,6 @@ function draw2DView(compound, useSite) {{
   s += `</svg>`;
   wrap.innerHTML = s;
 }}
-
-// ── Main compound select ─────────────────────────────────────────────────
-async function selectCompound(lig_id) {{
-  clearLigand();
-  if (!lig_id) return;
-  const compound = COMPOUNDS.find(c=>c.lig_id===lig_id);
-  if (!compound) return;
-  currentData = compound;
-
-  // Disable site toggle if no viewbox crop available
-  document.getElementById("btn-site").disabled = !compound.site_viewbox;
-
-  // 3D
-  if (compound.sdf_b64) {{
-    const sdf = atob(compound.sdf_b64);
-    ligandModel = viewer.addModel(sdf,"sdf");
-    ligandAtomCount = viewer.selectedAtoms({{model:ligandModel}}).length;
-    // Style is applied by rebuildScene() below, after pocket detection.
-  }}
-  // Pull every residue with at least one atom inside 5 Å of the ligand — gives
-  // a fuller picture of the pocket than the PLIP-interaction residues alone.
-  // Done by explicit distance scan because 3Dmol's `within` selector silently
-  // returned empty for cross-model queries here.
-  if (ligandModel !== null) {{
-    const lig = viewer.selectedAtoms({{model: ligandModel}});
-    const rec = viewer.selectedAtoms({{model: 0}});
-    const D2  = 25.0;   // (5 Å)^2
-    const hit = new Set();
-    for (const r of rec) {{
-      if (hit.has(r.resi)) continue;
-      for (const l of lig) {{
-        const dx = r.x - l.x, dy = r.y - l.y, dz = r.z - l.z;
-        if (dx*dx + dy*dy + dz*dz <= D2) {{ hit.add(r.resi); break; }}
-      }}
-    }}
-    pocketResi = [...hit];
-  }}
-  await rebuildScene();
-  setupHover();
-  drawInteractions(compound.interactions||[]);
-  updateInset(compound);
-  if (showResLabels) drawResidueLabels(compound);
-  await refreshPocketSurface();
-  await refreshHydrophobSurface();
-
-  renderSidebar(compound);
-
-  if (currentMode==='3d') {{
-    if (ligandModel!==null) {{
-      // Frame ligand + pocket together so the user sees the binding site in context,
-      // then nudge off-axis so it doesn't look like a flat schematic.
-      const sel = pocketResi.length
-        ? {{or:[{{model:ligandModel}}, {{model:0, resi:pocketResi}}]}}
-        : {{model:ligandModel}};
-      viewer.zoomTo(sel, 500);
-      viewer.rotate(15, "x");
-    }}
-    viewer.render();
-  }} else {{
-    draw2DView(compound, siteMode);
-  }}
-}}
-
-function toggleType(type, checked) {{
-  activeToggles[type]=checked;
-  if (!currentData) return;
-  refreshInteractions();
-  renderSidebar(currentData);
-  if (currentMode==='2d') draw2DView(currentData, siteMode);
-}}
-
-// ── Exports ──────────────────────────────────────────────────────────────
-function exportPNG() {{
-  if (currentMode==='2d') {{
-    const svg = document.getElementById("diagram2d-svg");
-    if (!svg) {{ alert("Select a compound first."); return; }}
-    const name = currentData?(currentData.name||currentData.lig_id):"pose";
-    const str  = new XMLSerializer().serializeToString(svg);
-    const img  = new Image();
-    const blob = new Blob([str],{{type:'image/svg+xml'}});
-    const url  = URL.createObjectURL(blob);
-    img.onload = () => {{
-      const sc=2, cv=document.createElement('canvas');
-      cv.width=svg.viewBox.baseVal.width*sc||1680;
-      cv.height=svg.viewBox.baseVal.height*sc||1320;
-      const ctx=cv.getContext('2d');
-      ctx.scale(sc,sc);
-      ctx.fillStyle=darkMode?"#0d1117":"#f6f8fa";
-      ctx.fillRect(0,0,cv.width,cv.height);
-      ctx.drawImage(img,0,0);
-      cv.toBlob(b => {{
-        const a=Object.assign(document.createElement('a'),
-          {{href:URL.createObjectURL(b),download:`${{name}}_2d.png`}});
-        a.click();
-      }},'image/png');
-      URL.revokeObjectURL(url);
-    }};
-    img.src=url;
-  }} else {{
-    const name=currentData?(currentData.name||currentData.lig_id):"pose";
-    const a=Object.assign(document.createElement("a"),
-      {{href:viewer.pngURI(),download:`${{name}}_3d.png`}});
-    a.click();
-  }}
-}}
-
-function exportSVG() {{
-  const svg=document.getElementById("diagram2d-svg");
-  if (!svg) {{ alert("Select a compound first."); return; }}
-  const name=currentData?(currentData.name||currentData.lig_id):"pose";
-  const blob=new Blob([new XMLSerializer().serializeToString(svg)],
-    {{type:'image/svg+xml'}});
-  const a=Object.assign(document.createElement('a'),
-    {{href:URL.createObjectURL(blob),download:`${{name}}_2d_interactions.svg`}});
-  a.click();
-}}
-
-function exportVideo() {{
-  const canvas=document.querySelector("#viewer canvas");
-  if (!canvas) {{ alert("3D canvas not ready."); return; }}
-  const mime=["video/webm;codecs=vp9","video/webm"].find(m=>MediaRecorder.isTypeSupported(m));
-  if (!mime) {{ alert("WebM not supported — try Chrome."); return; }}
-  const rec=new MediaRecorder(canvas.captureStream(30),{{mimeType:mime}});
-  const chunks=[];
-  rec.ondataavailable=e=>{{if(e.data.size)chunks.push(e.data);}};
-  rec.onstop=()=>{{
-    const name=currentData?(currentData.name||currentData.lig_id):"pose";
-    const a=Object.assign(document.createElement('a'),{{
-      href:URL.createObjectURL(new Blob(chunks,{{type:'video/webm'}})),
-      download:`${{name}}_360.webm`}});
-    a.click();
-    document.getElementById("record-overlay").style.display="none";
-    const btn=document.getElementById("btn-exp-vid");
-    btn.disabled=false; btn.textContent="Export 360° Video";
-  }};
-  document.getElementById("record-overlay").style.display="block";
-  const btn=document.getElementById("btn-exp-vid");
-  btn.disabled=true; btn.textContent="Recording…";
-  rec.start();
-  let step=0;
-  (function tick(){{
-    if(step>=72){{rec.stop();return;}}
-    viewer.rotate(5,"y"); viewer.render();
-    document.getElementById("record-pct").textContent=Math.round(step/72*100)+"%";
-    step++; setTimeout(tick,50);
-  }})();
-}}
-
-viewer.render();
 </script>
 </body>
 </html>
