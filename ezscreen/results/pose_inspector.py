@@ -444,6 +444,7 @@ function whenReady(fn) {{
       emdbProvider: 'rcsb',
     }});
     await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
+    applyBackground();
     viewerReady = true;
     pendingTasks.splice(0).forEach(fn => fn());
   }} catch (err) {{
@@ -570,12 +571,22 @@ function setSiteMode(site) {{
   if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
+function applyBackground() {{
+  if (!molViewer || !molViewer.plugin.canvas3d) return;
+  // Mol*'s Color is just a tagged number — passing the hex int directly works.
+  const c = darkMode ? 0x0d1117 : 0xf6f8fa;
+  molViewer.plugin.canvas3d.setProps({{
+    renderer: {{ backgroundColor: c }},
+  }});
+}}
+
 function toggleBackground() {{
   darkMode = !darkMode;
   document.body.classList.toggle('light', !darkMode);
   const btn = document.getElementById('btn-bg');
   btn.textContent = darkMode ? 'Light BG' : 'Dark BG';
   btn.classList.toggle('active', !darkMode);
+  applyBackground();
   if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
