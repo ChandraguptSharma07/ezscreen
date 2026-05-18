@@ -560,6 +560,7 @@ let currentData    = null;
 let pocketResi     = [];   // residue numbers within 5 Å of current ligand
 let pinnedLabels   = new Map();   // atom-key -> 3Dmol label, survives until clicked again
 let ligandAtomCount = 0;          // for spectrum-cartoon gradient over the ligand
+let envelopeShapes = [];          // translucent spheres around the hovered residue
 
 // ── 3D Viewer init ───────────────────────────────────────────────────────
 const viewer = $3Dmol.createViewer("viewer", {{ backgroundColor:"#0d1117", antialias:true }});
@@ -581,10 +582,36 @@ let insetLigandModel = null;
 // Hover tooltips are wired up per-compound in setupHover() — at init time
 // there is nothing useful to label, and the cartoon ribbon swallows hover
 // events anyway which is why the old global handler felt unreliable.
+// Translucent sphere cloud around every atom of the given residue. Cheap
+// to add/remove (~10 spheres) and gives the hovered residue a glowing
+// envelope so the label has an unambiguous target — much clearer than a
+// floating text label on its own.
+function showEnvelope(atom) {{
+  clearEnvelope();
+  if (!atom || (ligandModel !== null && atom.model === ligandModel)) return;
+  const atoms = viewer.selectedAtoms({{
+    model: atom.model, chain: atom.chain, resi: atom.resi,
+  }});
+  atoms.forEach(a => {{
+    envelopeShapes.push(viewer.addSphere({{
+      center: {{x:a.x, y:a.y, z:a.z}},
+      radius: 1.7, color: "#79c0ff", opacity: 0.22,
+    }}));
+  }});
+}}
+
+function clearEnvelope() {{
+  envelopeShapes.forEach(s => viewer.removeShape(s));
+  envelopeShapes = [];
+}}
+
 function setupHover() {{
-  const hoverSel = (ligandModel !== null && pocketResi.length)
-    ? {{or:[{{model:ligandModel}}, {{model:0, resi:pocketResi}}]}}
-    : (ligandModel !== null ? {{model:ligandModel}} : {{model:0, resi:pocketResi}});
+  // Hover everywhere — cartoon ribbon included. The previous pocket-only
+  // scope meant residues outside the 5 Å shell were silent on hover, which
+  // was confusing because they're clearly part of the rendered protein.
+  const hoverSel = ligandModel !== null
+    ? {{or:[{{model:ligandModel}}, {{model:0}}]}}
+    : {{model:0}};
 
   viewer.setHoverable(hoverSel, 120,
     function(atom) {{
@@ -601,14 +628,16 @@ function setupHover() {{
         borderThickness: 1, fontSize: 12, borderRadius: 5, padding: 5,
         inFront: true,
       }});
+      showEnvelope(atom);
       viewer.render();
     }},
     function(atom) {{
       if (atom._label) {{
         viewer.removeLabel(atom._label);
         delete atom._label;
-        viewer.render();
       }}
+      clearEnvelope();
+      viewer.render();
     }}
   );
 
@@ -707,6 +736,7 @@ function clearLigand() {{
   if (hydrophobSurf!==null) {{ viewer.removeSurface(hydrophobSurf); hydrophobSurf=null; }}
   if (pocketSurf!==null)    {{ viewer.removeSurface(pocketSurf);    pocketSurf=null;    }}
   clearPinnedLabels();
+  clearEnvelope();
   pocketResi = [];
   ligandAtomCount = 0;
   viewer.setStyle({{model:0}},{{cartoon:{{color:"spectrum",opacity:.9}}}});
