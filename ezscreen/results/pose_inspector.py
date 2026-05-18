@@ -975,7 +975,10 @@ function updateInset(compound) {{
     insetLigandModel = null;
   }}
   insetViewer.setStyle({{model:0}}, {{}});
-  insetViewer.setStyle({{model:0}}, proteinBaseStyle());
+  // The inset is a clean second-angle orientation view — keep it on cartoon
+  // even when the main view is in lines mode, otherwise the 220 px panel
+  // becomes an unreadable wireframe mess.
+  insetViewer.setStyle({{model:0}}, {{cartoon: cartoonColorSpec()}});
 
   if (!compound || !compound.sdf_b64) {{
     insetViewer.zoomTo({{model:0}});
@@ -986,16 +989,9 @@ function updateInset(compound) {{
   insetLigandModel = insetViewer.addModel(atob(compound.sdf_b64), "sdf");
   insetViewer.setStyle({{model:insetLigandModel}}, ligandStyleSpec());
 
-  const [ixResi] = pocketSplit();
-  if (ixResi.length) {{
-    insetViewer.addStyle({{model:0, resi:ixResi}},
-      {{stick:{{colorscheme:"cyanCarbon", radius:0.18}}}});
-  }}
-
-  const sel = ixResi.length
-    ? {{or:[{{model:insetLigandModel}}, {{model:0, resi:ixResi}}]}}
-    : {{model:insetLigandModel}};
-  insetViewer.zoomTo(sel);
+  // No pocket sticks here — they were the source of the visual mess.
+  insetViewer.zoomTo({{model:insetLigandModel}});
+  insetViewer.zoom(0.7);   // pull back so the cartoon context is visible
   insetViewer.rotate(90, "y");
   insetViewer.render();
 }}
