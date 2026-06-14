@@ -358,6 +358,7 @@ h3 {{
 
   <span class="tb-label">Display</span>
   <button class="tb-btn" id="btn-bg"   onclick="toggleBackground()" title="Switch light / dark background">Light BG</button>
+  <button class="tb-btn active" id="btn-fx" onclick="togglePostFx()" title="Edge outlines and ambient occlusion shading">FX</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
 </div>
@@ -416,6 +417,7 @@ let darkMode       = true;
 let currentMode    = '3d';
 let siteMode       = true;
 let showDistLabels = false;
+let postFxOn       = true;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
 const pendingTasks = [];
@@ -445,6 +447,7 @@ function whenReady(fn) {{
     }});
     await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
     applyBackground();
+    applyPostFx();
     viewerReady = true;
     pendingTasks.splice(0).forEach(fn => fn());
   }} catch (err) {{
@@ -580,6 +583,41 @@ function applyBackground() {{
   }});
 }}
 
+function applyPostFx() {{
+  if (!molViewer || !molViewer.plugin.canvas3d) return;
+  const outlineColor = darkMode ? 0x000000 : 0x202020;
+  molViewer.plugin.canvas3d.setProps({{
+    postprocessing: {{
+      occlusion: postFxOn
+        ? {{ name: 'on', params: {{
+            samples: 32,
+            multiScale: {{ name: 'off', params: {{}} }},
+            radius: 5,
+            bias: 0.8,
+            blurKernelSize: 15,
+            resolutionScale: 1,
+            color: 0x000000,
+            transparentThreshold: 0.4,
+          }} }}
+        : {{ name: 'off', params: {{}} }},
+      outline: postFxOn
+        ? {{ name: 'on', params: {{
+            scale: 1,
+            threshold: 0.33,
+            color: outlineColor,
+            includeTransparent: true,
+          }} }}
+        : {{ name: 'off', params: {{}} }},
+    }},
+  }});
+}}
+
+function togglePostFx() {{
+  postFxOn = !postFxOn;
+  document.getElementById('btn-fx').classList.toggle('active', postFxOn);
+  applyPostFx();
+}}
+
 function toggleBackground() {{
   darkMode = !darkMode;
   document.body.classList.toggle('light', !darkMode);
@@ -587,6 +625,7 @@ function toggleBackground() {{
   btn.textContent = darkMode ? 'Light BG' : 'Dark BG';
   btn.classList.toggle('active', !darkMode);
   applyBackground();
+  applyPostFx();
   if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
