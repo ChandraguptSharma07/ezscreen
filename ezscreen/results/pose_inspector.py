@@ -31,6 +31,36 @@ _LIG_SVG_W  = 560   # width of RDKit ligand SVG
 _LIG_SVG_H  = 380   # height of RDKit ligand SVG
 _GLYPH_MAR  = 170   # px margin around ligand for residue glyphs
 
+# Backbone atoms to strip when rendering interacting residues — Cα stays so
+# the side-chain stick visually anchors to the cartoon ribbon, but N/C/O don't
+# overlap the backbone trace.
+_BACKBONE_STRIP = {"N", "C", "O", "H", "HA", "HA2", "HA3"}
+
+
+def _extract_sidechain_pdb(receptor_text: str,
+                           targets: set[tuple[str, int]]) -> str:
+    if not targets or not receptor_text:
+        return ""
+    out: list[str] = []
+    for line in receptor_text.splitlines():
+        if not line.startswith(("ATOM  ", "HETATM")) or len(line) < 26:
+            continue
+        chain = line[21]
+        try:
+            resi = int(line[22:26])
+        except ValueError:
+            continue
+        if (chain, resi) not in targets:
+            continue
+        atom_name = line[12:16].strip()
+        if atom_name in _BACKBONE_STRIP:
+            continue
+        out.append(line)
+    if not out:
+        return ""
+    out.append("END")
+    return "\n".join(out) + "\n"
+
 
 def _strip_svg_inner(svg_text: str) -> tuple[str, str]:
     """Return (inner_content, viewBox) with outer <svg> wrapper and bg rect removed."""
@@ -359,6 +389,7 @@ h3 {{
   <span class="tb-label">Display</span>
   <button class="tb-btn" id="btn-bg"   onclick="toggleBackground()" title="Switch light / dark background">Light BG</button>
   <button class="tb-btn active" id="btn-fx" onclick="togglePostFx()" title="Edge outlines and ambient occlusion shading">FX</button>
+  <button class="tb-btn" id="btn-bindings" onclick="toggleBindings()" title="Show interaction cylinders in 3D">Bindings</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
 </div>
@@ -432,6 +463,7 @@ function aaColor(resn) {{ return AA_COL[AA_CLS[resn]] || '#8b949e'; }}
 // State
 let molViewer      = null;
 let ligandStruct   = null;   // Hierarchy structure entry for the current ligand
+let residueStruct  = null;   // Hierarchy structure entry for side-chain sticks
 let ixStructs      = {{}};     // {{type: hierarchy structure}} for cylinder groups
 let ixRebuildSeq   = 0;      // Cancels stale rebuilds when toggles fire quickly
 let currentData    = null;
@@ -439,6 +471,7 @@ let darkMode       = true;
 let currentMode    = '3d';
 let siteMode       = true;
 let showDistLabels = false;
+let showBindings   = false;
 let postFxOn       = true;
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
@@ -470,6 +503,14 @@ function whenReady(fn) {{
     await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
     applyBackground();
     applyPostFx();
+    // Per-atom hover: 'element' = atom in Mol*'s vocab. Without this Mol*
+    // falls back to residue-level labels which hide useful detail like
+    // which atom of the side chain the cursor is on.
+    try {{
+      molViewer.plugin.managers.interactivity.setProps({{ granularity: 'element' }});
+    }} catch (err) {{
+      console.warn('granularity setProps failed:', err);
+    }}
     viewerReady = true;
     pendingTasks.splice(0).forEach(fn => fn());
   }} catch (err) {{
@@ -518,6 +559,42 @@ async function removeCurrentLigand() {{
   ligandStruct = null;
 }}
 
+// Side-chain sticks loaded as a small companion structure. Backbone atoms
+// (N/C/O) are stripped on the Python side so the floating sticks don't
+// double-render the cartoon's backbone — only Cα and beyond ride along.
+async function removeResidueSticks() {{
+  if (residueStruct === null || !molViewer) return;
+  try {{
+    await molViewer.plugin.managers.structure.hierarchy.remove([residueStruct]);
+  }} catch (err) {{
+    console.warn('residue sticks removal failed:', err);
+  }}
+  residueStruct = null;
+}}
+
+async function loadResidueSticks(pdbText) {{
+  if (!pdbText || !molViewer) return;
+  const plugin = molViewer.plugin;
+  try {{
+    const data  = await plugin.builders.data.rawData({{ data: pdbText, label: 'Interacting residues' }});
+    const traj  = await plugin.builders.structure.parseTrajectory(data, 'pdb');
+    const model = await plugin.builders.structure.createModel(traj);
+    const struc = await plugin.builders.structure.createStructure(model);
+    const comp  = await plugin.builders.structure.tryCreateComponentStatic(struc, 'all');
+    if (comp) {{
+      await plugin.builders.structure.representation.addRepresentation(comp, {{
+        type: 'ball-and-stick',
+        typeParams: {{ sizeFactor: 0.18, sizeAspectRatio: 0.55, aromaticBonds: false }},
+        color: 'element-symbol',
+      }});
+    }}
+    const all = plugin.managers.structure.hierarchy.current.structures;
+    if (all.length) residueStruct = all[all.length - 1];
+  }} catch (err) {{
+    console.warn('residue sticks load failed:', err);
+  }}
+}}
+
 // ── Interaction cylinders via synthetic PDB structures ───────────────────
 function _pad(v, n)        {{ return String(v).padStart(n); }}
 function _fmtF(v, w, p)    {{ return v.toFixed(p).padStart(w); }}
@@ -525,32 +602,44 @@ function _isZeroVec(v)     {{
   return !v || (Math.abs(v[0]) + Math.abs(v[1]) + Math.abs(v[2]) < 1e-6);
 }}
 
-// One 78-column HETATM record. Element is always carbon since the bond
-// cylinder is what we render — the atoms get a near-zero radius later.
-function _pdbAtom(serial, resn, resi, x, y, z) {{
-  return 'HETATM' + _pad(serial, 5) +
-         '  C   ' +
-         _pad(resn, 3) + ' X' + _pad(resi, 4) +
-         '    ' +
-         _fmtF(x, 8, 3) + _fmtF(y, 8, 3) + _fmtF(z, 8, 3) +
-         '  1.00  0.00           C';
+// V2000 atom record (69 columns). All atoms are carbon — only the bond
+// cylinder is meaningful here.
+function _molAtom(x, y, z) {{
+  return _fmtF(x, 10, 4) + _fmtF(y, 10, 4) + _fmtF(z, 10, 4) +
+         ' C   0  0  0  0  0  0  0  0  0  0  0  0';
 }}
 
-function buildIxPdb(type, ixs) {{
-  const resn = IX_RESN[type] || 'INT';
-  const atoms = [];
-  const conects = [];
-  let serial = 1, resi = 1;
+// V2000 mol block. Mol*'s PDB parser ignores CONECT for atoms further apart
+// than the covalent-radius cutoff (3-4 A interactions get dropped), but
+// SDF/mol has an explicit bond block that the parser always honours.
+function buildIxMol(type, ixs) {{
+  const pairs = [];
   for (const ix of ixs) {{
     const lc = ix.ligand_coords, pc = ix.protein_coords;
     if (_isZeroVec(lc) || _isZeroVec(pc)) continue;
-    atoms.push(_pdbAtom(serial,     resn, resi, lc[0], lc[1], lc[2]));
-    atoms.push(_pdbAtom(serial + 1, resn, resi, pc[0], pc[1], pc[2]));
-    conects.push('CONECT' + _pad(serial, 5) + _pad(serial + 1, 5));
-    serial += 2; resi += 1;
+    pairs.push([lc, pc]);
   }}
-  if (!atoms.length) return null;
-  return [...atoms, ...conects, 'END', ''].join('\\n');
+  if (!pairs.length) return null;
+
+  const nAtoms = pairs.length * 2;
+  const nBonds = pairs.length;
+  const lines = [
+    'ix-' + type,
+    '  ezscreen          3D',
+    '',
+    _pad(nAtoms, 3) + _pad(nBonds, 3) + '  0  0  0  0  0  0  0  0999 V2000',
+  ];
+  for (const [lc, pc] of pairs) {{
+    lines.push(_molAtom(lc[0], lc[1], lc[2]));
+    lines.push(_molAtom(pc[0], pc[1], pc[2]));
+  }}
+  let serial = 1;
+  for (let i = 0; i < pairs.length; i++) {{
+    lines.push(_pad(serial, 3) + _pad(serial + 1, 3) + '  1  0  0  0  0');
+    serial += 2;
+  }}
+  lines.push('M  END');
+  return lines.join('\\n');
 }}
 
 async function clearInteractions() {{
@@ -568,6 +657,7 @@ async function rebuildInteractions() {{
   const seq = ++ixRebuildSeq;
   await clearInteractions();
   if (seq !== ixRebuildSeq || !molViewer || !currentData) return;
+  if (!showBindings) return;
 
   const groups = {{}};
   for (const ix of currentData.interactions || []) {{
@@ -575,32 +665,43 @@ async function rebuildInteractions() {{
     (groups[ix.type] = groups[ix.type] || []).push(ix);
   }}
 
+  const plugin = molViewer.plugin;
   for (const [type, ixs] of Object.entries(groups)) {{
     if (seq !== ixRebuildSeq) return;
-    const pdb = buildIxPdb(type, ixs);
-    if (!pdb) continue;
-    const before = molViewer.plugin.managers.structure.hierarchy.current.structures.length;
+    const mol = buildIxMol(type, ixs);
+    if (!mol) continue;
+
+    // Build the structure ourselves so we can pin a ball-and-stick representation
+    // with a uniform colour — Mol*'s default preset would render the synthetic
+    // HETATM block as a space-filling blob with chain-auto coloring instead.
     try {{
-      await molViewer.loadStructureFromData(pdb, 'pdb', false, {{
-        representationParams: {{
-          theme: {{
-            globalName: 'uniform',
-            globalColorParams: {{ value: IX_COLOR_INT[type] }},
-          }},
-        }},
-      }});
+      const data  = await plugin.builders.data.rawData({{ data: mol, label: 'ix-' + type }});
+      const traj  = await plugin.builders.structure.parseTrajectory(data, 'mol');
+      const model = await plugin.builders.structure.createModel(traj);
+      const struc = await plugin.builders.structure.createStructure(model);
+      const comp  = await plugin.builders.structure.tryCreateComponentStatic(struc, 'all');
+      if (comp) {{
+        await plugin.builders.structure.representation.addRepresentation(comp, {{
+          type: 'ball-and-stick',
+          typeParams: {{ sizeFactor: 0.05, sizeAspectRatio: 1.0, aromaticBonds: false }},
+          color: 'uniform',
+          colorParams: {{ value: IX_COLOR_INT[type] }},
+        }});
+      }}
     }} catch (err) {{
       console.warn('interaction load failed for', type, err);
       continue;
     }}
-    const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
-    if (all.length > before) ixStructs[type] = all[all.length - 1];
+
+    const all = plugin.managers.structure.hierarchy.current.structures;
+    if (all.length) ixStructs[type] = all[all.length - 1];
   }}
 }}
 
 async function selectCompound(ligId) {{
   whenReady(async () => {{
     await clearInteractions();
+    await removeResidueSticks();
     await removeCurrentLigand();
 
     if (!ligId) {{
@@ -620,6 +721,10 @@ async function selectCompound(ligId) {{
       await molViewer.loadStructureFromData(sdf, 'sdf', false);
       const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
       if (all.length > before) ligandStruct = all[all.length - 1];
+    }}
+
+    if (showBindings && compound && compound.residue_pdb) {{
+      await loadResidueSticks(compound.residue_pdb);
     }}
 
     renderSidebar(compound);
@@ -738,6 +843,19 @@ function toggleDistLabels() {{
   showDistLabels = !showDistLabels;
   document.getElementById('btn-dist').classList.toggle('active', showDistLabels);
   if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+}}
+
+async function toggleBindings() {{
+  showBindings = !showBindings;
+  document.getElementById('btn-bindings').classList.toggle('active', showBindings);
+  if (showBindings) {{
+    if (currentData && currentData.residue_pdb) {{
+      await loadResidueSticks(currentData.residue_pdb);
+    }}
+  }} else {{
+    await removeResidueSticks();
+  }}
+  await rebuildInteractions();
 }}
 
 // ── 2D diagram (preserved from prior viewer) ─────────────────────────────
@@ -1063,6 +1181,19 @@ def generate_viewer(work_dir: Path) -> Path:
     receptor_text = receptor_pdb.read_text() if receptor_pdb else ""
     compounds     = json.loads(interactions_json.read_text())
     compounds     = _enrich_2d(compounds)
+
+    for c in compounds:
+        targets: set[tuple[str, int]] = set()
+        for ix in c.get("interactions") or []:
+            ch = ix.get("chain")
+            rn = ix.get("residue_number")
+            if ch and rn is not None:
+                try:
+                    targets.add((str(ch), int(rn)))
+                except (TypeError, ValueError):
+                    pass
+        if targets:
+            c["residue_pdb"] = _extract_sidechain_pdb(receptor_text, targets)
 
     html = _build_html(compounds, receptor_text)
     viewer_path.write_text(html, encoding="utf-8")
