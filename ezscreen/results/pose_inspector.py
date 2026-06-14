@@ -550,7 +550,7 @@ function buildIxPdb(type, ixs) {{
     serial += 2; resi += 1;
   }}
   if (!atoms.length) return null;
-  return [...atoms, ...conects, 'END', ''].join('\n');
+  return [...atoms, ...conects, 'END', ''].join('\\n');
 }}
 
 async function clearInteractions() {{
