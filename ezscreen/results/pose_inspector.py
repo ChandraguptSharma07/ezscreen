@@ -399,6 +399,26 @@ const LIG_W     = {lig_svg_w};
 const LIG_H     = {lig_svg_h};
 const GM        = {glyph_mar};
 
+// 3-letter HETATM residue names + numeric colours for synthetic interaction
+// cylinders. The residue name is what Mol* sees inside the synthesised PDB;
+// the colour is fed into the uniform colour theme when loading.
+const IX_RESN = {{
+  hbond:       'HBD',
+  hydrophobic: 'HYP',
+  pi_stack:    'PST',
+  pi_cation:   'PCA',
+  salt_bridge: 'SLT',
+  halogen:     'HLG',
+}};
+const IX_COLOR_INT = {{
+  hbond:       0x3b82f6,
+  hydrophobic: 0xf97316,
+  pi_stack:    0x22c55e,
+  pi_cation:   0xa855f7,
+  salt_bridge: 0xef4444,
+  halogen:     0x14b8a6,
+}};
+
 // Amino-acid colour classes (used by the 2D diagram glyphs).
 const AA_CLS = {{
   ALA:'hp',VAL:'hp',LEU:'hp',ILE:'hp',PRO:'hp',PHE:'hp',MET:'hp',TRP:'hp',
@@ -412,6 +432,8 @@ function aaColor(resn) {{ return AA_COL[AA_CLS[resn]] || '#8b949e'; }}
 // State
 let molViewer      = null;
 let ligandStruct   = null;   // Hierarchy structure entry for the current ligand
+let ixStructs      = {{}};     // {{type: hierarchy structure}} for cylinder groups
+let ixRebuildSeq   = 0;      // Cancels stale rebuilds when toggles fire quickly
 let currentData    = null;
 let darkMode       = true;
 let currentMode    = '3d';
@@ -482,6 +504,7 @@ function toggleType(type, checked) {{
   if (!currentData) return;
   renderSidebar(currentData);
   if (currentMode === '2d') draw2DView(currentData, siteMode);
+  rebuildInteractions();
 }}
 
 // ── Compound load / unload via Mol* hierarchy manager ────────────────────
@@ -495,8 +518,89 @@ async function removeCurrentLigand() {{
   ligandStruct = null;
 }}
 
+// ── Interaction cylinders via synthetic PDB structures ───────────────────
+function _pad(v, n)        {{ return String(v).padStart(n); }}
+function _fmtF(v, w, p)    {{ return v.toFixed(p).padStart(w); }}
+function _isZeroVec(v)     {{
+  return !v || (Math.abs(v[0]) + Math.abs(v[1]) + Math.abs(v[2]) < 1e-6);
+}}
+
+// One 78-column HETATM record. Element is always carbon since the bond
+// cylinder is what we render — the atoms get a near-zero radius later.
+function _pdbAtom(serial, resn, resi, x, y, z) {{
+  return 'HETATM' + _pad(serial, 5) +
+         '  C   ' +
+         _pad(resn, 3) + ' X' + _pad(resi, 4) +
+         '    ' +
+         _fmtF(x, 8, 3) + _fmtF(y, 8, 3) + _fmtF(z, 8, 3) +
+         '  1.00  0.00           C';
+}}
+
+function buildIxPdb(type, ixs) {{
+  const resn = IX_RESN[type] || 'INT';
+  const atoms = [];
+  const conects = [];
+  let serial = 1, resi = 1;
+  for (const ix of ixs) {{
+    const lc = ix.ligand_coords, pc = ix.protein_coords;
+    if (_isZeroVec(lc) || _isZeroVec(pc)) continue;
+    atoms.push(_pdbAtom(serial,     resn, resi, lc[0], lc[1], lc[2]));
+    atoms.push(_pdbAtom(serial + 1, resn, resi, pc[0], pc[1], pc[2]));
+    conects.push('CONECT' + _pad(serial, 5) + _pad(serial + 1, 5));
+    serial += 2; resi += 1;
+  }}
+  if (!atoms.length) return null;
+  return [...atoms, ...conects, 'END', ''].join('\n');
+}}
+
+async function clearInteractions() {{
+  const toRemove = Object.values(ixStructs).filter(s => s);
+  ixStructs = {{}};
+  if (!toRemove.length || !molViewer) return;
+  try {{
+    await molViewer.plugin.managers.structure.hierarchy.remove(toRemove);
+  }} catch (err) {{
+    console.warn('interaction cleanup failed:', err);
+  }}
+}}
+
+async function rebuildInteractions() {{
+  const seq = ++ixRebuildSeq;
+  await clearInteractions();
+  if (seq !== ixRebuildSeq || !molViewer || !currentData) return;
+
+  const groups = {{}};
+  for (const ix of currentData.interactions || []) {{
+    if (!activeToggles[ix.type]) continue;
+    (groups[ix.type] = groups[ix.type] || []).push(ix);
+  }}
+
+  for (const [type, ixs] of Object.entries(groups)) {{
+    if (seq !== ixRebuildSeq) return;
+    const pdb = buildIxPdb(type, ixs);
+    if (!pdb) continue;
+    const before = molViewer.plugin.managers.structure.hierarchy.current.structures.length;
+    try {{
+      await molViewer.loadStructureFromData(pdb, 'pdb', false, {{
+        representationParams: {{
+          theme: {{
+            globalName: 'uniform',
+            globalColorParams: {{ value: IX_COLOR_INT[type] }},
+          }},
+        }},
+      }});
+    }} catch (err) {{
+      console.warn('interaction load failed for', type, err);
+      continue;
+    }}
+    const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
+    if (all.length > before) ixStructs[type] = all[all.length - 1];
+  }}
+}}
+
 async function selectCompound(ligId) {{
   whenReady(async () => {{
+    await clearInteractions();
     await removeCurrentLigand();
 
     if (!ligId) {{
@@ -516,11 +620,12 @@ async function selectCompound(ligId) {{
       await molViewer.loadStructureFromData(sdf, 'sdf', false);
       const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
       if (all.length > before) ligandStruct = all[all.length - 1];
-      // Frame the new ligand
-      molViewer.plugin.managers.camera.reset();
     }}
 
     renderSidebar(compound);
+    await rebuildInteractions();
+    // Frame everything that's now in the scene
+    molViewer.plugin.managers.camera.reset();
     if (currentMode === '2d') draw2DView(compound, siteMode);
   }});
 }}
