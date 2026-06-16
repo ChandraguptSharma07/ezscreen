@@ -390,6 +390,7 @@ h3 {{
   <button class="tb-btn" id="btn-bg"   onclick="toggleBackground()" title="Switch light / dark background">Light BG</button>
   <button class="tb-btn active" id="btn-fx" onclick="togglePostFx()" title="Edge outlines and ambient occlusion shading">FX</button>
   <button class="tb-btn" id="btn-bindings" onclick="toggleBindings()" title="Show interaction cylinders in 3D">Bindings</button>
+  <button class="tb-btn" id="btn-measure" onclick="toggleMeasure()" title="Click two atoms to drop a distance label; toggle off to clear">Measure</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
 </div>
@@ -473,6 +474,10 @@ let siteMode       = true;
 let showDistLabels = false;
 let showBindings   = false;
 let postFxOn       = true;
+let measureMode    = false;
+let measurePicks   = [];     // Loci accumulator: 2 picks → distance
+let measureSub     = null;   // RxJS subscription to click events
+let measureBaseline = null;  // Set<ref> snapshot of state cells before measure mode
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
 const pendingTasks = [];
@@ -856,6 +861,93 @@ async function toggleBindings() {{
     await removeResidueSticks();
   }}
   await rebuildInteractions();
+}}
+
+function _stateCellRefs() {{
+  const refs = new Set();
+  if (!molViewer) return refs;
+  const cells = molViewer.plugin.state.data.cells;
+  if (!cells) return refs;
+  cells.forEach((_, ref) => refs.add(ref));
+  return refs;
+}}
+
+async function clearAllMeasurements() {{
+  if (!molViewer || !measureBaseline) return;
+  // Diff approach: anything in the state tree that didn't exist when measure
+  // mode was switched on must have been added by a measurement. Mol*'s
+  // measurement manager state shape moves around between versions, so we
+  // avoid coupling to it and just delete the new refs.
+  const current = _stateCellRefs();
+  const toDelete = [];
+  current.forEach(ref => {{ if (!measureBaseline.has(ref)) toDelete.push(ref); }});
+  console.debug('measure clear:', toDelete.length, 'new cells to remove');
+  if (!toDelete.length) return;
+  try {{
+    const builder = molViewer.plugin.build();
+    for (const r of toDelete) builder.delete(r);
+    await builder.commit();
+  }} catch (err) {{
+    console.warn('measure clear failed:', err);
+  }}
+}}
+
+async function toggleMeasure() {{
+  measureMode = !measureMode;
+  document.getElementById('btn-measure').classList.toggle('active', measureMode);
+
+  if (measureMode) {{
+    if (!molViewer) return;
+    if (measureSub) return;
+    // Snapshot the state tree so we can diff on toggle-off and remove
+    // anything the measurement system added.
+    measureBaseline = _stateCellRefs();
+    // Subscribe to clicks while measure mode is active. Each click with a
+    // real loci becomes a pick; two picks add a distance measurement.
+    measureSub = molViewer.plugin.behaviors.interaction.click.subscribe(({{ current }}) => {{
+      if (!measureMode) return;
+      if (!current || !current.loci) return;
+      const kind = current.loci.kind;
+      if (kind !== 'element-loci') {{
+        console.debug('measure: ignored click with loci kind', kind);
+        return;
+      }}
+      measurePicks.push(current.loci);
+      console.debug('measure: pick', measurePicks.length, '/ 2');
+      if (measurePicks.length >= 2) {{
+        const a = measurePicks[0], b = measurePicks[1];
+        measurePicks = [];
+        // Override Mol*'s default label styling so the number is actually
+        // readable against the dark canvas: larger white text on a
+        // semi-opaque dark plate.
+        molViewer.plugin.managers.structure.measurement
+          .addDistance(a, b, {{
+            labelParams: {{
+              textColor: 0xffffff,
+              textSize: 0.55,
+              background: true,
+              backgroundColor: 0x0d1117,
+              backgroundOpacity: 0.9,
+              borderColor: 0xffd93d,
+              borderWidth: 0.12,
+            }},
+            lineParams: {{
+              linesColor: 0xffd93d,
+              linesSize: 0.08,
+            }},
+          }})
+          .then(() => console.debug('measure: added distance'))
+          .catch(err => console.warn('measure failed:', err));
+      }}
+    }});
+    return;
+  }}
+
+  // Leaving measure mode: stop listening + drop the user's distance labels.
+  if (measureSub) {{ measureSub.unsubscribe(); measureSub = null; }}
+  measurePicks = [];
+  await clearAllMeasurements();
+  measureBaseline = null;
 }}
 
 // ── 2D diagram (preserved from prior viewer) ─────────────────────────────
