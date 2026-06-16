@@ -36,6 +36,57 @@ _GLYPH_MAR  = 170   # px margin around ligand for residue glyphs
 # overlap the backbone trace.
 _BACKBONE_STRIP = {"N", "C", "O", "H", "HA", "HA2", "HA3"}
 
+_RES3TO1 = {
+    "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
+    "GLU": "E", "GLN": "Q", "GLY": "G", "HIS": "H", "ILE": "I",
+    "LEU": "L", "LYS": "K", "MET": "M", "PHE": "F", "PRO": "P",
+    "SER": "S", "THR": "T", "TRP": "W", "TYR": "Y", "VAL": "V",
+}
+
+
+def _extract_sequence(receptor_text: str) -> list[dict]:
+    """Walk ATOM lines, return [{chain, items:[{resi, resn, one, ca:[x,y,z]}]}].
+
+    Order within a chain follows the order of first appearance in the PDB.
+    Cα coordinates come from the CA atom of each residue; if no CA is present
+    (rare), the first atom seen for that residue is used as a fallback.
+    """
+    if not receptor_text:
+        return []
+    chains: dict[str, list] = {}
+    seen: dict[tuple[str, int], dict] = {}
+    chain_order: list[str] = []
+    for line in receptor_text.splitlines():
+        if not line.startswith("ATOM  ") or len(line) < 54:
+            continue
+        chain = line[21]
+        try:
+            resi = int(line[22:26])
+        except ValueError:
+            continue
+        atom = line[12:16].strip()
+        resn = line[17:20].strip()
+        key = (chain, resi)
+        if key not in seen:
+            entry = {
+                "resi": resi,
+                "resn": resn,
+                "one":  _RES3TO1.get(resn, "X"),
+                "ca":   None,
+            }
+            seen[key] = entry
+            if chain not in chains:
+                chains[chain] = []
+                chain_order.append(chain)
+            chains[chain].append(entry)
+        if seen[key]["ca"] is None or atom == "CA":
+            try:
+                x = float(line[30:38]); y = float(line[38:46]); z = float(line[46:54])
+                seen[key]["ca"] = [round(x, 3), round(y, 3), round(z, 3)]
+            except ValueError:
+                pass
+    return [{"chain": ch, "items": chains[ch]} for ch in chain_order]
+
 
 def _extract_sidechain_pdb(receptor_text: str,
                            targets: set[tuple[str, int]]) -> str:
@@ -236,6 +287,7 @@ def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
     receptor_escaped = receptor_pdb_text.replace("\\", "\\\\").replace("`", "\\`")
     compounds_json   = json.dumps(compounds)
     colors_json      = json.dumps(_INTERACTION_COLORS)
+    sequence_json    = json.dumps(_extract_sequence(receptor_pdb_text))
     lig_svg_w        = _LIG_SVG_W
     lig_svg_h        = _LIG_SVG_H
     glyph_mar        = _GLYPH_MAR
@@ -293,6 +345,47 @@ body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: 
 .view-pair {{ display: flex; gap: 0; }}
 .view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
 .view-pair .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; }}
+
+#seqpanel {{
+  flex-shrink: 0;
+  background: #161b22; border-top: 1px solid #30363d;
+  display: flex; flex-direction: column;
+  max-height: 160px;
+}}
+body.light #seqpanel {{ background: #eaeef2; border-color: #d0d7de; }}
+#seqpanel.collapsed #seq-body {{ display: none; }}
+#seq-header {{
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 12px; border-bottom: 1px solid #30363d;
+  font-size: 11px;
+}}
+body.light #seq-header {{ border-color: #d0d7de; }}
+#seq-body {{
+  overflow-x: auto; overflow-y: auto;
+  padding: 6px 12px 8px 12px;
+}}
+.seq-chain {{
+  display: flex; align-items: center; gap: 6px;
+  margin: 3px 0;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  white-space: nowrap;
+}}
+.seq-chain-label {{
+  font-size: 11px; color: #8b949e;
+  min-width: 36px; flex-shrink: 0;
+}}
+.seq-tiles {{ display: inline-flex; gap: 1px; }}
+.seq-tile {{
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 18px; font-size: 10px;
+  background: transparent; color: #6e7681;
+  border-radius: 2px; cursor: pointer;
+  position: relative;
+}}
+body.light .seq-tile {{ color: #8b949e; }}
+.seq-tile:hover {{ background: #30363d; color: #c9d1d9; outline: 1px solid #58a6ff; }}
+body.light .seq-tile:hover {{ background: #d0d7de; color: #24292f; }}
+.seq-tile.ix {{ color: #fff; font-weight: 600; }}
 
 .view-dropdown {{ position: relative; display: inline-block; }}
 .view-menu {{
@@ -459,9 +552,19 @@ h3 {{
   </div>
 </div>
 
+<div id="seqpanel">
+  <div id="seq-header">
+    <span class="tb-label">Sequence</span>
+    <span id="seq-hint" class="tb-label" style="color:#8b949e">— click a residue to fly to it</span>
+    <button class="tb-btn" id="btn-seq-toggle" onclick="toggleSeqPanel()" style="margin-left:auto">Hide &#9662;</button>
+  </div>
+  <div id="seq-body"></div>
+</div>
+
 <script>
 const COMPOUNDS = {compounds_json};
 const COLORS    = {colors_json};
+const SEQUENCE  = {sequence_json};
 const RECEPTOR  = `{receptor_escaped}`;
 const LIG_W     = {lig_svg_w};
 const LIG_H     = {lig_svg_h};
@@ -554,6 +657,7 @@ function whenReady(fn) {{
       console.warn('granularity setProps failed:', err);
     }}
     viewerReady = true;
+    renderSequencePanel();
     pendingTasks.splice(0).forEach(fn => fn());
   }} catch (err) {{
     console.error('Mol* init failed:', err);
@@ -586,6 +690,7 @@ function toggleType(type, checked) {{
   activeToggles[type] = checked;
   if (!currentData) return;
   renderSidebar(currentData);
+  applySequenceHighlight(currentData);
   if (currentMode === '2d') draw2DView(currentData, siteMode);
   rebuildInteractions();
 }}
@@ -749,6 +854,7 @@ async function selectCompound(ligId) {{
     if (!ligId) {{
       currentData = null;
       renderSidebar(null);
+      applySequenceHighlight(null);
       document.getElementById('btn-site').disabled = true;
       return;
     }}
@@ -770,11 +876,91 @@ async function selectCompound(ligId) {{
     }}
 
     renderSidebar(compound);
+    applySequenceHighlight(compound);
     await rebuildInteractions();
     // Frame everything that's now in the scene
     molViewer.plugin.managers.camera.reset();
     if (currentMode === '2d') draw2DView(compound, siteMode);
   }});
+}}
+
+// ── Sequence panel ──────────────────────────────────────────────────────
+let seqPanelOpen = true;
+
+function toggleSeqPanel() {{
+  seqPanelOpen = !seqPanelOpen;
+  const panel = document.getElementById('seqpanel');
+  panel.classList.toggle('collapsed', !seqPanelOpen);
+  document.getElementById('btn-seq-toggle').innerHTML = seqPanelOpen ? 'Hide &#9662;' : 'Show &#9652;';
+}}
+
+function _tileId(chain, resi) {{ return 'seqt-' + chain + '-' + resi; }}
+
+function renderSequencePanel() {{
+  const body = document.getElementById('seq-body');
+  body.innerHTML = '';
+  if (!SEQUENCE || SEQUENCE.length === 0) {{
+    body.innerHTML = '<div style="color:#8b949e;font-size:11px;padding:4px">No receptor sequence available</div>';
+    return;
+  }}
+  SEQUENCE.forEach(chainObj => {{
+    const row = document.createElement('div');
+    row.className = 'seq-chain';
+
+    const label = document.createElement('span');
+    label.className = 'seq-chain-label';
+    label.textContent = 'Chain ' + chainObj.chain;
+    row.appendChild(label);
+
+    const tiles = document.createElement('span');
+    tiles.className = 'seq-tiles';
+
+    chainObj.items.forEach(it => {{
+      const tile = document.createElement('span');
+      tile.className = 'seq-tile';
+      tile.id = _tileId(chainObj.chain, it.resi);
+      tile.textContent = it.one;
+      tile.title = it.resn + ' ' + it.resi + ' (chain ' + chainObj.chain + ')';
+      tile.onclick = () => {{
+        if (it.ca) flyToCoords(it.ca[0], it.ca[1], it.ca[2]);
+      }};
+      tiles.appendChild(tile);
+    }});
+    row.appendChild(tiles);
+    body.appendChild(row);
+  }});
+}}
+
+function applySequenceHighlight(compound) {{
+  document.querySelectorAll('.seq-tile.ix').forEach(t => {{
+    t.classList.remove('ix');
+    t.style.background = '';
+  }});
+  if (!compound || !compound.interactions) return;
+  const seen = {{}};
+  compound.interactions.forEach(ix => {{
+    if (!activeToggles[ix.type]) return;
+    const key = ix.chain + '|' + ix.residue_number;
+    if (seen[key]) return;
+    seen[key] = true;
+    const tile = document.getElementById(_tileId(ix.chain, ix.residue_number));
+    if (!tile) return;
+    tile.classList.add('ix');
+    tile.style.background = COLORS[ix.type] || '#1f6feb';
+  }});
+}}
+
+function flyToCoords(x, y, z) {{
+  if (!molViewer || !molViewer.plugin.canvas3d) return;
+  if (currentMode !== '3d') switchMode('3d');
+  const cam = molViewer.plugin.canvas3d.camera;
+  const snap = cam.getSnapshot();
+  const dx = x - snap.target[0];
+  const dy = y - snap.target[1];
+  const dz = z - snap.target[2];
+  snap.target[0] = x; snap.target[1] = y; snap.target[2] = z;
+  snap.position[0] += dx; snap.position[1] += dy; snap.position[2] += dz;
+  cam.setState(snap, 350);
 }}
 
 function resetCamera() {{
