@@ -294,6 +294,33 @@ body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: 
 .view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
 .view-pair .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; }}
 
+.view-dropdown {{ position: relative; display: inline-block; }}
+.view-menu {{
+  position: absolute; top: calc(100% + 4px); left: 0;
+  background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+  min-width: 180px; max-height: 240px; overflow-y: auto;
+  z-index: 100; padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+}}
+body.light .view-menu {{ background: #fff; border-color: #d0d7de; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }}
+.view-menu-item {{
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 6px; border-radius: 4px;
+  font-size: 12px;
+}}
+.view-menu-item:hover {{ background: #30363d; }}
+body.light .view-menu-item:hover {{ background: #f3f4f6; }}
+.vm-name {{ flex: 1; cursor: pointer; padding: 1px 2px; }}
+.vm-del {{
+  width: 18px; height: 18px; border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  color: #8b949e; font-size: 15px; line-height: 1; cursor: pointer;
+}}
+.vm-del:hover {{ background: #f85149; color: #fff; }}
+.view-menu-empty {{
+  padding: 8px; font-size: 12px; color: #8b949e; text-align: center;
+}}
+
 #main {{ display: flex; flex: 1; overflow: hidden; min-height: 0; }}
 
 #viewer {{
@@ -393,6 +420,15 @@ h3 {{
   <button class="tb-btn" id="btn-measure" onclick="toggleMeasure()" title="Click two atoms to drop a distance label; toggle off to clear">Measure</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
+
+  <div class="tb-sep"></div>
+
+  <span class="tb-label">Views</span>
+  <button class="tb-btn" id="btn-view-save" onclick="saveCurrentView()" title="Save the current camera as a new view">Save view</button>
+  <div class="view-dropdown">
+    <button class="tb-btn" id="btn-view-current" onclick="toggleViewMenu()" title="Pick a saved view to fly to it">No saved views &#9662;</button>
+    <div id="view-menu" class="view-menu" style="display:none"></div>
+  </div>
 </div>
 
 <div id="main">
@@ -478,6 +514,7 @@ let measureMode    = false;
 let measurePicks   = [];     // Loci accumulator: 2 picks → distance
 let measureSub     = null;   // RxJS subscription to click events
 let measureBaseline = null;  // Set<ref> snapshot of state cells before measure mode
+let cameraBookmarks = [];     // [{{name, snap}}, ...] — names auto-fill as max+1
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
 const pendingTasks = [];
@@ -741,7 +778,97 @@ async function selectCompound(ligId) {{
 }}
 
 function resetCamera() {{
-  whenReady(() => molViewer.plugin.managers.camera.reset());
+  whenReady(() => {{
+    const plg = molViewer.plugin;
+    if (plg.canvas3d && plg.canvas3d.requestCameraReset) {{
+      plg.canvas3d.requestCameraReset({{ durationMs: 350 }});
+    }} else {{
+      plg.managers.camera.reset();
+    }}
+  }});
+}}
+
+let viewMenuOpen = false;
+
+function _viewLabel() {{
+  const n = cameraBookmarks.length;
+  if (n === 0) return 'No saved views ▾';
+  return n + ' saved view' + (n === 1 ? '' : 's') + ' ▾';
+}}
+
+function updateViewLabel() {{
+  document.getElementById('btn-view-current').innerHTML = _viewLabel();
+}}
+
+function renderViewMenu() {{
+  const menu = document.getElementById('view-menu');
+  menu.innerHTML = '';
+  if (cameraBookmarks.length === 0) {{
+    const empty = document.createElement('div');
+    empty.className = 'view-menu-empty';
+    empty.textContent = 'No saved views yet';
+    menu.appendChild(empty);
+    return;
+  }}
+  cameraBookmarks.forEach((b, i) => {{
+    const row = document.createElement('div');
+    row.className = 'view-menu-item';
+
+    const name = document.createElement('span');
+    name.className = 'vm-name';
+    name.textContent = b.name;
+    name.onclick = () => restoreView(i);
+
+    const del = document.createElement('span');
+    del.className = 'vm-del';
+    del.textContent = '×';
+    del.title = 'Delete ' + b.name;
+    del.onclick = (e) => {{ e.stopPropagation(); deleteView(i); }};
+
+    row.appendChild(name);
+    row.appendChild(del);
+    menu.appendChild(row);
+  }});
+}}
+
+function setViewMenuOpen(on) {{
+  viewMenuOpen = on;
+  const menu = document.getElementById('view-menu');
+  menu.style.display = on ? '' : 'none';
+  if (on) renderViewMenu();
+}}
+
+function toggleViewMenu() {{ setViewMenuOpen(!viewMenuOpen); }}
+
+document.addEventListener('click', (e) => {{
+  if (!viewMenuOpen) return;
+  const dd = document.querySelector('.view-dropdown');
+  if (dd && !dd.contains(e.target)) setViewMenuOpen(false);
+}});
+
+function saveCurrentView() {{
+  if (!molViewer || !molViewer.plugin.canvas3d) return;
+  const maxN = cameraBookmarks.reduce((m, b) => {{
+    const n = parseInt(String(b.name).replace(/^View\\s+/, ''), 10);
+    return isNaN(n) ? m : Math.max(m, n);
+  }}, 0);
+  const name = 'View ' + (maxN + 1);
+  const snap = molViewer.plugin.canvas3d.camera.getSnapshot();
+  cameraBookmarks.push({{ name, snap }});
+  updateViewLabel();
+  if (viewMenuOpen) renderViewMenu();
+}}
+
+function restoreView(idx) {{
+  if (!molViewer || !molViewer.plugin.canvas3d) return;
+  molViewer.plugin.canvas3d.camera.setState(cameraBookmarks[idx].snap, 350);
+  setViewMenuOpen(false);
+}}
+
+function deleteView(idx) {{
+  cameraBookmarks.splice(idx, 1);
+  updateViewLabel();
+  renderViewMenu();
 }}
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -779,6 +906,9 @@ function switchMode(mode) {{
   document.getElementById('btn-3d').classList.toggle('active',  is3d);
   document.getElementById('btn-2d').classList.toggle('active', !is3d);
   document.getElementById('btn-reset').disabled = !is3d;
+  document.getElementById('btn-view-save').disabled = !is3d;
+  document.getElementById('btn-view-current').disabled = !is3d;
+  if (!is3d) setViewMenuOpen(false);
   if (!is3d && currentData) draw2DView(currentData, siteMode);
 }}
 
