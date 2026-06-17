@@ -31,11 +31,9 @@ _LIG_SVG_W  = 560   # width of RDKit ligand SVG
 _LIG_SVG_H  = 380   # height of RDKit ligand SVG
 _GLYPH_MAR  = 170   # px margin around ligand for residue glyphs
 
-# Backbone atoms to strip when rendering interacting residues — Cα stays so
-# the side-chain stick visually anchors to the cartoon ribbon, but N/C/O don't
-# overlap the backbone trace.
-_BACKBONE_STRIP = {"N", "C", "O", "H", "HA", "HA2", "HA3"}
-
+# Floating residue layer keeps full atoms (including backbone) so the
+# Cα coincides with the receptor's Cα — ball-and-stick then appears to
+# branch out of the cartoon ribbon instead of floating in space.
 _RES3TO1 = {
     "ALA": "A", "ARG": "R", "ASN": "N", "ASP": "D", "CYS": "C",
     "GLU": "E", "GLN": "Q", "GLY": "G", "HIS": "H", "ILE": "I",
@@ -88,8 +86,8 @@ def _extract_sequence(receptor_text: str) -> list[dict]:
     return [{"chain": ch, "items": chains[ch]} for ch in chain_order]
 
 
-def _extract_sidechain_pdb(receptor_text: str,
-                           targets: set[tuple[str, int]]) -> str:
+def _extract_residue_pdb(receptor_text: str,
+                         targets: set[tuple[str, int]]) -> str:
     if not targets or not receptor_text:
         return ""
     out: list[str] = []
@@ -102,9 +100,6 @@ def _extract_sidechain_pdb(receptor_text: str,
         except ValueError:
             continue
         if (chain, resi) not in targets:
-            continue
-        atom_name = line[12:16].strip()
-        if atom_name in _BACKBONE_STRIP:
             continue
         out.append(line)
     if not out:
@@ -603,7 +598,7 @@ function aaColor(resn) {{ return AA_COL[AA_CLS[resn]] || '#8b949e'; }}
 // State
 let molViewer      = null;
 let ligandStruct   = null;   // Hierarchy structure entry for the current ligand
-let residueStruct  = null;   // Hierarchy structure entry for side-chain sticks
+let residueStruct  = null;   // Hierarchy structure entry for the floating residue layer
 let ixStructs      = {{}};     // {{type: hierarchy structure}} for cylinder groups
 let ixRebuildSeq   = 0;      // Cancels stale rebuilds when toggles fire quickly
 let currentData    = null;
@@ -706,24 +701,25 @@ async function removeCurrentLigand() {{
   ligandStruct = null;
 }}
 
-// Side-chain sticks loaded as a small companion structure. Backbone atoms
-// (N/C/O) are stripped on the Python side so the floating sticks don't
-// double-render the cartoon's backbone — only Cα and beyond ride along.
-async function removeResidueSticks() {{
+// Side-chain ball-and-stick rides as a small companion structure containing
+// the *full* atoms (backbone included) of each interacting residue. Cα
+// coordinates coincide with the receptor's Cα, so the ball-and-stick layer
+// visually branches out of the cartoon ribbon instead of floating in space.
+async function removeResidueHighlight() {{
   if (residueStruct === null || !molViewer) return;
   try {{
     await molViewer.plugin.managers.structure.hierarchy.remove([residueStruct]);
   }} catch (err) {{
-    console.warn('residue sticks removal failed:', err);
+    console.warn('residue highlight removal failed:', err);
   }}
   residueStruct = null;
 }}
 
-async function loadResidueSticks(pdbText) {{
-  if (!pdbText || !molViewer) return;
+async function applyResidueHighlight(compound) {{
+  if (!compound || !compound.residue_pdb || !molViewer) return;
   const plugin = molViewer.plugin;
   try {{
-    const data  = await plugin.builders.data.rawData({{ data: pdbText, label: 'Interacting residues' }});
+    const data  = await plugin.builders.data.rawData({{ data: compound.residue_pdb, label: 'Interacting residues' }});
     const traj  = await plugin.builders.structure.parseTrajectory(data, 'pdb');
     const model = await plugin.builders.structure.createModel(traj);
     const struc = await plugin.builders.structure.createStructure(model);
@@ -731,14 +727,14 @@ async function loadResidueSticks(pdbText) {{
     if (comp) {{
       await plugin.builders.structure.representation.addRepresentation(comp, {{
         type: 'ball-and-stick',
-        typeParams: {{ sizeFactor: 0.18, sizeAspectRatio: 0.55, aromaticBonds: false }},
+        typeParams: {{ sizeFactor: 0.22, sizeAspectRatio: 0.55, aromaticBonds: false }},
         color: 'element-symbol',
       }});
     }}
     const all = plugin.managers.structure.hierarchy.current.structures;
     if (all.length) residueStruct = all[all.length - 1];
   }} catch (err) {{
-    console.warn('residue sticks load failed:', err);
+    console.warn('residue highlight load failed:', err);
   }}
 }}
 
@@ -848,7 +844,7 @@ async function rebuildInteractions() {{
 async function selectCompound(ligId) {{
   whenReady(async () => {{
     await clearInteractions();
-    await removeResidueSticks();
+    await removeResidueHighlight();
     await removeCurrentLigand();
 
     if (!ligId) {{
@@ -871,8 +867,8 @@ async function selectCompound(ligId) {{
       if (all.length > before) ligandStruct = all[all.length - 1];
     }}
 
-    if (showBindings && compound && compound.residue_pdb) {{
-      await loadResidueSticks(compound.residue_pdb);
+    if (showBindings && compound) {{
+      await applyResidueHighlight(compound);
     }}
 
     renderSidebar(compound);
@@ -1170,11 +1166,11 @@ async function toggleBindings() {{
   showBindings = !showBindings;
   document.getElementById('btn-bindings').classList.toggle('active', showBindings);
   if (showBindings) {{
-    if (currentData && currentData.residue_pdb) {{
-      await loadResidueSticks(currentData.residue_pdb);
+    if (currentData) {{
+      await applyResidueHighlight(currentData);
     }}
   }} else {{
-    await removeResidueSticks();
+    await removeResidueHighlight();
   }}
   await rebuildInteractions();
 }}
@@ -1601,7 +1597,7 @@ def generate_viewer(work_dir: Path) -> Path:
                 except (TypeError, ValueError):
                     pass
         if targets:
-            c["residue_pdb"] = _extract_sidechain_pdb(receptor_text, targets)
+            c["residue_pdb"] = _extract_residue_pdb(receptor_text, targets)
 
     html = _build_html(compounds, receptor_text)
     viewer_path.write_text(html, encoding="utf-8")
