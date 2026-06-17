@@ -382,7 +382,8 @@ body.light .seq-tile {{ color: #8b949e; }}
 body.light .seq-tile:hover {{ background: #d0d7de; color: #24292f; }}
 .seq-tile.ix {{ color: #fff; font-weight: 600; }}
 
-.view-dropdown {{ position: relative; display: inline-block; }}
+.view-dropdown, .rep-dropdown {{ position: relative; display: inline-block; }}
+.rep-menu-item.active {{ background: rgba(88, 166, 255, 0.18); }}
 .view-menu {{
   position: absolute; top: calc(100% + 4px); left: 0;
   background: #21262d; border: 1px solid #30363d; border-radius: 6px;
@@ -408,6 +409,23 @@ body.light .view-menu-item:hover {{ background: #f3f4f6; }}
 .view-menu-empty {{
   padding: 8px; font-size: 12px; color: #8b949e; text-align: center;
 }}
+/* The style menu holds flyout submenus, so it must not clip or scroll the way
+   the Views list does — override the inherited max-height / overflow. */
+#style-menu {{ overflow: visible; max-height: none; min-width: 0; padding: 4px; }}
+.style-cat {{ position: relative; }}
+.style-cat-head {{ cursor: default; white-space: nowrap; }}
+.style-cat-cur {{ color: #8b949e; font-size: 11px; margin-left: 16px; }}
+.style-arrow {{ color: #8b949e; font-size: 9px; margin-left: 8px; }}
+.style-cat:hover > .style-cat-head {{ background: #30363d; }}
+body.light .style-cat:hover > .style-cat-head {{ background: #f3f4f6; }}
+.view-submenu {{
+  display: none; position: absolute; top: -5px; left: calc(100% + 3px);
+  background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+  min-width: 150px; z-index: 110; padding: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
+}}
+body.light .view-submenu {{ background: #fff; border-color: #d0d7de; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }}
+.style-cat:hover > .view-submenu {{ display: block; }}
 
 #main {{ display: flex; flex: 1; overflow: hidden; min-height: 0; }}
 
@@ -508,6 +526,38 @@ h3 {{
   <button class="tb-btn" id="btn-measure" onclick="toggleMeasure()" title="Click two atoms to drop a distance label; toggle off to clear">Measure</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
+
+  <div class="tb-sep"></div>
+
+  <div class="rep-dropdown" id="style-dropdown">
+    <button class="tb-btn" id="btn-style" onclick="toggleStyleMenu()" title="Protein, ligand and interacting-residue representations">Style &#9662;</button>
+    <div id="style-menu" class="view-menu" style="display:none">
+      <div class="style-cat">
+        <div class="view-menu-item style-cat-head">
+          <span class="vm-name">Protein</span>
+          <span class="style-cat-cur" id="cur-protein"></span>
+          <span class="style-arrow">&#9656;</span>
+        </div>
+        <div id="protein-menu" class="view-submenu"></div>
+      </div>
+      <div class="style-cat">
+        <div class="view-menu-item style-cat-head">
+          <span class="vm-name">Ligand</span>
+          <span class="style-cat-cur" id="cur-ligand"></span>
+          <span class="style-arrow">&#9656;</span>
+        </div>
+        <div id="ligand-menu" class="view-submenu"></div>
+      </div>
+      <div class="style-cat">
+        <div class="view-menu-item style-cat-head">
+          <span class="vm-name">Interacting Residue</span>
+          <span class="style-cat-cur" id="cur-residue"></span>
+          <span class="style-arrow">&#9656;</span>
+        </div>
+        <div id="residue-menu" class="view-submenu"></div>
+      </div>
+    </div>
+  </div>
 
   <div class="tb-sep"></div>
 
@@ -613,6 +663,33 @@ let measurePicks   = [];     // Loci accumulator: 2 picks → distance
 let measureSub     = null;   // RxJS subscription to click events
 let measureBaseline = null;  // Set<ref> snapshot of state cells before measure mode
 let cameraBookmarks = [];     // [{{name, snap}}, ...] — names auto-fill as max+1
+let proteinRepType  = 'cartoon';
+let ligandRepType   = 'ball-and-stick';
+let sticksRepType   = 'ball-and-stick';
+let styleMenuOpen   = false;
+
+const PROTEIN_REPS = [
+  {{ id: 'cartoon',   label: 'Cartoon' }},
+  {{ id: 'lines',     label: 'Lines' }},
+  {{ id: 'backbone',  label: 'Backbone' }},
+  {{ id: 'surface',   label: 'Surface' }},
+  {{ id: 'spacefill', label: 'Spacefill' }},
+  {{ id: 'off',       label: 'Off' }},
+];
+const LIGAND_REPS = [
+  {{ id: 'ball-and-stick', label: 'Ball-and-stick' }},
+  {{ id: 'sticks',         label: 'Sticks only' }},
+  {{ id: 'spacefill',      label: 'Spacefill' }},
+  {{ id: 'lines',          label: 'Lines' }},
+  {{ id: 'off',            label: 'Off' }},
+];
+const STICKS_REPS = [
+  {{ id: 'ball-and-stick', label: 'Ball-and-stick' }},
+  {{ id: 'sticks',         label: 'Sticks only' }},
+  {{ id: 'lines',          label: 'Lines' }},
+  {{ id: 'spacefill',      label: 'Spacefill' }},
+  {{ id: 'off',             label: 'Off' }},
+];
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
 const pendingTasks = [];
@@ -715,8 +792,28 @@ async function removeResidueHighlight() {{
   residueStruct = null;
 }}
 
+function _sticksRepParams(type) {{
+  switch (type) {{
+    case 'ball-and-stick':
+      return {{ type: 'ball-and-stick', color: 'element-symbol',
+               typeParams: {{ sizeFactor: 0.22, sizeAspectRatio: 0.55, aromaticBonds: false }} }};
+    case 'sticks':
+      return {{ type: 'ball-and-stick', color: 'element-symbol',
+               typeParams: {{ sizeFactor: 0.22, sizeAspectRatio: 0.01, aromaticBonds: false }} }};
+    case 'lines':
+      return {{ type: 'line', color: 'element-symbol',
+               typeParams: {{ sizeFactor: 2.0 }} }};
+    case 'spacefill':
+      return {{ type: 'spacefill', color: 'element-symbol',
+               typeParams: {{ sizeFactor: 0.5 }} }};
+    default:
+      return null;
+  }}
+}}
+
 async function applyResidueHighlight(compound) {{
   if (!compound || !compound.residue_pdb || !molViewer) return;
+  if (proteinRepType === 'off' || sticksRepType === 'off') return;
   const plugin = molViewer.plugin;
   try {{
     const data  = await plugin.builders.data.rawData({{ data: compound.residue_pdb, label: 'Interacting residues' }});
@@ -724,12 +821,9 @@ async function applyResidueHighlight(compound) {{
     const model = await plugin.builders.structure.createModel(traj);
     const struc = await plugin.builders.structure.createStructure(model);
     const comp  = await plugin.builders.structure.tryCreateComponentStatic(struc, 'all');
-    if (comp) {{
-      await plugin.builders.structure.representation.addRepresentation(comp, {{
-        type: 'ball-and-stick',
-        typeParams: {{ sizeFactor: 0.22, sizeAspectRatio: 0.55, aromaticBonds: false }},
-        color: 'element-symbol',
-      }});
+    const params = _sticksRepParams(sticksRepType);
+    if (comp && params) {{
+      await plugin.builders.structure.representation.addRepresentation(comp, params);
     }}
     const all = plugin.managers.structure.hierarchy.current.structures;
     if (all.length) residueStruct = all[all.length - 1];
@@ -865,6 +959,9 @@ async function selectCompound(ligId) {{
       await molViewer.loadStructureFromData(sdf, 'sdf', false);
       const all = molViewer.plugin.managers.structure.hierarchy.current.structures;
       if (all.length > before) ligandStruct = all[all.length - 1];
+      // Mol* auto-styles a fresh ligand as ball-and-stick; only re-apply when
+      // the user has picked something else, so the default view is untouched.
+      if (ligandRepType !== 'ball-and-stick') await applyLigandRep();
     }}
 
     if (showBindings && compound) {{
@@ -1023,10 +1120,173 @@ function setViewMenuOpen(on) {{
 function toggleViewMenu() {{ setViewMenuOpen(!viewMenuOpen); }}
 
 document.addEventListener('click', (e) => {{
-  if (!viewMenuOpen) return;
-  const dd = document.querySelector('.view-dropdown');
-  if (dd && !dd.contains(e.target)) setViewMenuOpen(false);
+  if (viewMenuOpen) {{
+    const dd = document.querySelector('.view-dropdown');
+    if (dd && !dd.contains(e.target)) setViewMenuOpen(false);
+  }}
+  if (styleMenuOpen) {{
+    const dd = document.getElementById('style-dropdown');
+    if (dd && !dd.contains(e.target)) setStyleMenuOpen(false);
+  }}
 }});
+
+// ── Representation dropdowns (Protein / Sticks) ─────────────────────────
+function _proteinRepParams(type) {{
+  switch (type) {{
+    case 'cartoon':   return {{ type: 'cartoon', color: 'chain-id' }};
+    case 'lines':     return {{ type: 'line', color: 'element-symbol',
+                                typeParams: {{ sizeFactor: 1.5 }} }};
+    case 'backbone':  return {{ type: 'backbone', color: 'chain-id' }};
+    case 'surface':   return {{ type: 'molecular-surface', color: 'chain-id',
+                                typeParams: {{ alpha: 0.75, smoothness: 1.5 }} }};
+    case 'spacefill': return {{ type: 'spacefill', color: 'chain-id' }};
+    default:          return null;
+  }}
+}}
+
+function _findPolymerComp() {{
+  if (!molViewer) return null;
+  const structures = molViewer.plugin.managers.structure.hierarchy.current.structures;
+  if (!structures.length) return null;
+  const comps = structures[0].components || [];
+  if (!comps.length) return null;
+  const polymer = comps.find(c => {{
+    if (c.key && /polymer/i.test(c.key)) return true;
+    const lbl = c.cell && c.cell.obj && c.cell.obj.label;
+    return lbl && /polymer/i.test(lbl);
+  }});
+  return polymer || comps[0];
+}}
+
+async function applyProteinRep() {{
+  if (!molViewer) return;
+  const polymer = _findPolymerComp();
+  if (!polymer) return;
+  const plugin = molViewer.plugin;
+  if (polymer.representations && polymer.representations.length) {{
+    const update = plugin.build();
+    polymer.representations.forEach(rep => update.delete(rep.cell.transform.ref));
+    await update.commit();
+  }}
+  const params = _proteinRepParams(proteinRepType);
+  if (params) {{
+    await plugin.builders.structure.representation.addRepresentation(polymer.cell, params);
+  }}
+  // Surface / spacefill / lines occupy a larger volume than the cartoon trace
+  // the camera was first fitted to. Mol* only recomputes the zoom-out envelope
+  // (radiusMax) on a camera reset, so without this the view stays clamped to
+  // the old cartoon bounds — looking zoomed-in and refusing to pull back.
+  if (plugin.canvas3d && plugin.canvas3d.requestCameraReset) {{
+    plugin.canvas3d.requestCameraReset({{ durationMs: 350 }});
+  }}
+}}
+
+// hierarchy.current is rebuilt on every state change, so the StructureRef we
+// captured at load goes stale — its .components still report the original
+// representations. Re-resolve the live entry by ref before reading them, or we
+// delete nothing and just stack a new rep on top of the old one.
+function _liveLigandStruct() {{
+  if (!molViewer || !ligandStruct) return null;
+  const ref = ligandStruct.cell.transform.ref;
+  const structures = molViewer.plugin.managers.structure.hierarchy.current.structures;
+  return structures.find(s => s.cell.transform.ref === ref) || ligandStruct;
+}}
+
+async function applyLigandRep() {{
+  const live = _liveLigandStruct();
+  if (!live) return;
+  const plugin = molViewer.plugin;
+  const comps = live.components || [];
+  if (!comps.length) return;
+  const params = _sticksRepParams(ligandRepType);
+  for (const comp of comps) {{
+    if (comp.representations && comp.representations.length) {{
+      const update = plugin.build();
+      comp.representations.forEach(rep => update.delete(rep.cell.transform.ref));
+      await update.commit();
+    }}
+    if (params) {{
+      await plugin.builders.structure.representation.addRepresentation(comp.cell, params);
+    }}
+  }}
+}}
+
+function _labelOf(list, id) {{
+  const m = list.find(r => r.id === id);
+  return m ? m.label : '?';
+}}
+
+// Each style category resolves to its option list, current selection and the
+// submenu container — keyed by the category name used throughout the menu.
+const REP_CATS = {{
+  protein: {{ list: PROTEIN_REPS, menu: 'protein-menu', cur: 'cur-protein',
+             get: () => proteinRepType, set: id => setProteinRep(id) }},
+  ligand:  {{ list: LIGAND_REPS,  menu: 'ligand-menu',  cur: 'cur-ligand',
+             get: () => ligandRepType,  set: id => setLigandRep(id) }},
+  residue: {{ list: STICKS_REPS,  menu: 'residue-menu', cur: 'cur-residue',
+             get: () => sticksRepType,  set: id => setSticksRep(id) }},
+}};
+
+function refreshRepButtons() {{
+  Object.values(REP_CATS).forEach(cat => {{
+    const el = document.getElementById(cat.cur);
+    if (el) el.textContent = _labelOf(cat.list, cat.get());
+  }});
+}}
+
+function renderRepMenu(which) {{
+  const cat  = REP_CATS[which];
+  if (!cat) return;
+  const cur  = cat.get();
+  const menu = document.getElementById(cat.menu);
+  menu.innerHTML = '';
+  cat.list.forEach(rep => {{
+    const row = document.createElement('div');
+    row.className = 'view-menu-item rep-menu-item' + (rep.id === cur ? ' active' : '');
+    const name = document.createElement('span');
+    name.className = 'vm-name';
+    name.textContent = rep.label + (rep.id === cur ? ' ✓' : '');
+    name.onclick = () => cat.set(rep.id);
+    row.appendChild(name);
+    menu.appendChild(row);
+  }});
+}}
+
+function setStyleMenuOpen(on) {{
+  styleMenuOpen = on;
+  document.getElementById('style-menu').style.display = on ? '' : 'none';
+  if (on) {{ Object.keys(REP_CATS).forEach(renderRepMenu); refreshRepButtons(); }}
+}}
+function toggleStyleMenu() {{ setStyleMenuOpen(!styleMenuOpen); }}
+
+async function setProteinRep(id) {{
+  proteinRepType = id;
+  refreshRepButtons();
+  if (styleMenuOpen) renderRepMenu('protein');
+  await applyProteinRep();
+  applyPostFx();
+  if (showBindings && currentData) {{
+    await removeResidueHighlight();
+    if (proteinRepType !== 'off') await applyResidueHighlight(currentData);
+  }}
+}}
+
+async function setLigandRep(id) {{
+  ligandRepType = id;
+  refreshRepButtons();
+  if (styleMenuOpen) renderRepMenu('ligand');
+  await applyLigandRep();
+}}
+
+async function setSticksRep(id) {{
+  sticksRepType = id;
+  refreshRepButtons();
+  if (styleMenuOpen) renderRepMenu('residue');
+  if (showBindings && currentData) {{
+    await removeResidueHighlight();
+    await applyResidueHighlight(currentData);
+  }}
+}}
 
 function saveCurrentView() {{
   if (!molViewer || !molViewer.plugin.canvas3d) return;
@@ -1113,9 +1373,17 @@ function applyBackground() {{
 function applyPostFx() {{
   if (!molViewer || !molViewer.plugin.canvas3d) return;
   const outlineColor = darkMode ? 0x000000 : 0x202020;
+  // FX (outlines + AO) only reads well on solid reps. Lines/backbone/off
+  // get no benefit (often look noisier), so we no-op them regardless of
+  // the user's FX toggle — toggle state is preserved for when they switch
+  // back to a solid rep.
+  const isSolidRep = proteinRepType !== 'lines'
+                  && proteinRepType !== 'backbone'
+                  && proteinRepType !== 'off';
+  const fxActive = postFxOn && isSolidRep;
   molViewer.plugin.canvas3d.setProps({{
     postprocessing: {{
-      occlusion: postFxOn
+      occlusion: fxActive
         ? {{ name: 'on', params: {{
             samples: 32,
             multiScale: {{ name: 'off', params: {{}} }},
@@ -1127,7 +1395,7 @@ function applyPostFx() {{
             transparentThreshold: 0.4,
           }} }}
         : {{ name: 'off', params: {{}} }},
-      outline: postFxOn
+      outline: fxActive
         ? {{ name: 'on', params: {{
             scale: 1,
             threshold: 0.33,
