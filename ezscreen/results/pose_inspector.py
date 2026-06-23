@@ -297,209 +297,201 @@ def _build_html(compounds: list[dict], receptor_pdb_text: str) -> str:
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
-body {{
-  font-family: system-ui, sans-serif;
-  background: #0d1117; color: #c9d1d9;
-  display: flex; flex-direction: column;
-  height: 100vh; overflow: hidden;
-  transition: background .2s, color .2s;
-}}
-body.light {{ background: #f6f8fa; color: #24292f; }}
-
-#banner {{
-  background: #161b22; border-bottom: 1px solid #30363d;
-  padding: 4px 16px; font-size: 11px; color: #8b949e;
-  text-align: center; flex-shrink: 0;
-}}
-body.light #banner {{ background: #eaeef2; border-color: #d0d7de; }}
-
-#toolbar {{
-  background: #161b22; border-bottom: 1px solid #30363d;
-  padding: 6px 12px; display: flex; align-items: center;
-  gap: 6px; flex-wrap: wrap; flex-shrink: 0;
-}}
-body.light #toolbar {{ background: #eaeef2; border-color: #d0d7de; }}
-
-.tb-sep {{ width: 1px; height: 20px; background: #30363d; margin: 0 3px; flex-shrink: 0; }}
-body.light .tb-sep {{ background: #d0d7de; }}
-.tb-label {{ font-size: 11px; color: #8b949e; white-space: nowrap; }}
-
-.tb-btn {{
-  background: #21262d; color: #c9d1d9;
-  border: 1px solid #30363d; border-radius: 6px;
-  padding: 4px 10px; font-size: 12px;
-  cursor: pointer; white-space: nowrap; transition: background .12s;
-}}
-.tb-btn:hover {{ background: #30363d; }}
-.tb-btn:disabled {{ opacity: .4; cursor: not-allowed; }}
-.tb-btn.active {{ background: #1f6feb; border-color: #388bfd; color: #fff; }}
-body.light .tb-btn {{ background: #fff; color: #24292f; border-color: #d0d7de; }}
-body.light .tb-btn:hover {{ background: #f3f4f6; }}
-body.light .tb-btn.active {{ background: #0969da; border-color: #0969da; color: #fff; }}
-
-.view-pair {{ display: flex; gap: 0; }}
-.view-pair .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; }}
-.view-pair .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; }}
-
-#seqpanel {{
-  flex-shrink: 0;
-  background: #161b22; border-top: 1px solid #30363d;
-  display: flex; flex-direction: column;
-  max-height: 160px;
-}}
-body.light #seqpanel {{ background: #eaeef2; border-color: #d0d7de; }}
-#seqpanel.collapsed #seq-body {{ display: none; }}
-#seq-header {{
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 12px; border-bottom: 1px solid #30363d;
-  font-size: 11px;
-}}
-body.light #seq-header {{ border-color: #d0d7de; }}
-#seq-body {{
-  overflow-x: auto; overflow-y: auto;
-  padding: 6px 12px 8px 12px;
-}}
-.seq-chain {{
-  display: flex; align-items: center; gap: 6px;
-  margin: 3px 0;
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  white-space: nowrap;
-}}
-.seq-chain-label {{
-  font-size: 11px; color: #8b949e;
-  min-width: 36px; flex-shrink: 0;
-}}
-.seq-tiles {{ display: inline-flex; gap: 1px; }}
-.seq-tile {{
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 15px; height: 18px; font-size: 10px;
-  background: transparent; color: #6e7681;
-  border-radius: 2px; cursor: pointer;
-  position: relative;
-}}
-body.light .seq-tile {{ color: #8b949e; }}
-.seq-tile:hover {{ background: #30363d; color: #c9d1d9; outline: 1px solid #58a6ff; }}
-body.light .seq-tile:hover {{ background: #d0d7de; color: #24292f; }}
-.seq-tile.ix {{ color: #fff; font-weight: 600; }}
-
-.view-dropdown, .rep-dropdown {{ position: relative; display: inline-block; }}
-.rep-menu-item.active {{ background: rgba(88, 166, 255, 0.18); }}
-.view-menu {{
-  position: absolute; top: calc(100% + 4px); left: 0;
-  background: #21262d; border: 1px solid #30363d; border-radius: 6px;
-  min-width: 180px; max-height: 240px; overflow-y: auto;
-  z-index: 100; padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
-}}
-body.light .view-menu {{ background: #fff; border-color: #d0d7de; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }}
-.view-menu-item {{
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 6px; border-radius: 4px;
-  font-size: 12px;
-}}
-.view-menu-item:hover {{ background: #30363d; }}
-body.light .view-menu-item:hover {{ background: #f3f4f6; }}
-.vm-name {{ flex: 1; cursor: pointer; padding: 1px 2px; }}
-.vm-del {{
-  width: 18px; height: 18px; border-radius: 4px;
-  display: flex; align-items: center; justify-content: center;
-  color: #8b949e; font-size: 15px; line-height: 1; cursor: pointer;
-}}
-.vm-del:hover {{ background: #f85149; color: #fff; }}
-.view-menu-empty {{
-  padding: 8px; font-size: 12px; color: #8b949e; text-align: center;
-}}
-/* The style menu holds flyout submenus, so it must not clip or scroll the way
-   the Views list does — override the inherited max-height / overflow. */
-#style-menu {{ overflow: visible; max-height: none; min-width: 0; padding: 4px; }}
-.style-cat {{ position: relative; }}
-.style-cat-head {{ cursor: default; white-space: nowrap; }}
-.style-cat-cur {{ color: #8b949e; font-size: 11px; margin-left: 16px; }}
-.style-arrow {{ color: #8b949e; font-size: 9px; margin-left: 8px; }}
-.style-cat:hover > .style-cat-head {{ background: #30363d; }}
-body.light .style-cat:hover > .style-cat-head {{ background: #f3f4f6; }}
-.view-submenu {{
-  display: none; position: absolute; top: -5px; left: calc(100% + 3px);
-  background: #21262d; border: 1px solid #30363d; border-radius: 6px;
-  min-width: 150px; z-index: 110; padding: 4px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.45);
-}}
-body.light .view-submenu {{ background: #fff; border-color: #d0d7de; box-shadow: 0 4px 12px rgba(0,0,0,0.12); }}
-.style-cat:hover > .view-submenu {{ display: block; }}
-
-#main {{ display: flex; flex: 1; overflow: hidden; min-height: 0; }}
-
-#viewer {{
-  flex: 1; position: relative;
-  background: #0d1117;
-}}
-body.light #viewer {{ background: #f6f8fa; }}
-
-#diagram2d-wrap {{
-  flex: 1; display: none; align-items: center;
-  justify-content: center; overflow: hidden;
-  padding: 12px; position: relative;
-}}
-#diagram2d-wrap svg {{ max-width: 100%; max-height: 100%; }}
-.d2-placeholder {{ color: #8b949e; font-size: 14px; text-align: center; padding: 40px; }}
-
-#sidebar {{
-  width: 300px; background: #161b22;
-  border-left: 1px solid #30363d;
-  display: flex; flex-direction: column; overflow: hidden;
-}}
-body.light #sidebar {{ background: #f6f8fa; border-color: #d0d7de; }}
-
-.sb-section {{
-  padding: 10px 12px;
-  border-bottom: 1px solid #30363d;
-  flex-shrink: 0;
-}}
-body.light .sb-section {{ border-color: #d0d7de; }}
-
-.sb-section select {{
-  width: 100%; background: #21262d; color: #c9d1d9;
-  border: 1px solid #30363d; border-radius: 6px;
-  padding: 6px; font-size: 12px;
-}}
-body.light .sb-section select {{
-  background: #fff; color: #24292f; border-color: #d0d7de;
+:root{{
+  --bg:#0e1114; --panel:#161a20; --panel2:#1b2027; --elev:#222932;
+  --border:#2a313b; --border2:#3a434f;
+  --text:#dde4ec; --muted:#8a95a3; --faint:#5a6471; --tile-fg:#aeb9c6;
+  --accent:#2dd4bf; --accent-fg:#04130f; --accent-soft:rgba(45,212,191,.15);
+  --radius:6px; --radius-sm:4px;
+  --font:'Inter',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:ui-monospace,'SF Mono','JetBrains Mono',Menlo,Consolas,monospace;
+  --tile-w:16px; --tile-h:20px; --tile-font:11px;
+  --shadow:0 10px 28px rgba(0,0,0,.55);
+  --btn:var(--panel2); --btn-hover:var(--elev);
 }}
 
-#site-toggle {{
-  display: none; gap: 0; margin-top: 8px;
-}}
-#site-toggle .tb-btn:first-child {{ border-radius: 6px 0 0 6px; border-right: none; flex: 1; }}
-#site-toggle .tb-btn:last-child  {{ border-radius: 0 6px 6px 0; flex: 1; }}
-
-.toggle-row {{
-  display: flex; align-items: center; gap: 7px;
-  margin: 3px 0; font-size: 12px; cursor: pointer;
-}}
-.toggle-row input {{ width: 13px; height: 13px; cursor: pointer; }}
-.color-dot {{ width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }}
-
-#ilist {{ flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }}
-.i-row {{
-  background: #21262d; border-radius: 6px;
-  margin: 3px 0; padding: 7px 8px; font-size: 12px;
-}}
-body.light .i-row {{ background: #fff; border: 1px solid #d0d7de; }}
-.i-type {{ font-weight: 600; text-transform: capitalize; }}
-.i-detail {{ color: #8b949e; margin-top: 2px; font-size: 11px; }}
-#no-compound {{ padding: 16px; color: #8b949e; font-size: 13px; text-align: center; }}
-
-h3 {{
-  font-size: 11px; font-weight: 600; color: #8b949e;
-  letter-spacing: .05em; text-transform: uppercase;
+body{{
+  font-family:var(--font);
+  background:var(--bg); color:var(--text);
+  display:flex; flex-direction:column; height:100vh; overflow:hidden;
+  transition:background .2s,color .2s;
 }}
 
-/* Mol*-specific overrides so its viewport blends with our chrome */
-#viewer .msp-plugin {{ background: transparent; }}
-#viewer .msp-viewport {{ background: transparent !important; }}
+#banner{{
+  background:var(--panel); border-bottom:1px solid var(--border);
+  padding:4px 16px; font-size:11px; color:var(--muted);
+  text-align:center; flex-shrink:0;
+}}
+
+#toolbar{{
+  background:var(--panel); border-bottom:1px solid var(--border);
+  padding:6px 12px; display:flex; align-items:center;
+  gap:6px; flex-wrap:wrap; flex-shrink:0;
+}}
+.tb-sep{{ width:1px; height:20px; background:var(--border); margin:0 3px; flex-shrink:0; }}
+.tb-label{{ font-size:11px; color:var(--muted); white-space:nowrap; }}
+
+.tb-btn{{
+  background:var(--btn); color:var(--text);
+  border:1px solid var(--border); border-radius:var(--radius);
+  padding:4px 10px; font-size:12px; font-family:var(--font);
+  cursor:pointer; white-space:nowrap;
+  transition:background .15s,border-color .15s,color .15s;
+}}
+.tb-btn:hover{{ background:var(--btn-hover); border-color:var(--border2); }}
+.tb-btn:disabled{{ opacity:.4; cursor:not-allowed; }}
+.tb-btn.active{{ background:var(--accent); border-color:var(--accent); color:var(--accent-fg); }}
+
+.view-pair{{ display:flex; gap:0; }}
+.view-pair .tb-btn:first-child{{ border-radius:var(--radius) 0 0 var(--radius); border-right:none; }}
+.view-pair .tb-btn:last-child{{ border-radius:0 var(--radius) var(--radius) 0; }}
+
+.view-dropdown,.rep-dropdown{{ position:relative; display:inline-block; }}
+.view-menu{{
+  position:absolute; top:calc(100% + 4px); left:0;
+  background:var(--elev); border:1px solid var(--border); border-radius:var(--radius);
+  min-width:180px; max-height:300px; overflow-y:auto;
+  z-index:100; padding:4px; box-shadow:var(--shadow);
+}}
+.view-menu.up{{ top:auto; bottom:calc(100% + 4px); }}
+.view-menu-item{{
+  display:flex; align-items:center; gap:4px;
+  padding:5px 6px; border-radius:var(--radius-sm); font-size:12px;
+}}
+.view-menu-item:hover{{ background:var(--panel2); }}
+.rep-menu-item.active{{ background:var(--accent-soft); }}
+.vm-name{{ flex:1; cursor:pointer; padding:1px 2px; }}
+.vm-del{{
+  width:18px; height:18px; border-radius:var(--radius-sm);
+  display:flex; align-items:center; justify-content:center;
+  color:var(--muted); font-size:15px; line-height:1; cursor:pointer;
+}}
+.vm-del:hover{{ background:#d23b3b; color:#fff; }}
+.view-menu-empty{{ padding:8px; font-size:12px; color:var(--muted); text-align:center; }}
+
+#style-menu{{ overflow:visible; max-height:none; min-width:0; padding:4px; }}
+.style-cat{{ position:relative; }}
+.style-cat-head{{ cursor:default; white-space:nowrap; }}
+.style-cat-cur{{ color:var(--muted); font-size:11px; margin-left:16px; }}
+.style-arrow{{ color:var(--muted); font-size:9px; margin-left:8px; }}
+.style-cat:hover > .style-cat-head{{ background:var(--panel2); }}
+.view-submenu{{
+  display:none; position:absolute; top:-5px; left:calc(100% + 3px);
+  background:var(--elev); border:1px solid var(--border); border-radius:var(--radius);
+  min-width:150px; z-index:110; padding:4px; box-shadow:var(--shadow);
+}}
+.style-cat:hover > .view-submenu{{ display:block; }}
+
+.seg{{ display:inline-flex; border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }}
+.seg-btn{{
+  background:var(--btn); color:var(--text); border:none;
+  border-right:1px solid var(--border); padding:4px 11px; font-size:12px;
+  cursor:pointer; font-family:var(--font); transition:background .15s,color .15s;
+}}
+.seg-btn:last-child{{ border-right:none; }}
+.seg-btn:hover{{ background:var(--btn-hover); }}
+.seg-btn.active{{ background:var(--accent); color:var(--accent-fg); }}
+
+#color-menu{{ min-width:236px; }}
+.color-sep{{ height:1px; background:var(--border); margin:6px 2px; }}
+.color-sec-head{{
+  font-size:10px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--muted); padding:3px 6px 4px; font-weight:600;
+}}
+.color-swatch-grid{{ display:grid; grid-template-columns:repeat(2,1fr); gap:2px 6px; padding:2px 4px 4px; }}
+.color-swatch{{ display:flex; align-items:center; gap:6px; font-size:12px; padding:2px; border-radius:var(--radius-sm); cursor:pointer; }}
+.color-swatch:hover{{ background:var(--panel2); }}
+.color-swatch input[type=color],.pr-color{{
+  width:22px; height:16px; padding:0; border:1px solid var(--border);
+  border-radius:3px; background:none; cursor:pointer; flex-shrink:0;
+}}
+.color-reset{{ margin-top:3px; justify-content:center; }}
+.color-reset .vm-name{{ flex:0; color:var(--muted); font-size:11px; white-space:nowrap; }}
+
+.pr-row{{ display:flex; align-items:center; gap:5px; padding:4px 6px; }}
+.pr-row select{{
+  flex:1; min-width:0; background:var(--btn); color:var(--text);
+  border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:3px 4px; font-size:11px; font-family:var(--font);
+}}
+.pr-apply{{
+  background:var(--accent); color:var(--accent-fg); border:none;
+  border-radius:var(--radius-sm); padding:4px 9px; font-size:11px;
+  cursor:pointer; white-space:nowrap; font-family:var(--font);
+}}
+.pr-apply:hover{{ filter:brightness(1.08); }}
+.pr-hint{{ font-size:11px; color:var(--muted); padding:3px 6px; }}
+.ov-list{{ max-height:124px; overflow-y:auto; padding:2px; }}
+.ov-item{{ display:flex; align-items:center; gap:6px; padding:3px 6px; border-radius:var(--radius-sm); font-size:11px; }}
+.ov-item:hover{{ background:var(--panel2); }}
+.ov-swatch{{ width:11px; height:11px; border-radius:2px; flex-shrink:0; border:1px solid rgba(0,0,0,.28); }}
+.ov-label{{ flex:1; font-family:var(--mono); font-variant-numeric:tabular-nums; }}
+.ov-del{{ color:var(--muted); cursor:pointer; font-size:14px; line-height:1; padding:0 3px; }}
+.ov-del:hover{{ color:#d23b3b; }}
+
+#main{{ display:flex; flex:1; overflow:hidden; min-height:0; }}
+#viewer{{ flex:1; position:relative; background:var(--bg); }}
+body.light #viewer,body.light #diagram2d-wrap{{ background:#f6f8fa; }}
+#diagram2d-wrap{{ flex:1; display:none; align-items:center; justify-content:center; overflow:hidden; padding:12px; position:relative; }}
+#diagram2d-wrap svg{{ max-width:100%; max-height:100%; }}
+.d2-placeholder{{ color:var(--muted); font-size:14px; text-align:center; padding:40px; }}
+
+#sidebar{{ width:300px; background:var(--panel); border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }}
+.sb-section{{ padding:10px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }}
+.sb-section select{{ width:100%; background:var(--btn); color:var(--text); border:1px solid var(--border); border-radius:var(--radius); padding:6px; font-size:12px; font-family:var(--font); }}
+#site-toggle{{ display:none; gap:0; margin-top:8px; }}
+#site-toggle .tb-btn:first-child{{ border-radius:var(--radius) 0 0 var(--radius); border-right:none; flex:1; }}
+#site-toggle .tb-btn:last-child{{ border-radius:0 var(--radius) var(--radius) 0; flex:1; }}
+.toggle-row{{ display:flex; align-items:center; gap:7px; margin:3px 0; font-size:12px; cursor:pointer; }}
+.toggle-row input{{ width:13px; height:13px; cursor:pointer; }}
+.color-dot{{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }}
+#ilist{{ flex:1; overflow-y:auto; padding:8px; min-height:0; }}
+.i-row{{ background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius); margin:3px 0; padding:7px 8px; font-size:12px; }}
+.i-type{{ font-weight:600; text-transform:capitalize; }}
+.i-detail{{ color:var(--muted); margin-top:2px; font-size:11px; font-family:var(--mono); font-variant-numeric:tabular-nums; }}
+#no-compound{{ padding:16px; color:var(--muted); font-size:13px; text-align:center; }}
+h3{{ font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.05em; text-transform:uppercase; }}
+
+#seqpanel{{ flex-shrink:0; background:var(--panel); border-top:1px solid var(--border); display:flex; flex-direction:column; max-height:176px; }}
+#seqpanel.collapsed #seq-body{{ display:none; }}
+#seq-header{{ display:flex; align-items:center; gap:10px; padding:6px 12px; border-bottom:1px solid var(--border); font-size:11px; }}
+.seq-tool{{ padding:3px 9px; font-size:11px; }}
+.seq-actions{{ display:flex; align-items:center; gap:8px; }}
+.seq-count{{ font-size:11px; color:var(--muted); font-family:var(--mono); font-variant-numeric:tabular-nums; }}
+.seq-paint{{ width:22px; height:18px; padding:0; border:1px solid var(--border); border-radius:3px; background:none; cursor:pointer; }}
+.seq-link{{ background:none; border:none; color:var(--accent); font-size:11px; cursor:pointer; padding:0; font-family:var(--font); }}
+.seq-link:hover{{ text-decoration:underline; }}
+#seq-chainbar{{ display:flex; gap:4px; padding:4px 12px; border-bottom:1px solid var(--border); flex-wrap:wrap; align-items:center; flex-shrink:0; }}
+#seq-chainbar .cb-label{{ font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); margin-right:2px; }}
+.chain-chip{{ display:inline-flex; align-items:center; gap:5px; background:var(--btn); color:var(--text); border:1px solid var(--border); border-radius:var(--radius-sm); padding:2px 9px; font-size:11px; cursor:pointer; font-family:var(--font); transition:background .15s,color .15s; }}
+.chain-chip:hover{{ background:var(--btn-hover); }}
+.chain-chip.active{{ background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }}
+.chain-dot{{ width:5px; height:5px; border-radius:50%; background:var(--accent); flex-shrink:0; }}
+.chain-chip.active .chain-dot{{ background:var(--accent-fg); }}
+#seq-body{{ overflow-x:auto; overflow-y:auto; padding:6px 12px 10px; }}
+.seq-chain{{ display:flex; align-items:flex-end; gap:8px; margin:4px 0; font-family:var(--mono); white-space:nowrap; }}
+.seq-chain-label{{ font-size:11px; color:var(--muted); min-width:48px; flex-shrink:0; font-family:var(--font); padding-bottom:2px; }}
+.seq-tiles{{ display:inline-flex; gap:1px; }}
+.seq-col{{ display:inline-flex; flex-direction:column; align-items:center; }}
+.seq-tick{{ height:11px; font-size:8.5px; line-height:11px; color:var(--faint); font-family:var(--mono); white-space:nowrap; overflow:visible; }}
+.seq-tick.on{{ color:var(--muted); }}
+.seq-tile{{
+  display:inline-flex; align-items:center; justify-content:center;
+  width:var(--tile-w); height:var(--tile-h); font-size:var(--tile-font);
+  background:transparent; color:var(--tile-fg); border-radius:2px; cursor:pointer;
+  position:relative; user-select:none; transition:background .1s,color .1s,opacity .1s;
+}}
+.seq-tile:hover{{ background:var(--panel2); color:var(--text); outline:1px solid var(--accent); }}
+.seq-tile.ix{{ color:#fff; font-weight:600; }}
+.seq-tile.sel{{ outline:2px solid var(--accent); outline-offset:-1px; color:var(--text); }}
+.seq-tile.dim{{ opacity:.2; }}
+.seq-tile.ov::after{{ content:''; position:absolute; bottom:1px; left:50%; transform:translateX(-50%); width:5px; height:5px; border-radius:50%; background:var(--ov-dot,#fff); border:1px solid rgba(0,0,0,.3); }}
+
+#viewer .msp-plugin{{ background:transparent; }}
+#viewer .msp-viewport{{ background:transparent !important; }}
 #viewer .msp-viewport-controls,
 #viewer .msp-viewport-top-left-controls,
-#viewer .msp-canvas-renderer-target-control {{ display: none !important; }}
+#viewer .msp-canvas-renderer-target-control{{ display:none !important; }}
 </style>
 </head>
 <body>
@@ -559,6 +551,11 @@ h3 {{
     </div>
   </div>
 
+  <div class="rep-dropdown" id="color-dropdown">
+    <button class="tb-btn" id="btn-color" onclick="toggleColorMenu()" title="Protein colour scheme">Colour &#9662;</button>
+    <div id="color-menu" class="view-menu" style="display:none"></div>
+  </div>
+
   <div class="tb-sep"></div>
 
   <span class="tb-label">Views</span>
@@ -600,9 +597,26 @@ h3 {{
 <div id="seqpanel">
   <div id="seq-header">
     <span class="tb-label">Sequence</span>
-    <span id="seq-hint" class="tb-label" style="color:#8b949e">— click a residue to fly to it</span>
+    <div class="seg" id="seq-mode">
+      <button class="seg-btn active" id="seqm-fly" onclick="setStripMode('fly')">Fly</button>
+      <button class="seg-btn" id="seqm-sel" onclick="setStripMode('select')">Select</button>
+    </div>
+    <div class="rep-dropdown" id="seqfilter-dropdown">
+      <button class="tb-btn seq-tool" id="btn-seqfilter" onclick="toggleSeqFilterMenu()">Filter &#9662;</button>
+      <div id="seqfilter-menu" class="view-menu up" style="display:none"></div>
+    </div>
+    <div class="rep-dropdown" id="seqselect-dropdown">
+      <button class="tb-btn seq-tool" id="btn-seqselect" onclick="toggleSeqSelectMenu()">Quick select &#9662;</button>
+      <div id="seqselect-menu" class="view-menu up" style="display:none"></div>
+    </div>
+    <span id="seq-hint" class="tb-label">click a residue to fly to it</span>
+    <span class="seq-actions" id="seq-actions" style="display:none">
+      <span class="seq-count" id="seq-count">0 selected</span>
+      <button class="seq-link" onclick="deselectStrip()" title="Clear the selection">Deselect</button>
+    </span>
     <button class="tb-btn" id="btn-seq-toggle" onclick="toggleSeqPanel()" style="margin-left:auto">Hide &#9662;</button>
   </div>
+  <div id="seq-chainbar"></div>
   <div id="seq-body"></div>
 </div>
 
@@ -666,7 +680,9 @@ let cameraBookmarks = [];     // [{{name, snap}}, ...] — names auto-fill as ma
 let proteinRepType  = 'cartoon';
 let ligandRepType   = 'ball-and-stick';
 let sticksRepType   = 'ball-and-stick';
+let proteinColorType = 'chain-id';
 let styleMenuOpen   = false;
+let colorMenuOpen   = false;
 
 const PROTEIN_REPS = [
   {{ id: 'cartoon',   label: 'Cartoon' }},
@@ -690,6 +706,35 @@ const STICKS_REPS = [
   {{ id: 'spacefill',      label: 'Spacefill' }},
   {{ id: 'off',             label: 'Off' }},
 ];
+// Swiss-PdbViewer-style Colour panel. The scheme list maps to Mol* built-in
+// colour themes, except 'cpk' which drives a custom theme we register so the
+// per-element palette below is editable. 'uniform' carries its own value.
+const COLOR_SCHEMES = [
+  {{ id: 'cpk',                 label: 'CPK' }},
+  {{ id: 'secondary-structure', label: 'Secondary structure' }},
+  {{ id: 'chain-id',            label: 'Chain' }},
+  {{ id: 'residue-name',        label: 'Type (residue)' }},
+  {{ id: 'uncertainty',         label: 'B-factor' }},
+  {{ id: 'sequence-id',         label: 'Rainbow N→C' }},
+  {{ id: 'uniform',            label: 'Solid' }},
+];
+// Editable CPK palette, SPDBV defaults. Keyed by element symbol; HAL covers the
+// halogens as one swatch (SPDBV greens them together).
+const ELEMENT_PALETTE = {{
+  C: 0x909090, N: 0x3050f8, O: 0xff0d0d, S: 0xffff30,
+  H: 0xffffff, P: 0xff8000, HAL: 0x1ff01f,
+}};
+const ELEMENT_DEFAULTS = Object.assign({{}}, ELEMENT_PALETTE);
+const ELEMENT_SWATCHES = [
+  {{ key: 'C', label: 'C' }}, {{ key: 'N', label: 'N' }}, {{ key: 'O', label: 'O' }},
+  {{ key: 'S', label: 'S' }}, {{ key: 'H', label: 'H' }}, {{ key: 'P', label: 'P' }},
+  {{ key: 'HAL', label: 'Halogens' }},
+];
+const HALOGENS = new Set(['F', 'CL', 'BR', 'I', 'AT']);
+
+function _intToHex(n) {{ return '#' + (n >>> 0).toString(16).padStart(6, '0').slice(-6); }}
+function _hexToInt(h) {{ return parseInt(h.replace('#', ''), 16); }}
+
 let activeToggles  = Object.fromEntries(Object.keys(COLORS).map(k => [k, true]));
 let viewerReady    = false;
 const pendingTasks = [];
@@ -717,6 +762,7 @@ function whenReady(fn) {{
       pdbProvider: 'rcsb',
       emdbProvider: 'rcsb',
     }});
+    registerCpkTheme();
     await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
     applyBackground();
     applyPostFx();
@@ -989,60 +1035,6 @@ function toggleSeqPanel() {{
 
 function _tileId(chain, resi) {{ return 'seqt-' + chain + '-' + resi; }}
 
-function renderSequencePanel() {{
-  const body = document.getElementById('seq-body');
-  body.innerHTML = '';
-  if (!SEQUENCE || SEQUENCE.length === 0) {{
-    body.innerHTML = '<div style="color:#8b949e;font-size:11px;padding:4px">No receptor sequence available</div>';
-    return;
-  }}
-  SEQUENCE.forEach(chainObj => {{
-    const row = document.createElement('div');
-    row.className = 'seq-chain';
-
-    const label = document.createElement('span');
-    label.className = 'seq-chain-label';
-    label.textContent = 'Chain ' + chainObj.chain;
-    row.appendChild(label);
-
-    const tiles = document.createElement('span');
-    tiles.className = 'seq-tiles';
-
-    chainObj.items.forEach(it => {{
-      const tile = document.createElement('span');
-      tile.className = 'seq-tile';
-      tile.id = _tileId(chainObj.chain, it.resi);
-      tile.textContent = it.one;
-      tile.title = it.resn + ' ' + it.resi + ' (chain ' + chainObj.chain + ')';
-      tile.onclick = () => {{
-        if (it.ca) flyToCoords(it.ca[0], it.ca[1], it.ca[2]);
-      }};
-      tiles.appendChild(tile);
-    }});
-    row.appendChild(tiles);
-    body.appendChild(row);
-  }});
-}}
-
-function applySequenceHighlight(compound) {{
-  document.querySelectorAll('.seq-tile.ix').forEach(t => {{
-    t.classList.remove('ix');
-    t.style.background = '';
-  }});
-  if (!compound || !compound.interactions) return;
-  const seen = {{}};
-  compound.interactions.forEach(ix => {{
-    if (!activeToggles[ix.type]) return;
-    const key = ix.chain + '|' + ix.residue_number;
-    if (seen[key]) return;
-    seen[key] = true;
-    const tile = document.getElementById(_tileId(ix.chain, ix.residue_number));
-    if (!tile) return;
-    tile.classList.add('ix');
-    tile.style.background = COLORS[ix.type] || '#1f6feb';
-  }});
-}}
-
 function flyToCoords(x, y, z) {{
   if (!molViewer || !molViewer.plugin.canvas3d) return;
   if (currentMode !== '3d') switchMode('3d');
@@ -1128,18 +1120,23 @@ document.addEventListener('click', (e) => {{
     const dd = document.getElementById('style-dropdown');
     if (dd && !dd.contains(e.target)) setStyleMenuOpen(false);
   }}
+  if (colorMenuOpen) {{
+    const dd = document.getElementById('color-dropdown');
+    if (dd && !dd.contains(e.target)) setColorMenuOpen(false);
+  }}
 }});
 
 // ── Representation dropdowns (Protein / Sticks) ─────────────────────────
 function _proteinRepParams(type) {{
+  const col = _proteinColorSpec();
   switch (type) {{
-    case 'cartoon':   return {{ type: 'cartoon', color: 'chain-id' }};
-    case 'lines':     return {{ type: 'line', color: 'element-symbol',
+    case 'cartoon':   return {{ type: 'cartoon', ...col }};
+    case 'lines':     return {{ type: 'line', ...col,
                                 typeParams: {{ sizeFactor: 1.5 }} }};
-    case 'backbone':  return {{ type: 'backbone', color: 'chain-id' }};
-    case 'surface':   return {{ type: 'molecular-surface', color: 'chain-id',
+    case 'backbone':  return {{ type: 'backbone', ...col }};
+    case 'surface':   return {{ type: 'molecular-surface', ...col,
                                 typeParams: {{ alpha: 0.75, smoothness: 1.5 }} }};
-    case 'spacefill': return {{ type: 'spacefill', color: 'chain-id' }};
+    case 'spacefill': return {{ type: 'spacefill', ...col }};
     default:          return null;
   }}
 }}
@@ -1158,7 +1155,7 @@ function _findPolymerComp() {{
   return polymer || comps[0];
 }}
 
-async function applyProteinRep() {{
+async function applyProteinRep(refit = true) {{
   if (!molViewer) return;
   const polymer = _findPolymerComp();
   if (!polymer) return;
@@ -1175,8 +1172,9 @@ async function applyProteinRep() {{
   // Surface / spacefill / lines occupy a larger volume than the cartoon trace
   // the camera was first fitted to. Mol* only recomputes the zoom-out envelope
   // (radiusMax) on a camera reset, so without this the view stays clamped to
-  // the old cartoon bounds — looking zoomed-in and refusing to pull back.
-  if (plugin.canvas3d && plugin.canvas3d.requestCameraReset) {{
+  // the old cartoon bounds — looking zoomed-in and refusing to pull back. A
+  // colour-only change keeps the same geometry, so it passes refit=false.
+  if (refit && plugin.canvas3d && plugin.canvas3d.requestCameraReset) {{
     plugin.canvas3d.requestCameraReset({{ durationMs: 350 }});
   }}
 }}
@@ -1287,6 +1285,13 @@ async function setSticksRep(id) {{
     await applyResidueHighlight(currentData);
   }}
 }}
+
+function setColorMenuOpen(on) {{
+  colorMenuOpen = on;
+  document.getElementById('color-menu').style.display = on ? '' : 'none';
+  if (on) renderColorMenu();
+}}
+function toggleColorMenu() {{ setColorMenuOpen(!colorMenuOpen); }}
 
 function saveCurrentView() {{
   if (!molViewer || !molViewer.plugin.canvas3d) return;
@@ -1819,6 +1824,579 @@ function draw2DView(compound, useSite) {{
 
   s += `</svg>`;
   wrap.innerHTML = s;
+}}
+// ── Colour layers + interactive residue strip ───────────────────────────
+// Two colour layers compose in one custom Mol* theme (ezs-protein): a global
+// default atom/scheme colour, with optional per-residue overrides painted on
+// top. The strip drives fly-to / multi-select, with filter + quick-select.
+var RESIDUE_OVERRIDES = {{}};
+var _hasOverrides = false;
+var proteinThemeRegistered = false;
+var stripMode = 'fly';
+var stripSel = new Set();
+var stripLastKey = null;
+var seqFilter = 'all';
+var seqFilterMenuOpen = false;
+var seqSelectMenuOpen = false;
+// With several chains the strip stacks one full row each, so default to a
+// single-chain view past a couple of chains; the chip bar switches / shows all.
+var seqChain = (SEQUENCE && SEQUENCE.length > 2) ? SEQUENCE[0].chain : 'all';
+var SOLID_VALUE = 0x9aa4af;
+
+// chain -> {{ items, idx:{{resi->index}} }} for range select and residue pickers
+var CHAIN_MAP = (function () {{
+  var m = {{}};
+  (SEQUENCE || []).forEach(function (ch) {{
+    var idx = {{}};
+    ch.items.forEach(function (it, i) {{ idx[it.resi] = i; }});
+    m[ch.chain] = {{ items: ch.items, idx: idx }};
+  }});
+  return m;
+}})();
+
+function _seqKey(chain, resi) {{ return chain + '|' + resi; }}
+
+// The viewer build of Mol* does not expose molstar.StructureProperties, so we
+// read atom/residue/chain identity straight off the model's atomic hierarchy.
+// location.element is a model-level ElementIndex; the segment index arrays map
+// it to the owning residue / chain.
+function _atomSymbol(location) {{
+  try {{
+    var m = location && location.unit && location.unit.model;
+    if (!m || !m.atomicHierarchy) return '';
+    return String(m.atomicHierarchy.atoms.type_symbol.value(location.element) || '');
+  }} catch (e) {{ return ''; }}
+}}
+
+function _atomChainResi(location) {{
+  try {{
+    var m = location && location.unit && location.unit.model;
+    if (!m || !m.atomicHierarchy) return null;
+    var AH = m.atomicHierarchy;
+    var el = location.element;
+    var rI = AH.residueAtomSegments.index[el];
+    var cI = AH.chainAtomSegments.index[el];
+    return {{ chain: String(AH.chains.auth_asym_id.value(cI)), resi: AH.residues.auth_seq_id.value(rI) }};
+  }} catch (e) {{ return null; }}
+}}
+
+// CPK element colour, hierarchy-based.
+function elementColor(location) {{
+  var sym = _atomSymbol(location).toUpperCase();
+  if (HALOGENS.has(sym)) return ELEMENT_PALETTE.HAL;
+  return ELEMENT_PALETTE[sym] != null ? ELEMENT_PALETTE[sym] : ELEMENT_PALETTE.C;
+}}
+
+// Per-residue override lookup, composed on top of the base scheme below.
+function residueOverrideAt(location) {{
+  if (!_hasOverrides) return null;
+  var cr = _atomChainResi(location);
+  if (!cr) return null;
+  var v = RESIDUE_OVERRIDES[cr.chain + '|' + cr.resi];
+  return (v == null) ? null : v;
+}}
+
+// Resolve the base (default) colour function for the active scheme. CPK and
+// Solid are computed directly; the rest delegate to Mol*'s built-in theme so
+// chain / secondary-structure / b-factor / rainbow keep rendering as before.
+function _baseColorFn(ctx) {{
+  var scheme = proteinColorType;
+  if (scheme === 'cpk') return function (loc) {{ return elementColor(loc); }};
+  if (scheme === 'uniform') return function () {{ return SOLID_VALUE; }};
+  try {{
+    var reg = molViewer.plugin.representation.structure.themes.colorThemeRegistry;
+    var provider = reg.get(scheme);
+    if (provider && provider.factory) {{
+      var params = provider.getParams ? provider.getParams(ctx) : {{}};
+      var dv = {{}};
+      try {{
+        dv = molstar.ParamDefinition
+          ? molstar.ParamDefinition.getDefaultValues(params)
+          : (provider.defaultValues || {{}});
+      }} catch (e2) {{ dv = provider.defaultValues || {{}}; }}
+      var inst = provider.factory(ctx, dv);
+      if (inst && typeof inst.color === 'function') return inst.color;
+    }}
+  }} catch (e) {{ console.warn('base theme delegation failed for', scheme, e); }}
+  return function (loc) {{ return elementColor(loc); }};
+}}
+
+function _proteinThemeFactory(ctx, props) {{
+  var base = _baseColorFn(ctx);
+  return {{
+    factory: _proteinThemeFactory,
+    granularity: 'group',
+    color: function (loc) {{ var o = residueOverrideAt(loc); return (o != null) ? o : base(loc); }},
+    props: props || {{}},
+  }};
+}}
+
+function registerCpkTheme() {{
+  if (proteinThemeRegistered || !molViewer) return proteinThemeRegistered;
+  try {{
+    var reg = molViewer.plugin.representation.structure.themes.colorThemeRegistry;
+    if (!reg || !reg.add) return false;
+    reg.add({{
+      name: 'ezs-protein', label: 'SwiftScreen protein', category: 'Atom Property',
+      factory: _proteinThemeFactory, getParams: function () {{ return {{}}; }},
+      defaultValues: {{}}, isApplicable: function () {{ return true; }},
+    }});
+    proteinThemeRegistered = true;
+  }} catch (e) {{
+    console.warn('protein theme registration failed:', e);
+    proteinThemeRegistered = false;
+  }}
+  return proteinThemeRegistered;
+}}
+
+// Route through the unified theme only when CPK is active or overrides exist;
+// otherwise hand back the built-in theme untouched.
+function _proteinColorSpec() {{
+  if (proteinThemeRegistered && (_hasOverrides || proteinColorType === 'cpk')) {{
+    return {{ color: 'ezs-protein' }};
+  }}
+  if (proteinColorType === 'uniform') return {{ color: 'uniform', colorParams: {{ value: SOLID_VALUE }} }};
+  if (proteinColorType === 'cpk') return {{ color: 'element-symbol' }};
+  return {{ color: proteinColorType }};
+}}
+
+function refreshOverrideState() {{
+  _hasOverrides = Object.keys(RESIDUE_OVERRIDES).length > 0;
+  if (colorMenuOpen) renderColorMenu();
+  decorateOverrideTiles();
+}}
+
+function paintResidues(keys, hex) {{
+  if (!keys || !keys.length) return;
+  var c = _hexToInt(hex);
+  keys.forEach(function (k) {{ RESIDUE_OVERRIDES[k] = c; }});
+  refreshOverrideState();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+function clearResidueOverride(k) {{
+  delete RESIDUE_OVERRIDES[k];
+  refreshOverrideState();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+function clearAllOverrides() {{
+  Object.keys(RESIDUE_OVERRIDES).forEach(function (k) {{ delete RESIDUE_OVERRIDES[k]; }});
+  refreshOverrideState();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+// ── Residue strip ────────────────────────────────────────────────────────
+function setStripMode(m) {{
+  stripMode = m;
+  document.getElementById('seqm-fly').classList.toggle('active', m === 'fly');
+  document.getElementById('seqm-sel').classList.toggle('active', m === 'select');
+  document.getElementById('seq-hint').textContent =
+    m === 'fly' ? 'click a residue to fly to it' : 'click to select · shift-click for a range';
+  updateSeqActions();
+}}
+
+function updateSeqActions() {{
+  var bar = document.getElementById('seq-actions');
+  bar.style.display = (stripMode === 'select') ? '' : 'none';
+  document.getElementById('seq-count').textContent = stripSel.size + ' selected';
+}}
+
+function onTileClick(chain, resi, ev) {{
+  if (stripMode === 'fly') {{
+    var info = CHAIN_MAP[chain];
+    var it = info && info.items[info.idx[resi]];
+    if (it && it.ca) flyToCoords(it.ca[0], it.ca[1], it.ca[2]);
+    return;
+  }}
+  var key = _seqKey(chain, resi);
+  if (ev && ev.shiftKey && stripLastKey && stripLastKey.indexOf(chain + '|') === 0) {{
+    var info2 = CHAIN_MAP[chain];
+    var lastResi = parseInt(stripLastKey.split('|')[1], 10);
+    var a = info2.idx[lastResi], b = info2.idx[resi];
+    if (a != null && b != null) {{
+      var lo = Math.min(a, b), hi = Math.max(a, b);
+      for (var i = lo; i <= hi; i++) stripSel.add(_seqKey(chain, info2.items[i].resi));
+    }}
+  }} else {{
+    if (stripSel.has(key)) stripSel.delete(key); else stripSel.add(key);
+    stripLastKey = key;
+  }}
+  refreshStripSelection();
+}}
+
+function refreshStripSelection() {{
+  document.querySelectorAll('.seq-tile.sel').forEach(function (t) {{ t.classList.remove('sel'); }});
+  stripSel.forEach(function (k) {{
+    var p = k.split('|');
+    var t = document.getElementById(_tileId(p[0], parseInt(p[1], 10)));
+    if (t) t.classList.add('sel');
+  }});
+  updateSeqActions();
+}}
+
+function deselectStrip() {{ stripSel.clear(); stripLastKey = null; refreshStripSelection(); }}
+
+function paintSelection(hex) {{
+  if (!stripSel.size) return;
+  paintResidues(Array.from(stripSel), hex);
+}}
+
+// Drops any per-residue overrides on the current selection, returning those
+// residues to the default atom-colour layer.
+function clearSelectionOverrides() {{
+  if (!stripSel.size) return;
+  var changed = false;
+  stripSel.forEach(function (k) {{
+    if (k in RESIDUE_OVERRIDES) {{ delete RESIDUE_OVERRIDES[k]; changed = true; }}
+  }});
+  if (!changed) return;
+  refreshOverrideState();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+function decorateOverrideTiles() {{
+  document.querySelectorAll('.seq-tile.ov').forEach(function (t) {{
+    t.classList.remove('ov'); t.style.removeProperty('--ov-dot');
+  }});
+  Object.keys(RESIDUE_OVERRIDES).forEach(function (k) {{
+    var p = k.split('|');
+    var t = document.getElementById(_tileId(p[0], parseInt(p[1], 10)));
+    if (t) {{ t.classList.add('ov'); t.style.setProperty('--ov-dot', _intToHex(RESIDUE_OVERRIDES[k])); }}
+  }});
+}}
+
+// ── Strip filter + quick-select ──────────────────────────────────────────
+// Residues that the current compound interacts with, honouring the type toggles.
+function _interactingKeys() {{
+  var keys = new Set();
+  if (currentData && currentData.interactions) {{
+    currentData.interactions.forEach(function (ix) {{
+      if (!activeToggles[ix.type]) return;
+      keys.add(ix.chain + '|' + ix.residue_number);
+    }});
+  }}
+  return keys;
+}}
+
+function setSeqFilter(mode) {{
+  seqFilter = mode;
+  applySeqFilter();
+  if (seqFilterMenuOpen) renderSeqFilterMenu();
+  var btn = document.getElementById('btn-seqfilter');
+  if (btn) btn.classList.toggle('active', mode !== 'all');
+}}
+
+// Dims tiles outside the interacting set when the filter is on; they stay
+// clickable so you can still inspect them.
+function applySeqFilter() {{
+  var inter = seqFilter === 'interacting' ? _interactingKeys() : null;
+  (SEQUENCE || []).forEach(function (ch) {{
+    ch.items.forEach(function (it) {{
+      var t = document.getElementById(_tileId(ch.chain, it.resi));
+      if (!t) return;
+      if (inter && !inter.has(ch.chain + '|' + it.resi)) t.classList.add('dim');
+      else t.classList.remove('dim');
+    }});
+  }});
+}}
+
+function selectInteracting() {{
+  setStripMode('select');
+  _interactingKeys().forEach(function (k) {{ stripSel.add(k); }});
+  refreshStripSelection();
+}}
+
+function selectChain(chain) {{
+  setStripMode('select');
+  var info = CHAIN_MAP[chain];
+  if (!info) return;
+  info.items.forEach(function (it) {{ stripSel.add(_seqKey(chain, it.resi)); }});
+  refreshStripSelection();
+}}
+
+function renderSeqFilterMenu() {{
+  var menu = document.getElementById('seqfilter-menu');
+  menu.innerHTML = '';
+  menu.appendChild(_menuRow('Show all residues', seqFilter === 'all', function () {{ setSeqFilter('all'); }}));
+  menu.appendChild(_menuRow('Only interacting', seqFilter === 'interacting', function () {{ setSeqFilter('interacting'); }}));
+}}
+
+function renderSeqSelectMenu() {{
+  var menu = document.getElementById('seqselect-menu');
+  menu.innerHTML = '';
+  menu.appendChild(_menuRow('All interacting residues', false, function () {{ selectInteracting(); setSeqSelectMenuOpen(false); }}));
+  var sep = document.createElement('div'); sep.className = 'color-sep'; menu.appendChild(sep);
+  (SEQUENCE || []).forEach(function (ch) {{
+    menu.appendChild(_menuRow('All of chain ' + ch.chain, false, function () {{ selectChain(ch.chain); setSeqSelectMenuOpen(false); }}));
+  }});
+  var sep2 = document.createElement('div'); sep2.className = 'color-sep'; menu.appendChild(sep2);
+  menu.appendChild(_menuRow('Clear selection', false, function () {{ deselectStrip(); setSeqSelectMenuOpen(false); }}));
+}}
+
+function setSeqFilterMenuOpen(on) {{
+  seqFilterMenuOpen = on;
+  document.getElementById('seqfilter-menu').style.display = on ? '' : 'none';
+  if (on) renderSeqFilterMenu();
+}}
+function toggleSeqFilterMenu() {{ setSeqFilterMenuOpen(!seqFilterMenuOpen); }}
+
+function setSeqSelectMenuOpen(on) {{
+  seqSelectMenuOpen = on;
+  document.getElementById('seqselect-menu').style.display = on ? '' : 'none';
+  if (on) renderSeqSelectMenu();
+}}
+function toggleSeqSelectMenu() {{ setSeqSelectMenuOpen(!seqSelectMenuOpen); }}
+
+document.addEventListener('click', function (e) {{
+  if (seqFilterMenuOpen) {{
+    var d = document.getElementById('seqfilter-dropdown');
+    if (d && !d.contains(e.target)) setSeqFilterMenuOpen(false);
+  }}
+  if (seqSelectMenuOpen) {{
+    var d2 = document.getElementById('seqselect-dropdown');
+    if (d2 && !d2.contains(e.target)) setSeqSelectMenuOpen(false);
+  }}
+}});
+
+// Chains the current compound contacts (honouring the type toggles).
+function _interactingChains() {{
+  var s = new Set();
+  if (currentData && currentData.interactions) {{
+    currentData.interactions.forEach(function (ix) {{ if (activeToggles[ix.type]) s.add(ix.chain); }});
+  }}
+  return s;
+}}
+
+// Chain chips: focus one chain (default for many-chain receptors) or show all.
+// A dot marks chains the ligand contacts. Hidden for single-chain receptors.
+function renderChainBar() {{
+  var bar = document.getElementById('seq-chainbar');
+  if (!bar) return;
+  if (!SEQUENCE || SEQUENCE.length <= 1) {{ bar.style.display = 'none'; bar.innerHTML = ''; return; }}
+  bar.style.display = '';
+  bar.innerHTML = '';
+  var inter = _interactingChains();
+  var lab = document.createElement('span'); lab.className = 'cb-label'; lab.textContent = 'Chain';
+  bar.appendChild(lab);
+  function chip(label, value, dot) {{
+    var b = document.createElement('button');
+    b.className = 'chain-chip' + (seqChain === value ? ' active' : '');
+    b.appendChild(document.createTextNode(label));
+    if (dot) {{ var d = document.createElement('span'); d.className = 'chain-dot'; b.appendChild(d); }}
+    b.onclick = function () {{ setSeqChain(value); }};
+    return b;
+  }}
+  bar.appendChild(chip('All', 'all', false));
+  SEQUENCE.forEach(function (ch) {{ bar.appendChild(chip(ch.chain, ch.chain, inter.has(ch.chain))); }});
+}}
+
+function setSeqChain(c) {{ seqChain = c; renderSequencePanel(); }}
+
+// Rebuilds the strip with a per-column tick ruler and interactive tiles.
+function renderSequencePanel() {{
+  renderChainBar();
+  var body = document.getElementById('seq-body');
+  body.innerHTML = '';
+  if (!SEQUENCE || SEQUENCE.length === 0) {{
+    body.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:4px">No receptor sequence available</div>';
+    return;
+  }}
+  var chains = (seqChain === 'all') ? SEQUENCE : SEQUENCE.filter(function (c) {{ return c.chain === seqChain; }});
+  if (!chains.length) chains = SEQUENCE;
+  chains.forEach(function (chainObj) {{
+    var row = document.createElement('div'); row.className = 'seq-chain';
+    var label = document.createElement('span'); label.className = 'seq-chain-label';
+    label.textContent = 'Chain ' + chainObj.chain; row.appendChild(label);
+    var tiles = document.createElement('span'); tiles.className = 'seq-tiles';
+    chainObj.items.forEach(function (it) {{
+      var col = document.createElement('span'); col.className = 'seq-col';
+      var tick = document.createElement('span'); tick.className = 'seq-tick';
+      if (it.resi % 10 === 0) {{ tick.textContent = it.resi; tick.classList.add('on'); }}
+      col.appendChild(tick);
+      var tile = document.createElement('span'); tile.className = 'seq-tile';
+      tile.id = _tileId(chainObj.chain, it.resi);
+      tile.textContent = it.one;
+      tile.title = it.resn + ' ' + it.resi + ' (chain ' + chainObj.chain + ')';
+      tile.onclick = function (ev) {{ onTileClick(chainObj.chain, it.resi, ev); }};
+      col.appendChild(tile);
+      tiles.appendChild(col);
+    }});
+    row.appendChild(tiles);
+    body.appendChild(row);
+  }});
+  if (currentData) applySequenceHighlight(currentData);
+  refreshStripSelection();
+  decorateOverrideTiles();
+  applySeqFilter();
+}}
+
+// Contact highlight only; selection / override / filter decorations live on
+// separate classes so they survive a re-highlight.
+function applySequenceHighlight(compound) {{
+  document.querySelectorAll('.seq-tile.ix').forEach(function (t) {{
+    t.classList.remove('ix'); t.style.background = '';
+  }});
+  if (compound && compound.interactions) {{
+    var seen = {{}};
+    compound.interactions.forEach(function (ix) {{
+      if (!activeToggles[ix.type]) return;
+      var key = ix.chain + '|' + ix.residue_number;
+      if (seen[key]) return;
+      seen[key] = true;
+      var tile = document.getElementById(_tileId(ix.chain, ix.residue_number));
+      if (!tile) return;
+      tile.classList.add('ix');
+      tile.style.background = COLORS[ix.type] || 'var(--accent)';
+    }});
+  }}
+  renderChainBar();
+  applySeqFilter();
+}}
+
+// ── Colour menu: Layer 1 atom colours + Layer 2 per-residue ──────────────
+function _menuRow(label, active, onclick) {{
+  var row = document.createElement('div');
+  row.className = 'view-menu-item rep-menu-item' + (active ? ' active' : '');
+  var name = document.createElement('span'); name.className = 'vm-name';
+  name.textContent = label + (active ? ' ✓' : ''); name.onclick = onclick;
+  row.appendChild(name);
+  return row;
+}}
+
+function renderColorMenu() {{
+  var menu = document.getElementById('color-menu');
+  menu.innerHTML = '';
+
+  var h1 = document.createElement('div');
+  h1.className = 'color-sec-head'; h1.textContent = 'Atom colours (default)';
+  menu.appendChild(h1);
+  COLOR_SCHEMES.forEach(function (c) {{
+    menu.appendChild(_menuRow(c.label, c.id === proteinColorType, function () {{ setProteinColor(c.id); }}));
+  }});
+
+  var sub = document.createElement('div');
+  sub.className = 'color-sec-head'; sub.textContent = 'Customize elements';
+  sub.style.marginTop = '4px'; menu.appendChild(sub);
+  var grid = document.createElement('div'); grid.className = 'color-swatch-grid';
+  ELEMENT_SWATCHES.forEach(function (sw) {{
+    var cell = document.createElement('label'); cell.className = 'color-swatch';
+    var input = document.createElement('input'); input.type = 'color';
+    input.value = _intToHex(ELEMENT_PALETTE[sw.key]);
+    input.oninput = function () {{ setElementColor(sw.key, input.value); }};
+    var lbl = document.createElement('span'); lbl.textContent = sw.label;
+    cell.appendChild(input); cell.appendChild(lbl); grid.appendChild(cell);
+  }});
+  menu.appendChild(grid);
+  var reset = document.createElement('div');
+  reset.className = 'view-menu-item rep-menu-item color-reset';
+  reset.innerHTML = '<span class="vm-name">Reset elements to CPK</span>';
+  reset.onclick = resetElementPalette; menu.appendChild(reset);
+
+  var sep = document.createElement('div'); sep.className = 'color-sep'; menu.appendChild(sep);
+
+  var h2 = document.createElement('div');
+  h2.className = 'color-sec-head'; h2.textContent = 'Per-residue colours';
+  menu.appendChild(h2);
+
+  var pick = document.createElement('div'); pick.className = 'pr-row';
+  var chSel = document.createElement('select'); chSel.id = 'pr-chain';
+  (SEQUENCE || []).forEach(function (ch) {{
+    var o = document.createElement('option'); o.value = ch.chain; o.textContent = ch.chain; chSel.appendChild(o);
+  }});
+  chSel.onchange = function () {{ populateResidueOptions(); }};
+  var resSel = document.createElement('select'); resSel.id = 'pr-res';
+  var col = document.createElement('input'); col.type = 'color'; col.className = 'pr-color'; col.id = 'pr-color'; col.value = '#ffd23f';
+  var apply = document.createElement('button'); apply.className = 'pr-apply'; apply.textContent = 'Apply';
+  apply.onclick = applyPerResidue;
+  pick.appendChild(chSel); pick.appendChild(resSel); pick.appendChild(col); pick.appendChild(apply);
+  menu.appendChild(pick);
+  populateResidueOptions();
+
+  if (stripSel.size) {{
+    var fromSel = document.createElement('div'); fromSel.className = 'pr-row';
+    var btn = document.createElement('button'); btn.className = 'pr-apply'; btn.style.flex = '1';
+    btn.textContent = 'Colour ' + stripSel.size + ' selected residue' + (stripSel.size === 1 ? '' : 's');
+    btn.onclick = function () {{ paintSelection(document.getElementById('pr-color').value); }};
+    fromSel.appendChild(btn); menu.appendChild(fromSel);
+  }}
+
+  var keys = Object.keys(RESIDUE_OVERRIDES);
+  if (keys.length) {{
+    keys.sort(function (a, b) {{
+      var pa = a.split('|'), pb = b.split('|');
+      return pa[0] === pb[0] ? (parseInt(pa[1], 10) - parseInt(pb[1], 10)) : (pa[0] < pb[0] ? -1 : 1);
+    }});
+    var list = document.createElement('div'); list.className = 'ov-list';
+    keys.forEach(function (k) {{
+      var p = k.split('|'); var chain = p[0]; var resi = parseInt(p[1], 10);
+      var info = CHAIN_MAP[chain]; var it = info && info.items[info.idx[resi]];
+      var item = document.createElement('div'); item.className = 'ov-item';
+      var sw = document.createElement('span'); sw.className = 'ov-swatch';
+      sw.style.background = _intToHex(RESIDUE_OVERRIDES[k]);
+      var lab = document.createElement('span'); lab.className = 'ov-label';
+      lab.textContent = (it ? it.resn : '') + ' ' + resi + ' · ' + chain;
+      var del = document.createElement('span'); del.className = 'ov-del'; del.textContent = '×';
+      del.title = 'Remove'; del.onclick = function () {{ clearResidueOverride(k); }};
+      item.appendChild(sw); item.appendChild(lab); item.appendChild(del); list.appendChild(item);
+    }});
+    menu.appendChild(list);
+  }} else {{
+    var hint = document.createElement('div'); hint.className = 'pr-hint';
+    hint.textContent = 'None painted. Pick a residue, or use Select mode in the strip.';
+    menu.appendChild(hint);
+  }}
+
+  // Decolour actions stay visible regardless of selection / overrides.
+  function _decolourRow(label, fn) {{
+    var r = document.createElement('div');
+    r.className = 'view-menu-item rep-menu-item color-reset';
+    r.innerHTML = '<span class="vm-name">' + label + '</span>';
+    r.onclick = fn;
+    return r;
+  }}
+  menu.appendChild(_decolourRow('Decolour selected', clearSelectionOverrides));
+  menu.appendChild(_decolourRow('Decolour all', clearAllOverrides));
+}}
+
+function populateResidueOptions() {{
+  var chSel = document.getElementById('pr-chain');
+  var resSel = document.getElementById('pr-res');
+  if (!chSel || !resSel) return;
+  var info = CHAIN_MAP[chSel.value];
+  resSel.innerHTML = '';
+  if (!info) return;
+  info.items.forEach(function (it) {{
+    var o = document.createElement('option'); o.value = it.resi; o.textContent = it.resn + ' ' + it.resi;
+    resSel.appendChild(o);
+  }});
+}}
+
+function applyPerResidue() {{
+  var chSel = document.getElementById('pr-chain');
+  var resSel = document.getElementById('pr-res');
+  var col = document.getElementById('pr-color');
+  if (!chSel || !resSel || !resSel.value) return;
+  paintResidues([_seqKey(chSel.value, parseInt(resSel.value, 10))], col.value);
+}}
+
+function setProteinColor(id) {{
+  proteinColorType = id;
+  if (colorMenuOpen) renderColorMenu();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+function setElementColor(key, hex) {{
+  ELEMENT_PALETTE[key] = _hexToInt(hex);
+  if (proteinColorType !== 'cpk') proteinColorType = 'cpk';
+  if (colorMenuOpen) renderColorMenu();
+  if (proteinRepType !== 'off') applyProteinRep(false);
+}}
+
+function resetElementPalette() {{
+  Object.assign(ELEMENT_PALETTE, ELEMENT_DEFAULTS);
+  if (colorMenuOpen) renderColorMenu();
+  if (proteinColorType === 'cpk' && proteinRepType !== 'off') applyProteinRep(false);
 }}
 </script>
 </body>
