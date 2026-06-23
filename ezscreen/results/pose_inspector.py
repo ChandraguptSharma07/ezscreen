@@ -405,6 +405,7 @@ body{{
   width:22px; height:16px; padding:0; border:1px solid var(--border);
   border-radius:3px; background:none; cursor:pointer; flex-shrink:0;
 }}
+.color-swatch input[type=checkbox]{{ width:13px; height:13px; margin:0; cursor:pointer; flex-shrink:0; accent-color:var(--accent); }}
 .color-reset{{ margin-top:3px; justify-content:center; }}
 .color-reset .vm-name{{ flex:0; color:var(--muted); font-size:11px; white-space:nowrap; }}
 
@@ -420,7 +421,11 @@ body{{
   cursor:pointer; white-space:nowrap; font-family:var(--font);
 }}
 .pr-apply:hover{{ filter:brightness(1.08); }}
+.pr-apply:disabled{{ opacity:.4; cursor:not-allowed; filter:none; }}
 .pr-hint{{ font-size:11px; color:var(--muted); padding:3px 6px; }}
+.cm-disabled{{ opacity:.45; cursor:not-allowed; }}
+.cm-note{{ font-size:10px; color:var(--faint); margin-left:auto; white-space:nowrap; }}
+.color-swatch input[type=color]:disabled{{ opacity:.4; cursor:not-allowed; }}
 .ov-list{{ max-height:124px; overflow-y:auto; padding:2px; }}
 .ov-item{{ display:flex; align-items:center; gap:6px; padding:3px 6px; border-radius:var(--radius-sm); font-size:11px; }}
 .ov-item:hover{{ background:var(--panel2); }}
@@ -763,6 +768,17 @@ function whenReady(fn) {{
       emdbProvider: 'rcsb',
     }});
     registerCpkTheme();
+    // Mol* auto-clamps the scroll-zoom-out limit to ~10x the focal radius, which
+    // can leave you unable to pull back far enough on large or atomistic views.
+    // Widen that envelope so the wheel can always zoom out.
+    try {{
+      molViewer.plugin.canvas3d.setProps({{
+        trackball: {{ autoAdjustMinMaxDistance: {{ name: 'on', params: {{
+          minDistanceFactor: 0, minDistancePadding: 5,
+          maxDistanceFactor: 100, maxDistanceMin: 20,
+        }} }} }},
+      }});
+    }} catch (e) {{ console.warn('zoom envelope setProps failed:', e); }}
     await molViewer.loadStructureFromData(RECEPTOR, 'pdb', false);
     applyBackground();
     applyPostFx();
@@ -1263,6 +1279,8 @@ async function setProteinRep(id) {{
   if (styleMenuOpen) renderRepMenu('protein');
   await applyProteinRep();
   applyPostFx();
+  // Element colouring availability depends on the rep, so refresh the menu.
+  if (colorMenuOpen) renderColorMenu();
   if (showBindings && currentData) {{
     await removeResidueHighlight();
     if (proteinRepType !== 'off') await applyResidueHighlight(currentData);
@@ -1835,6 +1853,8 @@ var proteinThemeRegistered = false;
 var stripMode = 'fly';
 var stripSel = new Set();
 var stripLastKey = null;
+var ELEMENT_DRAFT = {{}};
+var ELEMENT_APPLY = {{}};
 var seqFilter = 'all';
 var seqFilterMenuOpen = false;
 var seqSelectMenuOpen = false;
@@ -1858,22 +1878,34 @@ function _seqKey(chain, resi) {{ return chain + '|' + resi; }}
 
 // The viewer build of Mol* does not expose molstar.StructureProperties, so we
 // read atom/residue/chain identity straight off the model's atomic hierarchy.
-// location.element is a model-level ElementIndex; the segment index arrays map
-// it to the owning residue / chain.
+// Atom representations pass an element location (.unit/.element); line and other
+// bond representations pass a bond location (.aUnit/.aIndex) with no .element —
+// for those we colour by the bond's first atom, else everything reads as carbon.
+function _locUnitElement(location) {{
+  if (!location) return null;
+  if (location.unit && location.element != null) return [location.unit, location.element];
+  if (location.aUnit && location.aIndex != null) return [location.aUnit, location.aUnit.elements[location.aIndex]];
+  return null;
+}}
+
 function _atomSymbol(location) {{
   try {{
-    var m = location && location.unit && location.unit.model;
+    var ue = _locUnitElement(location);
+    if (!ue) return '';
+    var m = ue[0].model;
     if (!m || !m.atomicHierarchy) return '';
-    return String(m.atomicHierarchy.atoms.type_symbol.value(location.element) || '');
+    return String(m.atomicHierarchy.atoms.type_symbol.value(ue[1]) || '');
   }} catch (e) {{ return ''; }}
 }}
 
 function _atomChainResi(location) {{
   try {{
-    var m = location && location.unit && location.unit.model;
+    var ue = _locUnitElement(location);
+    if (!ue) return null;
+    var m = ue[0].model;
     if (!m || !m.atomicHierarchy) return null;
     var AH = m.atomicHierarchy;
-    var el = location.element;
+    var el = ue[1];
     var rI = AH.residueAtomSegments.index[el];
     var cI = AH.chainAtomSegments.index[el];
     return {{ chain: String(AH.chains.auth_asym_id.value(cI)), resi: AH.residues.auth_seq_id.value(rI) }};
@@ -1896,11 +1928,21 @@ function residueOverrideAt(location) {{
   return (v == null) ? null : v;
 }}
 
+// Element/CPK colouring only makes sense where atoms are drawn; on a cartoon
+// the ribbon shows no atoms, so element colours are suppressed (we fall back to
+// chain colouring). Residue-level overrides still apply on cartoon.
+function _elementAllowed() {{
+  return proteinRepType !== 'cartoon' && proteinRepType !== 'off';
+}}
+function _effectiveScheme() {{
+  return (proteinColorType === 'cpk' && !_elementAllowed()) ? 'chain-id' : proteinColorType;
+}}
+
 // Resolve the base (default) colour function for the active scheme. CPK and
 // Solid are computed directly; the rest delegate to Mol*'s built-in theme so
 // chain / secondary-structure / b-factor / rainbow keep rendering as before.
 function _baseColorFn(ctx) {{
-  var scheme = proteinColorType;
+  var scheme = _effectiveScheme();
   if (scheme === 'cpk') return function (loc) {{ return elementColor(loc); }};
   if (scheme === 'uniform') return function () {{ return SOLID_VALUE; }};
   try {{
@@ -1952,12 +1994,13 @@ function registerCpkTheme() {{
 // Route through the unified theme only when CPK is active or overrides exist;
 // otherwise hand back the built-in theme untouched.
 function _proteinColorSpec() {{
-  if (proteinThemeRegistered && (_hasOverrides || proteinColorType === 'cpk')) {{
+  var scheme = _effectiveScheme();
+  if (proteinThemeRegistered && (_hasOverrides || scheme === 'cpk')) {{
     return {{ color: 'ezs-protein' }};
   }}
-  if (proteinColorType === 'uniform') return {{ color: 'uniform', colorParams: {{ value: SOLID_VALUE }} }};
-  if (proteinColorType === 'cpk') return {{ color: 'element-symbol' }};
-  return {{ color: proteinColorType }};
+  if (scheme === 'uniform') return {{ color: 'uniform', colorParams: {{ value: SOLID_VALUE }} }};
+  if (scheme === 'cpk') return {{ color: 'element-symbol' }};
+  return {{ color: scheme }};
 }}
 
 function refreshOverrideState() {{
@@ -2268,29 +2311,56 @@ function renderColorMenu() {{
   var menu = document.getElementById('color-menu');
   menu.innerHTML = '';
 
+  var elAllowed = _elementAllowed();
+
   var h1 = document.createElement('div');
   h1.className = 'color-sec-head'; h1.textContent = 'Atom colours (default)';
   menu.appendChild(h1);
   COLOR_SCHEMES.forEach(function (c) {{
-    menu.appendChild(_menuRow(c.label, c.id === proteinColorType, function () {{ setProteinColor(c.id); }}));
+    if (c.id === 'cpk' && !elAllowed) {{
+      var dis = document.createElement('div');
+      dis.className = 'view-menu-item rep-menu-item cm-disabled';
+      dis.innerHTML = '<span class="vm-name">' + c.label + '</span><span class="cm-note">atom views only</span>';
+      menu.appendChild(dis);
+    }} else {{
+      menu.appendChild(_menuRow(c.label, c.id === proteinColorType, function () {{ setProteinColor(c.id); }}));
+    }}
   }});
 
   var sub = document.createElement('div');
   sub.className = 'color-sec-head'; sub.textContent = 'Customize elements';
   sub.style.marginTop = '4px'; menu.appendChild(sub);
+  if (!elAllowed) {{
+    var note = document.createElement('div'); note.className = 'pr-hint';
+    note.textContent = 'Element colours apply to atom views (sticks, spacefill, surface, lines), not cartoon.';
+    menu.appendChild(note);
+  }}
+  ELEMENT_DRAFT = Object.assign({{}}, ELEMENT_PALETTE);
   var grid = document.createElement('div'); grid.className = 'color-swatch-grid';
   ELEMENT_SWATCHES.forEach(function (sw) {{
-    var cell = document.createElement('label'); cell.className = 'color-swatch';
+    if (ELEMENT_APPLY[sw.key] === undefined) ELEMENT_APPLY[sw.key] = true;
+    var cell = document.createElement('div'); cell.className = 'color-swatch';
+    var cb = document.createElement('input'); cb.type = 'checkbox';
+    cb.checked = ELEMENT_APPLY[sw.key] !== false; cb.disabled = !elAllowed;
+    cb.title = 'Include ' + sw.label + ' when applying';
+    cb.onchange = function () {{ ELEMENT_APPLY[sw.key] = cb.checked; }};
     var input = document.createElement('input'); input.type = 'color';
-    input.value = _intToHex(ELEMENT_PALETTE[sw.key]);
-    input.oninput = function () {{ setElementColor(sw.key, input.value); }};
+    input.value = _intToHex(ELEMENT_DRAFT[sw.key]);
+    input.disabled = !elAllowed;
+    // Editing a colour implies you want it applied, so tick its box.
+    input.oninput = function () {{ ELEMENT_DRAFT[sw.key] = _hexToInt(input.value); ELEMENT_APPLY[sw.key] = true; cb.checked = true; }};
     var lbl = document.createElement('span'); lbl.textContent = sw.label;
-    cell.appendChild(input); cell.appendChild(lbl); grid.appendChild(cell);
+    cell.appendChild(cb); cell.appendChild(input); cell.appendChild(lbl); grid.appendChild(cell);
   }});
   menu.appendChild(grid);
+  var applyRow = document.createElement('div'); applyRow.className = 'pr-row';
+  var applyEl = document.createElement('button'); applyEl.className = 'pr-apply'; applyEl.style.flex = '1';
+  applyEl.textContent = 'Apply'; applyEl.disabled = !elAllowed;
+  applyEl.onclick = applyElementColors;
+  applyRow.appendChild(applyEl); menu.appendChild(applyRow);
   var reset = document.createElement('div');
   reset.className = 'view-menu-item rep-menu-item color-reset';
-  reset.innerHTML = '<span class="vm-name">Reset elements to CPK</span>';
+  reset.innerHTML = '<span class="vm-name">Reset elements</span>';
   reset.onclick = resetElementPalette; menu.appendChild(reset);
 
   var sep = document.createElement('div'); sep.className = 'color-sep'; menu.appendChild(sep);
@@ -2383,20 +2453,29 @@ function applyPerResidue() {{
 function setProteinColor(id) {{
   proteinColorType = id;
   if (colorMenuOpen) renderColorMenu();
-  if (proteinRepType !== 'off') applyProteinRep(false);
+  // Reframe to the default fit on a scheme change, matching Apply / Reset.
+  if (proteinRepType !== 'off') applyProteinRep(true);
 }}
 
-function setElementColor(key, hex) {{
-  ELEMENT_PALETTE[key] = _hexToInt(hex);
+// Element swatches edit a draft palette; nothing changes until Apply is hit.
+// Element colours are an atom-view feature, so Apply is a no-op on cartoon.
+function applyElementColors() {{
+  if (!_elementAllowed()) return;
+  ELEMENT_SWATCHES.forEach(function (sw) {{
+    if (ELEMENT_APPLY[sw.key] !== false) ELEMENT_PALETTE[sw.key] = ELEMENT_DRAFT[sw.key];
+  }});
   if (proteinColorType !== 'cpk') proteinColorType = 'cpk';
   if (colorMenuOpen) renderColorMenu();
-  if (proteinRepType !== 'off') applyProteinRep(false);
+  // Apply reframes the camera to a default fit so the recoloured structure is
+  // fully in view rather than leaving you stuck at the previous zoom.
+  if (proteinRepType !== 'off') applyProteinRep(true);
 }}
 
 function resetElementPalette() {{
   Object.assign(ELEMENT_PALETTE, ELEMENT_DEFAULTS);
   if (colorMenuOpen) renderColorMenu();
-  if (proteinColorType === 'cpk' && proteinRepType !== 'off') applyProteinRep(false);
+  // Reframe to the default fit on reset, matching Apply.
+  if (proteinColorType === 'cpk' && proteinRepType !== 'off') applyProteinRep(true);
 }}
 </script>
 </body>
