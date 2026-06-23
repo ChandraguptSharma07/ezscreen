@@ -1,5 +1,29 @@
 # Changelog
 
+## v1.10.0 — 2026-06-24
+
+### Changed
+
+- **Interaction viewer engine: 3Dmol.js → Mol\*** — the 3D pose viewer was rebuilt on Mol\* (4.4.0) for native per-atom hover highlighting and cleaner cartoon / surface rendering; the 2D LIGPLOT-style diagram is unchanged
+- **Residue panel redesign** — the bottom sequence strip is now a Maestro-style panel with a tick ruler, monospace residue tiles coloured by PLIP contact type, a chain selector (defaults to a single chain on many-chain receptors, with dots marking the chains the ligand contacts), an interacting-residue filter, and Fly / Select modes (click a residue to fly the camera to its Cα, or multi-select with shift-range)
+- **Colouring consolidated into one Colour menu** — a two-layer model: a global atom-colour scheme (CPK / secondary structure / chain / residue type / B-factor / rainbow N→C / solid) with an editable per-element palette, plus per-residue colour overrides painted from a residue picker or the strip selection; scheme changes, element Apply, and Reset all reframe the camera to a default fit
+
+### Added
+
+- **Mol\* 3D toolbar** — an FX toggle (edge outlines + ambient occlusion), light / dark canvas, a Bindings toggle that draws each PLIP interaction as a thin coloured cylinder anchored on the contacting side chain, a Measure mode (click two atoms to drop a distance label), and a Views dropdown to snapshot the camera and fly back to named positions
+- **Style dropdown** — protein, ligand, and interacting-residue representations in one nested menu, with a switchable ligand representation
+- **Per-element colour customisation** — editable C / N / O / S / H / P / halogen swatches with per-element tickboxes and an Apply step, applied only to atom representations (sticks / spacefill / surface / lines), not the cartoon where individual atoms aren't visible
+- **Per-residue colouring** — paint the selected residues a chosen colour, with Decolour-selected and Decolour-all actions and a per-residue override list
+
+### Fixed
+
+- **Per-residue and element colours not applying** — the Mol\* viewer bundle does not expose `StructureProperties`, so the colour callbacks silently fell back to carbon; atom / residue / chain identity is now read directly off the model's atomic hierarchy, so painting and CPK colours work
+- **Element colours on line representations** — bond locations carry no element index, so every bond read as carbon and the whole structure turned one colour; bonds are now coloured by their first atom
+- **Scroll zoom-out clamped too tight** — the trackball auto-clamped the zoom-out distance to roughly the structure radius, so the wheel could not pull back far enough; widened the envelope so the whole structure can always be framed
+- **Viewer script silently broken by an unescaped newline** in the synthetic interaction-PDB join
+
+---
+
 ## v1.9.4 — 2026-05-16
 
 ### Fixed
