@@ -79,7 +79,9 @@ def _extract_sequence(receptor_text: str) -> list[dict]:
             chains[chain].append(entry)
         if seen[key]["ca"] is None or atom == "CA":
             try:
-                x = float(line[30:38]); y = float(line[38:46]); z = float(line[46:54])
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
                 seen[key]["ca"] = [round(x, 3), round(y, 3), round(z, 3)]
             except ValueError:
                 pass
