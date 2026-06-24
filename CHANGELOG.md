@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.10.1 — 2026-06-24
+
+### Added
+
+- **Export dropdown restored on the Mol\* viewer** — PNG of the current 3D view, SVG of the 2D diagram, and a 360° WebM rotation video, all of which shipped in the old 3Dmol.js viewer (v1.9.3) and were dropped during the Mol\* migration
+- **Residue labels in 3D** — a Labels toggle overlays the name and number of every interacting residue, projected from each contact's Cα to screen pixels each frame (the viewer bundle lacks Mol\*'s label query language, so the chips are HTML overlays)
+- **Distance labels in 3D** — distance chips at the midpoint of each active interaction, coloured to match the interaction type, driven by the same per-frame projection as the residue labels
+- **Hydrophobicity pocket surface** — a Pocket toggle draws a translucent molecular surface over the contact residues coloured on the Kyte-Doolittle scale (blue polar → white → red greasy), looked up per residue from the chain map so no hierarchy read is needed
+- **Citation banner** — the footer now names UniDock (Yu et al. 2023) and PLIP (Salentin et al. 2015) for the methods section
+
+### Fixed
+
+- **2D SVG export rendered on white** — the export now frames to the diagram's actual content bounds and paints the current background behind it, so saved diagrams match the dark / light mode on screen instead of coming out transparent (white)
+- **Residue and distance label chips missing from PNG exports** — the HTML overlay chips are now composited into the screenshot at their on-screen positions, since they aren't part of the WebGL scene
+
 ## v1.10.0 — 2026-06-24
 
 ### Changed
