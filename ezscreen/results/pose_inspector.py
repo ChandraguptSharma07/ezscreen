@@ -442,6 +442,12 @@ body.light #viewer,body.light #diagram2d-wrap{{ background:#f6f8fa; }}
 #diagram2d-wrap{{ flex:1; display:none; align-items:center; justify-content:center; overflow:hidden; padding:12px; position:relative; }}
 #diagram2d-wrap svg{{ max-width:100%; max-height:100%; }}
 .d2-placeholder{{ color:var(--muted); font-size:14px; text-align:center; padding:40px; }}
+#export-overlay{{ position:absolute; top:12px; left:50%; transform:translateX(-50%); z-index:50; background:rgba(0,0,0,.72); color:#fff; font-size:12px; padding:6px 14px; border-radius:var(--radius); border:1px solid var(--border); pointer-events:none; }}
+#reslabel-layer{{ position:absolute; inset:0; pointer-events:none; z-index:40; overflow:hidden; }}
+.reslabel{{ position:absolute; transform:translate(-50%,-140%); background:rgba(13,17,23,.82); color:#fff; font:600 10px var(--mono); font-variant-numeric:tabular-nums; padding:1px 5px; border-radius:4px; border:1px solid var(--border2); white-space:nowrap; pointer-events:none; }}
+#distlabel-layer{{ position:absolute; inset:0; pointer-events:none; z-index:41; overflow:hidden; }}
+.distlabel{{ position:absolute; transform:translate(-50%,-50%); background:rgba(13,17,23,.85); color:#fff; font:600 10px var(--mono); font-variant-numeric:tabular-nums; padding:1px 5px; border-radius:4px; border:1px solid var(--border2); white-space:nowrap; pointer-events:none; }}
+#measure-hint{{ position:absolute; bottom:12px; left:50%; transform:translateX(-50%); z-index:50; background:rgba(0,0,0,.74); color:#fff; font-size:12px; padding:6px 14px; border-radius:var(--radius); border:1px solid var(--border); pointer-events:none; }}
 
 #sidebar{{ width:300px; background:var(--panel); border-left:1px solid var(--border); display:flex; flex-direction:column; overflow:hidden; }}
 .sb-section{{ padding:10px 12px; border-bottom:1px solid var(--border); flex-shrink:0; }}
@@ -507,6 +513,7 @@ h3{{ font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.05em; 
   Predicted pose — not experimentally validated &nbsp;&middot;&nbsp;
   Pipeline: UniDock &rarr; PLIP &rarr; SwiftScreen &nbsp;&middot;&nbsp;
   Viewer: Mol*&nbsp;{_MOLSTAR_VERSION}
+  <span id="cite">&nbsp;&middot;&nbsp; Cite: UniDock (Yu et&nbsp;al. 2023, <i>J.&nbsp;Chem.&nbsp;Inf.&nbsp;Model.</i>) &middot; PLIP (Salentin et&nbsp;al. 2015, <i>Nucleic&nbsp;Acids&nbsp;Res.</i>)</span>
 </div>
 
 <div id="toolbar">
@@ -522,6 +529,8 @@ h3{{ font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.05em; 
   <button class="tb-btn" id="btn-bg"   onclick="toggleBackground()" title="Switch light / dark background">Light BG</button>
   <button class="tb-btn active" id="btn-fx" onclick="togglePostFx()" title="Edge outlines and ambient occlusion shading">FX</button>
   <button class="tb-btn" id="btn-bindings" onclick="toggleBindings()" title="Show interaction cylinders in 3D">Bindings</button>
+  <button class="tb-btn" id="btn-labels" onclick="toggleResLabels()" title="Label interacting residues in the 3D view">Labels</button>
+  <button class="tb-btn" id="btn-hydro" onclick="toggleHydroSurface()" title="Hydrophobicity-coloured surface over the binding-site residues (blue = polar, red = greasy)">Pocket</button>
   <button class="tb-btn" id="btn-measure" onclick="toggleMeasure()" title="Click two atoms to drop a distance label; toggle off to clear">Measure</button>
   <button class="tb-btn" id="btn-dist" onclick="toggleDistLabels()" title="Distance labels in 2D mode">Distances</button>
   <button class="tb-btn" id="btn-reset" onclick="resetCamera()" title="Recenter on the current selection">Reset View</button>
@@ -570,6 +579,13 @@ h3{{ font-size:11px; font-weight:600; color:var(--muted); letter-spacing:.05em; 
   <div class="view-dropdown">
     <button class="tb-btn" id="btn-view-current" onclick="toggleViewMenu()" title="Pick a saved view to fly to it">No saved views &#9662;</button>
     <div id="view-menu" class="view-menu" style="display:none"></div>
+  </div>
+
+  <div class="tb-sep"></div>
+
+  <div class="rep-dropdown" id="export-dropdown">
+    <button class="tb-btn" id="btn-export" onclick="toggleExportMenu()" title="Download the current view">Export &#9662;</button>
+    <div id="export-menu" class="view-menu" style="display:none"></div>
   </div>
 </div>
 
@@ -770,6 +786,7 @@ function whenReady(fn) {{
       emdbProvider: 'rcsb',
     }});
     registerCpkTheme();
+    registerHydroTheme();
     // Mol* auto-clamps the scroll-zoom-out limit to ~10x the focal radius, which
     // can leave you unable to pull back far enough on large or atomistic views.
     // Widen that envelope so the wheel can always zoom out.
@@ -1031,6 +1048,11 @@ async function selectCompound(ligId) {{
     if (showBindings && compound) {{
       await applyResidueHighlight(compound);
     }}
+    // Pocket surface is per-compound; rebuild it for the newly selected one.
+    if (showHydro) {{
+      await removeHydroSurface();
+      if (compound && compound.residue_pdb) await addHydroSurface();
+    }}
 
     renderSidebar(compound);
     applySequenceHighlight(compound);
@@ -1129,6 +1151,476 @@ function setViewMenuOpen(on) {{
 
 function toggleViewMenu() {{ setViewMenuOpen(!viewMenuOpen); }}
 
+// ── Export (PNG / SVG) ───────────────────────────────────────────────────
+let exportMenuOpen = false;
+
+function _exportBaseName() {{
+  const id = (currentData && (currentData.lig_id || currentData.name)) || 'pose';
+  return String(id).replace(/[^A-Za-z0-9_.-]+/g, '_');
+}}
+
+function _triggerDownload(href, filename) {{
+  const a = document.createElement('a');
+  a.href = href; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+}}
+
+// 3D snapshot via Mol*'s screenshot helper (re-renders to an offscreen target,
+// so it works even when the live canvas has no preserved drawing buffer); falls
+// back to the helper's own download and finally to reading the canvas directly.
+async function _screenshotUri() {{
+  const vs = molViewer.plugin.helpers && molViewer.plugin.helpers.viewportScreenshot;
+  try {{ if (vs && typeof vs.getImageDataUri === 'function') {{ const u = await vs.getImageDataUri(); if (u && u.length > 64) return u; }} }}
+  catch (e) {{ console.warn('getImageDataUri failed:', e); }}
+  try {{ const c = document.querySelector('#viewer canvas'); if (c) {{ const u = c.toDataURL('image/png'); if (u && u.length > 64) return u; }} }}
+  catch (e) {{ console.warn('canvas snapshot failed:', e); }}
+  return null;
+}}
+
+function _roundRectPath(ctx, x, y, w, h, r) {{
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}}
+
+// The residue / distance label chips are HTML overlays, not part of the WebGL
+// scene, so burn them into the snapshot at their on-screen positions. (Measure
+// labels are real 3D objects and are already in the screenshot.)
+function _compositeOverlays(ctx, grect, sx, sy) {{
+  const els = document.querySelectorAll('#reslabel-layer .reslabel, #distlabel-layer .distlabel');
+  ctx.textBaseline = 'middle';
+  els.forEach(el => {{
+    if (el.style.display === 'none') return;
+    const r = el.getBoundingClientRect();
+    if (!r.width) return;
+    const x = (r.left - grect.left) * sx, y = (r.top - grect.top) * sy;
+    const w = r.width * sx, h = r.height * sy;
+    _roundRectPath(ctx, x, y, w, h, 4 * sy);
+    ctx.fillStyle = 'rgba(13,17,23,0.85)';
+    ctx.fill();
+    ctx.lineWidth = Math.max(1, sy);
+    ctx.strokeStyle = el.style.borderColor || '#3a434f';
+    ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.font = '600 ' + Math.round(10 * sy) + 'px ui-monospace, SFMono-Regular, Menlo, monospace';
+    ctx.fillText(el.textContent, x + 5 * sx, y + h / 2 + 0.5);
+  }});
+}}
+
+async function exportPng() {{
+  setExportMenuOpen(false);
+  if (currentMode !== '3d') {{ switchMode('3d'); await new Promise(r => setTimeout(r, 150)); }}
+  const name = _exportBaseName() + '_3d.png';
+  const uri = await _screenshotUri();
+  if (!uri) {{ alert('PNG export is not available in this browser.'); return; }}
+  try {{
+    const img = new Image();
+    await new Promise((res, rej) => {{ img.onload = res; img.onerror = rej; img.src = uri; }});
+    const out = document.createElement('canvas');
+    out.width = img.naturalWidth || img.width;
+    out.height = img.naturalHeight || img.height;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = darkMode ? '#0d1117' : '#f6f8fa';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(img, 0, 0, out.width, out.height);
+    const glCanvas = document.querySelector('#viewer canvas');
+    const grect = glCanvas.getBoundingClientRect();
+    _compositeOverlays(ctx, grect, out.width / grect.width, out.height / grect.height);
+    _triggerDownload(out.toDataURL('image/png'), name);
+  }} catch (e) {{
+    console.warn('overlay composite failed, exporting raw screenshot:', e);
+    _triggerDownload(uri, name);
+  }}
+}}
+
+// 2D diagram is already an SVG; serialise the live element, painting in the
+// current background so the export isn't transparent (which renders as white).
+function exportSvg() {{
+  setExportMenuOpen(false);
+  if (currentMode !== '2d') switchMode('2d');
+  const svg = document.querySelector('#diagram2d-wrap svg');
+  if (!svg) {{ alert('Select a compound first to generate the 2D diagram.'); return; }}
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const clone = svg.cloneNode(true);
+  if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', SVGNS);
+  // The diagram draws beyond its viewBox, so frame the export to the actual
+  // content bounds; then fill the whole canvas (letterbox included) with the
+  // current background so nothing renders on white.
+  let vx = 0, vy = 0, vw = 0, vh = 0;
+  try {{ const bb = svg.getBBox(); vx = bb.x; vy = bb.y; vw = bb.width; vh = bb.height; }} catch (e) {{}}
+  const cur = svg.viewBox && svg.viewBox.baseVal;
+  if (!(vw > 0)) {{
+    if (cur && cur.width) {{ vx = cur.x; vy = cur.y; vw = cur.width; vh = cur.height; }}
+    else {{ vw = 800; vh = 600; }}
+  }}
+  const pad = Math.max(12, Math.max(vw, vh) * 0.03);
+  vx -= pad; vy -= pad; vw += 2 * pad; vh += 2 * pad;
+  clone.setAttribute('viewBox', vx + ' ' + vy + ' ' + vw + ' ' + vh);
+  clone.setAttribute('width', '100%');
+  clone.setAttribute('height', '100%');
+  clone.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  const bg = document.createElementNS(SVGNS, 'rect');
+  const M = Math.max(vw, vh) * 4;
+  bg.setAttribute('x', vx - M); bg.setAttribute('y', vy - M);
+  bg.setAttribute('width', vw + 2 * M); bg.setAttribute('height', vh + 2 * M);
+  bg.setAttribute('fill', darkMode ? '#0d1117' : '#f6f8fa');
+  clone.insertBefore(bg, clone.firstChild);
+  const data = new XMLSerializer().serializeToString(clone);
+  const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>\\n' + data], {{ type: 'image/svg+xml' }});
+  const url = URL.createObjectURL(blob);
+  _triggerDownload(url, _exportBaseName() + '_2d.svg');
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}}
+
+// Rotate the camera position a full turn about the view's up axis (Rodrigues),
+// recording the canvas to a WebM via captureStream + MediaRecorder.
+function _rotateCameraAroundUp(base, ang) {{
+  const t = base.target, p = base.position, up = base.up;
+  const vx = p[0] - t[0], vy = p[1] - t[1], vz = p[2] - t[2];
+  const ul = Math.hypot(up[0], up[1], up[2]) || 1;
+  const ux = up[0] / ul, uy = up[1] / ul, uz = up[2] / ul;
+  const cos = Math.cos(ang), sin = Math.sin(ang);
+  const dot = vx * ux + vy * uy + vz * uz;
+  const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+  const rx = vx * cos + cx * sin + ux * dot * (1 - cos);
+  const ry = vy * cos + cy * sin + uy * dot * (1 - cos);
+  const rz = vz * cos + cz * sin + uz * dot * (1 - cos);
+  const snap = Object.assign({{}}, base);
+  snap.position = [t[0] + rx, t[1] + ry, t[2] + rz];
+  snap.target = [t[0], t[1], t[2]];
+  snap.up = [up[0], up[1], up[2]];
+  return snap;
+}}
+
+function _exportOverlay(text) {{
+  let el = document.getElementById('export-overlay');
+  if (!text) {{ if (el) el.remove(); return; }}
+  if (!el) {{
+    el = document.createElement('div');
+    el.id = 'export-overlay';
+    document.getElementById('viewer').appendChild(el);
+  }}
+  el.textContent = text;
+}}
+
+let recording360 = false;
+
+async function export360() {{
+  setExportMenuOpen(false);
+  if (recording360) return;
+  if (currentMode !== '3d') {{ switchMode('3d'); await new Promise(r => setTimeout(r, 150)); }}
+  const canvas = document.querySelector('#viewer canvas');
+  if (!canvas || !canvas.captureStream || typeof MediaRecorder === 'undefined') {{
+    alert('360° video export is not supported in this browser.'); return;
+  }}
+  const mimes = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+  const mime = mimes.find(m => MediaRecorder.isTypeSupported(m)) || '';
+  let rec;
+  try {{
+    rec = new MediaRecorder(canvas.captureStream(30), mime ? {{ mimeType: mime }} : undefined);
+  }} catch (e) {{ alert('Could not start the recorder: ' + e); return; }}
+  const chunks = [];
+  rec.ondataavailable = e => {{ if (e.data && e.data.size) chunks.push(e.data); }};
+  const stopped = new Promise(res => {{ rec.onstop = res; }});
+
+  recording360 = true;
+  const cam = molViewer.plugin.canvas3d.camera;
+  const base = cam.getSnapshot();
+  const steps = 120;
+  try {{
+    rec.start();
+    for (let i = 0; i <= steps; i++) {{
+      cam.setState(_rotateCameraAroundUp(base, (i / steps) * 2 * Math.PI));
+      _exportOverlay('Recording 360° … ' + Math.round((i / steps) * 100) + '%');
+      await new Promise(r => setTimeout(r, 33));
+    }}
+    cam.setState(base);
+  }} finally {{
+    rec.stop();
+    await stopped;
+    _exportOverlay('');
+    recording360 = false;
+  }}
+  const blob = new Blob(chunks, {{ type: mime || 'video/webm' }});
+  const url = URL.createObjectURL(blob);
+  _triggerDownload(url, _exportBaseName() + '_360.webm');
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}}
+
+function _exportRow(label, fn) {{
+  const row = document.createElement('div');
+  row.className = 'view-menu-item rep-menu-item';
+  row.innerHTML = '<span class="vm-name">' + label + '</span>';
+  row.onclick = fn;
+  return row;
+}}
+
+function renderExportMenu() {{
+  const menu = document.getElementById('export-menu');
+  menu.innerHTML = '';
+  menu.appendChild(_exportRow('PNG &mdash; 3D view', exportPng));
+  menu.appendChild(_exportRow('SVG &mdash; 2D diagram', exportSvg));
+  menu.appendChild(_exportRow('360&deg; video &mdash; WebM', export360));
+}}
+
+// ── Residue labels in 3D (HTML overlay, projected each frame) ────────────
+// The viewer bundle lacks the label representation's query language, so we
+// project each contact residue's Cα to screen pixels with camera.project (the
+// viewport uses a bottom-left origin) and place absolutely-positioned chips.
+let showResLabels = false;
+let _resLabelEls = {{}};
+let _labelRaf = null;
+
+function _contactResidues() {{
+  const seen = {{}}, list = [];
+  if (currentData && currentData.interactions) {{
+    currentData.interactions.forEach(ix => {{
+      if (!activeToggles[ix.type]) return;
+      const key = ix.chain + '|' + ix.residue_number;
+      if (seen[key]) return;
+      seen[key] = true;
+      const info = CHAIN_MAP[ix.chain];
+      const it = info && info.items[info.idx[ix.residue_number]];
+      if (it && it.ca) {{
+        list.push({{ key, resi: ix.residue_number, resn: it.resn || ix.residue_name || '', ca: it.ca, type: ix.type }});
+      }}
+    }});
+  }}
+  return list;
+}}
+
+function _ensureLabelLayer() {{
+  let layer = document.getElementById('reslabel-layer');
+  if (!layer) {{
+    layer = document.createElement('div');
+    layer.id = 'reslabel-layer';
+    document.getElementById('viewer').appendChild(layer);
+  }}
+  return layer;
+}}
+
+function _syncResLabels() {{
+  const layer = _ensureLabelLayer();
+  if (!showResLabels || currentMode !== '3d' || !molViewer.plugin.canvas3d) {{ layer.style.display = 'none'; return; }}
+  layer.style.display = '';
+  const residues = _contactResidues();
+  const wanted = {{}};
+  residues.forEach(r => {{ wanted[r.key] = r; }});
+  Object.keys(_resLabelEls).forEach(k => {{ if (!wanted[k]) {{ _resLabelEls[k].remove(); delete _resLabelEls[k]; }} }});
+  const cam = molViewer.plugin.canvas3d.camera;
+  const canvas = document.querySelector('#viewer canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const vrect = document.getElementById('viewer').getBoundingClientRect();
+  const vp = cam.viewport;
+  const sx = rect.width / vp.width, sy = rect.height / vp.height;
+  const ox = rect.left - vrect.left, oy = rect.top - vrect.top;
+  const out = [0, 0, 0, 0];
+  residues.forEach(r => {{
+    let el = _resLabelEls[r.key];
+    if (!el) {{ el = document.createElement('div'); el.className = 'reslabel'; layer.appendChild(el); _resLabelEls[r.key] = el; }}
+    el.textContent = (r.resn ? r.resn + ' ' : '') + r.resi;
+    el.style.borderColor = COLORS[r.type] || 'var(--border2)';
+    cam.project(out, r.ca);
+    const px = out[0] * sx + ox;
+    const py = rect.height - out[1] * sy + oy;
+    if (px < -60 || py < -30 || px > rect.width + ox + 60 || py > rect.height + oy + 30) {{
+      el.style.display = 'none';
+    }} else {{
+      el.style.display = '';
+      el.style.left = px + 'px';
+      el.style.top = py + 'px';
+    }}
+  }});
+}}
+
+// Distance chips at the midpoint of each active interaction (3D only), reusing
+// the same screen-projection as the residue labels.
+let _distLabelEls = {{}};
+
+function _ensureDistLayer() {{
+  let layer = document.getElementById('distlabel-layer');
+  if (!layer) {{
+    layer = document.createElement('div');
+    layer.id = 'distlabel-layer';
+    document.getElementById('viewer').appendChild(layer);
+  }}
+  return layer;
+}}
+
+function _activeInteractions() {{
+  const list = [];
+  if (currentData && currentData.interactions) {{
+    currentData.interactions.forEach((ix, i) => {{
+      if (!activeToggles[ix.type]) return;
+      const lc = ix.ligand_coords, pc = ix.protein_coords;
+      if (!lc || !pc) return;
+      if (Math.abs(lc[0]) + Math.abs(lc[1]) + Math.abs(lc[2]) < 1e-6) return;
+      if (Math.abs(pc[0]) + Math.abs(pc[1]) + Math.abs(pc[2]) < 1e-6) return;
+      if (!(ix.distance > 0.1)) return;
+      list.push({{ key: 'd' + i, type: ix.type, dist: ix.distance,
+                   mid: [(lc[0] + pc[0]) / 2, (lc[1] + pc[1]) / 2, (lc[2] + pc[2]) / 2] }});
+    }});
+  }}
+  return list;
+}}
+
+function _syncDistLabels() {{
+  const layer = _ensureDistLayer();
+  if (!showDistLabels || currentMode !== '3d' || !molViewer.plugin.canvas3d) {{ layer.style.display = 'none'; return; }}
+  layer.style.display = '';
+  const items = _activeInteractions();
+  const wanted = {{}};
+  items.forEach(d => {{ wanted[d.key] = d; }});
+  Object.keys(_distLabelEls).forEach(k => {{ if (!wanted[k]) {{ _distLabelEls[k].remove(); delete _distLabelEls[k]; }} }});
+  const cam = molViewer.plugin.canvas3d.camera;
+  const canvas = document.querySelector('#viewer canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const vrect = document.getElementById('viewer').getBoundingClientRect();
+  const vp = cam.viewport;
+  const sx = rect.width / vp.width, sy = rect.height / vp.height;
+  const ox = rect.left - vrect.left, oy = rect.top - vrect.top;
+  const out = [0, 0, 0, 0];
+  items.forEach(d => {{
+    let el = _distLabelEls[d.key];
+    if (!el) {{ el = document.createElement('div'); el.className = 'distlabel'; layer.appendChild(el); _distLabelEls[d.key] = el; }}
+    el.textContent = d.dist.toFixed(2) + ' \\u00c5';
+    el.style.borderColor = COLORS[d.type] || 'var(--border2)';
+    cam.project(out, d.mid);
+    const px = out[0] * sx + ox, py = rect.height - out[1] * sy + oy;
+    if (px < -60 || py < -30 || px > rect.width + ox + 60 || py > rect.height + oy + 30) el.style.display = 'none';
+    else {{ el.style.display = ''; el.style.left = px + 'px'; el.style.top = py + 'px'; }}
+  }});
+}}
+
+// One rAF drives both the residue-label and distance-label overlays.
+function _overlayActive() {{ return showResLabels || (showDistLabels && currentMode === '3d'); }}
+
+function _overlayLoop() {{
+  if (!_overlayActive()) {{ _labelRaf = null; return; }}
+  _syncResLabels();
+  _syncDistLabels();
+  _labelRaf = requestAnimationFrame(_overlayLoop);
+}}
+
+function _startOverlay() {{ if (!_labelRaf && _overlayActive()) _overlayLoop(); }}
+
+function toggleResLabels() {{
+  showResLabels = !showResLabels;
+  document.getElementById('btn-labels').classList.toggle('active', showResLabels);
+  if (showResLabels) {{
+    _startOverlay();
+  }} else {{
+    Object.values(_resLabelEls).forEach(e => e.remove());
+    _resLabelEls = {{}};
+    const layer = document.getElementById('reslabel-layer');
+    if (layer) layer.style.display = 'none';
+  }}
+}}
+
+// ── Hydrophobicity pocket surface ────────────────────────────────────────
+// A translucent molecular surface over the contact residues, coloured by the
+// Kyte-Doolittle scale (blue = hydrophilic → white → red = hydrophobic). The
+// per-residue value is looked up from CHAIN_MAP via the atom's chain+resi, so
+// no residue-name read off Mol*'s hierarchy is needed.
+const KD_SCALE = {{
+  ILE: 4.5, VAL: 4.2, LEU: 3.8, PHE: 2.8, CYS: 2.5, MET: 1.9, ALA: 1.8,
+  GLY: -0.4, THR: -0.7, SER: -0.8, TRP: -0.9, TYR: -1.3, PRO: -1.6,
+  HIS: -3.2, GLU: -3.5, GLN: -3.5, ASP: -3.5, ASN: -3.5, LYS: -3.9, ARG: -4.5,
+}};
+let showHydro = false;
+let hydroStruct = null;
+let hydroThemeRegistered = false;
+
+function _lerp(a, b, u) {{ return Math.round(a + (b - a) * u); }}
+function _gradBWR(t) {{
+  // blue 0x3b6fe0 -> white 0xeef0f2 -> red 0xe03b3b
+  let r, g, b;
+  if (t < 0.5) {{ const u = t / 0.5; r = _lerp(0x3b, 0xee, u); g = _lerp(0x6f, 0xf0, u); b = _lerp(0xe0, 0xf2, u); }}
+  else {{ const u = (t - 0.5) / 0.5; r = _lerp(0xee, 0xe0, u); g = _lerp(0xf0, 0x3b, u); b = _lerp(0xf2, 0x3b, u); }}
+  return (r << 16) | (g << 8) | b;
+}}
+function _hydroColorAt(loc) {{
+  const cr = _atomChainResi(loc);
+  let kd = 0;
+  if (cr) {{
+    const info = CHAIN_MAP[cr.chain];
+    const it = info && info.items[info.idx[cr.resi]];
+    if (it && KD_SCALE[it.resn] != null) kd = KD_SCALE[it.resn];
+  }}
+  return _gradBWR(Math.max(0, Math.min(1, (kd + 4.5) / 9)));
+}}
+function _hydroThemeFactory(ctx, props) {{
+  return {{ factory: _hydroThemeFactory, granularity: 'group', color: (loc) => _hydroColorAt(loc), props: props || {{}} }};
+}}
+function registerHydroTheme() {{
+  if (hydroThemeRegistered || !molViewer) return;
+  try {{
+    molViewer.plugin.representation.structure.themes.colorThemeRegistry.add({{
+      name: 'ezs-hydro', label: 'Hydrophobicity', category: 'Atom Property',
+      factory: _hydroThemeFactory, getParams: () => ({{}}), defaultValues: {{}}, isApplicable: () => true,
+    }});
+    hydroThemeRegistered = true;
+  }} catch (e) {{ console.warn('hydro theme registration failed:', e); }}
+}}
+
+async function removeHydroSurface() {{
+  if (!hydroStruct || !molViewer) return;
+  try {{ await molViewer.plugin.managers.structure.hierarchy.remove([hydroStruct]); }}
+  catch (e) {{ console.warn('hydro surface removal failed:', e); }}
+  hydroStruct = null;
+}}
+
+async function addHydroSurface() {{
+  if (!currentData || !currentData.residue_pdb || !molViewer) return;
+  const plugin = molViewer.plugin;
+  try {{
+    const data = await plugin.builders.data.rawData({{ data: currentData.residue_pdb, label: 'Pocket surface' }});
+    const traj = await plugin.builders.structure.parseTrajectory(data, 'pdb');
+    const model = await plugin.builders.structure.createModel(traj);
+    const struc = await plugin.builders.structure.createStructure(model);
+    const comp = await plugin.builders.structure.tryCreateComponentStatic(struc, 'all');
+    if (comp) {{
+      const params = {{ type: 'molecular-surface', typeParams: {{ alpha: 0.55, smoothness: 1.5 }} }};
+      if (hydroThemeRegistered) params.color = 'ezs-hydro';
+      else {{ params.color = 'uniform'; params.colorParams = {{ value: 0x9aa4af }}; }}
+      await plugin.builders.structure.representation.addRepresentation(comp, params);
+    }}
+    const all = plugin.managers.structure.hierarchy.current.structures;
+    if (all.length) hydroStruct = all[all.length - 1];
+  }} catch (e) {{ console.warn('hydro surface load failed:', e); }}
+}}
+
+async function toggleHydroSurface() {{
+  showHydro = !showHydro;
+  document.getElementById('btn-hydro').classList.toggle('active', showHydro);
+  if (showHydro) {{
+    if (!currentData || !currentData.residue_pdb) {{
+      showHydro = false;
+      document.getElementById('btn-hydro').classList.remove('active');
+      alert('Select a compound to show its pocket surface.');
+      return;
+    }}
+    if (currentMode !== '3d') switchMode('3d');
+    await addHydroSurface();
+  }} else {{
+    await removeHydroSurface();
+  }}
+}}
+
+function setExportMenuOpen(on) {{
+  exportMenuOpen = on;
+  document.getElementById('export-menu').style.display = on ? '' : 'none';
+  if (on) renderExportMenu();
+}}
+function toggleExportMenu() {{ setExportMenuOpen(!exportMenuOpen); }}
+
 document.addEventListener('click', (e) => {{
   if (viewMenuOpen) {{
     const dd = document.querySelector('.view-dropdown');
@@ -1141,6 +1633,10 @@ document.addEventListener('click', (e) => {{
   if (colorMenuOpen) {{
     const dd = document.getElementById('color-dropdown');
     if (dd && !dd.contains(e.target)) setColorMenuOpen(false);
+  }}
+  if (exportMenuOpen) {{
+    const dd = document.getElementById('export-dropdown');
+    if (dd && !dd.contains(e.target)) setExportMenuOpen(false);
   }}
 }});
 
@@ -1377,6 +1873,8 @@ function switchMode(mode) {{
   document.getElementById('btn-view-current').disabled = !is3d;
   if (!is3d) setViewMenuOpen(false);
   if (!is3d && currentData) draw2DView(currentData, siteMode);
+  // Overlays (residue + distance labels) are 3D-only; restart the loop on 3D.
+  if (typeof _startOverlay === 'function') _startOverlay();
 }}
 
 function setSiteMode(site) {{
@@ -1449,10 +1947,20 @@ function toggleBackground() {{
   if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
 }}
 
+// Distance labels: on the 2D diagram in 2D mode, and as projected chips on each
+// interaction in 3D mode.
 function toggleDistLabels() {{
   showDistLabels = !showDistLabels;
   document.getElementById('btn-dist').classList.toggle('active', showDistLabels);
-  if (currentData && currentMode === '2d') draw2DView(currentData, siteMode);
+  if (currentMode === '2d') {{
+    if (currentData) draw2DView(currentData, siteMode);
+  }} else if (showDistLabels) {{
+    _startOverlay();
+  }} else {{
+    Object.values(_distLabelEls).forEach(e => e.remove());
+    _distLabelEls = {{}};
+    _syncDistLabels();
+  }}
 }}
 
 async function toggleBindings() {{
@@ -1497,12 +2005,21 @@ async function clearAllMeasurements() {{
   }}
 }}
 
+function _measureHint(on) {{
+  let el = document.getElementById('measure-hint');
+  if (!on) {{ if (el) el.remove(); return; }}
+  if (!el) {{ el = document.createElement('div'); el.id = 'measure-hint'; document.getElementById('viewer').appendChild(el); }}
+  el.textContent = 'Measure: click two atoms to drop a distance label · click Measure again to clear';
+}}
+
 async function toggleMeasure() {{
   measureMode = !measureMode;
   document.getElementById('btn-measure').classList.toggle('active', measureMode);
 
   if (measureMode) {{
     if (!molViewer) return;
+    if (currentMode !== '3d') switchMode('3d');
+    _measureHint(true);
     if (measureSub) return;
     // Snapshot the state tree so we can diff on toggle-off and remove
     // anything the measurement system added.
@@ -1549,6 +2066,7 @@ async function toggleMeasure() {{
   }}
 
   // Leaving measure mode: stop listening + drop the user's distance labels.
+  _measureHint(false);
   if (measureSub) {{ measureSub.unsubscribe(); measureSub = null; }}
   measurePicks = [];
   await clearAllMeasurements();
