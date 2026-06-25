@@ -39,6 +39,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+analysis = [
+    "posebusters>=0.3.0",
+    "prolif>=2.0.0",
+    "mdanalysis>=2.7.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
