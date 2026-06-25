@@ -14,7 +14,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Sta
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
-_SKIP_COLS = {"rmsd_lb", "rmsd_ub"}
+_SKIP_COLS = {"rmsd_lb", "rmsd_ub", "pb_valid", "pb_failed"}
 
 
 class ResultsScreen(Screen):
@@ -118,6 +118,10 @@ class ResultsScreen(Screen):
         for h in headers:
             table.add_column(h.replace("_", " ").title())
 
+        has_validity = any("pb_valid" in row for row in rows)
+        if has_validity:
+            table.add_column("Valid")
+
         for i, row in enumerate(rows, 1):
             cells: list = [str(i)]
             for h in headers:
@@ -134,7 +138,17 @@ class ResultsScreen(Screen):
                     cells.append(Text(val, style="#3fb950"))
                 else:
                     cells.append(val)
+            if has_validity:
+                cells.append(self._validity_cell(row.get("pb_valid", "")))
             table.add_row(*cells, key=str(i - 1))
+
+    @staticmethod
+    def _validity_cell(raw: str) -> Text:
+        if raw in ("True", True):
+            return Text("valid", style="#3fb950")
+        if raw in ("False", False):
+            return Text("invalid", style="#f85149")
+        return Text("—", style="#6e7681")
 
     # ------------------------------------------------------------------
     # Events
@@ -158,6 +172,19 @@ class ResultsScreen(Screen):
         if smiles:
             truncated = smiles if len(smiles) <= 38 else smiles[:35] + "..."
             lines += ["", "[#6e7681]SMILES:[/#6e7681]", f"[#8b949e]{truncated}[/#8b949e]"]
+
+        pb_valid = row.get("pb_valid", "")
+        if pb_valid in ("True", "False"):
+            if pb_valid == "True":
+                lines += ["", "[#6e7681]Pose validity:[/#6e7681] [#3fb950]valid[/#3fb950]"]
+            else:
+                failed = row.get("pb_failed", "")
+                checks = failed.replace(";", ", ") if failed else "—"
+                lines += [
+                    "",
+                    "[#6e7681]Pose validity:[/#6e7681] [#f85149]invalid[/#f85149]",
+                    f"[#6e7681]Failed checks:[/#6e7681] [#8b949e]{checks}[/#8b949e]",
+                ]
 
         self.query_one("#compound-info", Static).update("\n".join(lines))
         self.query_one("#btn-3d").display = self._viewer_html() is not None
