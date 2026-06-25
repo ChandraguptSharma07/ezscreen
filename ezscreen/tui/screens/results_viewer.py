@@ -41,6 +41,7 @@ class ResultsScreen(Screen):
         self._annotations: dict[str, dict[str, str]] = {}
         self._selected_idx: int | None = None
         self._flag_col_index: int | None = None
+        self._score_type: str = "vina_kcal_mol"
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -124,6 +125,12 @@ class ResultsScreen(Screen):
         except Exception:
             self._annotations = {}
 
+        try:
+            from ezscreen.results import score_types
+            self._score_type = score_types.read_score_type(self._output)
+        except Exception:
+            self._score_type = "vina_kcal_mol"
+
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
         self.app.call_from_thread(self._refresh_plip_button)
@@ -137,9 +144,14 @@ class ResultsScreen(Screen):
     def _populate_table(self, rows: list[dict], headers: list[str], score_col: str) -> None:
         table = self.query_one("#hits-table", DataTable)
         table.clear(columns=True)
+        from ezscreen.results import score_types
+        score_label = score_types.label(self._score_type)
         table.add_column("#", width=4)
         for h in headers:
-            table.add_column(h.replace("_", " ").title())
+            if h == score_col:
+                table.add_column(score_label)
+            else:
+                table.add_column(h.replace("_", " ").title())
 
         has_validity = any("pb_valid" in row for row in rows)
         if has_validity:
@@ -211,10 +223,14 @@ class ResultsScreen(Screen):
         smiles = row.get("smiles", "")
         ann    = self._annotations.get(self._compound_id(row), {})
 
+        from ezscreen.results import score_types
+        unit = score_types.unit(self._score_type)
+        unit_str = f" {unit}" if unit else ""
         lines = [
             f"[bold #f0f6fc]{name}[/bold #f0f6fc]",
             "",
-            f"[#6e7681]Score:[/#6e7681]  [bold #79c0ff]{score} kcal/mol[/bold #79c0ff]",
+            f"[#6e7681]Score:[/#6e7681]  [bold #79c0ff]{score}{unit_str}[/bold #79c0ff]",
+            f"[#6e7681]{score_types.label(self._score_type)} — {score_types.describe(self._score_type)}[/#6e7681]",
         ]
         if smiles:
             truncated = smiles if len(smiles) <= 38 else smiles[:35] + "..."
