@@ -298,6 +298,76 @@ def _cluster_section_html(
     return summary + '<div class="structs">' + "\n".join(cards) + "</div>"
 
 
+def _failed_checks_bar_b64(counts: dict[str, int]) -> str:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    items = sorted(counts.items(), key=lambda x: -x[1])
+    labels = [k for k, _ in items]
+    values = [v for _, v in items]
+
+    fig, ax = plt.subplots(figsize=(6, max(2.5, 0.4 * len(labels))))
+    ax.barh(labels, values, color="#b3433b")
+    ax.invert_yaxis()
+    ax.set_xlabel("Poses failing")
+    ax.set_title("Most frequent failed checks")
+    fig.tight_layout()
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=120)
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _pose_validity_section_html(rows: list[dict]) -> str:
+    has_data = any("pb_valid" in r and r.get("pb_valid") not in ("", None) for r in rows)
+    if not has_data:
+        return ""
+
+    n_valid = sum(1 for r in rows if r.get("pb_valid") == "True")
+    n_invalid = sum(1 for r in rows if r.get("pb_valid") == "False")
+
+    check_counts: dict[str, int] = {}
+    invalid_ids: list[str] = []
+    for r in rows:
+        if r.get("pb_valid") != "False":
+            continue
+        invalid_ids.append(r.get("name") or r.get("ligand", "—"))
+        for chk in (r.get("pb_failed", "") or "").split(";"):
+            chk = chk.strip()
+            if chk:
+                check_counts[chk] = check_counts.get(chk, 0) + 1
+
+    badges = (
+        f'<div class="metrics">'
+        f'<div class="badge"><div class="value">{n_valid}</div><div class="label">Valid poses</div></div>'
+        f'<div class="badge"><div class="value">{n_invalid}</div><div class="label">Invalid poses</div></div>'
+        f"</div>"
+    )
+
+    bar_html = ""
+    if check_counts:
+        bar_html = (
+            f'<img src="data:image/png;base64,{_failed_checks_bar_b64(check_counts)}" '
+            f'alt="Failed checks">'
+        )
+
+    invalid_html = ""
+    if invalid_ids:
+        items = ", ".join(invalid_ids[:50])
+        more = f" &nbsp;(+{len(invalid_ids) - 50} more)" if len(invalid_ids) > 50 else ""
+        invalid_html = (
+            f'<p class="note"><b>Invalid compounds:</b> {items}{more}</p>'
+        )
+
+    note = (
+        '<p class="note">Pose validity from PoseBusters (dock config) — geometry, '
+        "internal energy, and protein clash checks. Invalid poses fail one or more checks.</p>"
+    )
+    return badges + bar_html + invalid_html + note
+
+
 def _interactions_heatmap_html(
     interactions: dict[str, dict[str, dict[str, int]]],
 ) -> str:
@@ -403,9 +473,13 @@ def write_results_report(
         if b64:
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
+    validity_html  = _pose_validity_section_html(rows)
     cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
     interactions_html = _interactions_heatmap_html(interactions) if interactions else ""
 
+    validity_section = (
+        f"\n<h2>Pose Validity</h2>\n{validity_html}" if validity_html else ""
+    )
     cluster_section = (
         f"\n<h2>Scaffold Clusters</h2>\n{cluster_html}" if cluster_html else ""
     )
@@ -433,6 +507,7 @@ def write_results_report(
 <div class="structs">
 {structs_html}
 </div>
+{validity_section}
 {cluster_section}
 {interactions_section}
 </body></html>
