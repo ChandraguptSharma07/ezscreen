@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS shards (
     updated_at    TEXT,
     UNIQUE(run_id, shard_index)
 );
+
+CREATE TABLE IF NOT EXISTS annotations (
+    run_id      TEXT NOT NULL,
+    compound_id TEXT NOT NULL,
+    flag        TEXT DEFAULT '',
+    note        TEXT DEFAULT '',
+    updated_at  TEXT,
+    PRIMARY KEY (run_id, compound_id)
+);
 """
 
 
@@ -185,3 +194,29 @@ def get_failed_shards(run_id: str) -> list[dict[str, Any]]:
             (run_id,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Hit annotations — flags + notes
+# ---------------------------------------------------------------------------
+
+def set_annotation(run_id: str, compound_id: str, flag: str = "", note: str = "") -> None:
+    """Upsert a flag (one of '', 'green', 'yellow', 'red') and note for a compound."""
+    with _connection() as conn:
+        conn.execute(
+            "INSERT INTO annotations (run_id, compound_id, flag, note, updated_at) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(run_id, compound_id) DO UPDATE SET "
+            "flag = excluded.flag, note = excluded.note, updated_at = excluded.updated_at",
+            (run_id, compound_id, flag, note, _now()),
+        )
+
+
+def get_annotations(run_id: str) -> dict[str, dict[str, str]]:
+    """Return {compound_id: {'flag': ..., 'note': ...}} for a run; {} when none."""
+    with _connection() as conn:
+        rows = conn.execute(
+            "SELECT compound_id, flag, note FROM annotations WHERE run_id = ?",
+            (run_id,),
+        ).fetchall()
+    return {r["compound_id"]: {"flag": r["flag"] or "", "note": r["note"] or ""} for r in rows}
