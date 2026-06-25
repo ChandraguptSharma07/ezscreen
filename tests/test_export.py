@@ -50,6 +50,33 @@ def test_export_xlsx_round_trip(tmp_path):
     assert ws.cell(row=2, column=score_idx).value == -9.5
 
 
+def test_export_xlsx_limit(tmp_path):
+    from openpyxl import load_workbook
+
+    scores = tmp_path / "scores.csv"
+    _write_scores(scores)
+    out = export_xlsx(scores, tmp_path / "hits.xlsx", limit=1)
+
+    wb = load_workbook(out)
+    ws = wb.active
+    assert ws.max_row == 2  # header + 1 data row
+    # the kept row is the best (first) one
+    name_idx = _HEADERS.index("name") + 1
+    assert ws.cell(row=2, column=name_idx).value == "alpha"
+
+
+def test_export_sdf_limit(tmp_path):
+    scores = tmp_path / "scores.csv"
+    poses = tmp_path / "poses.sdf"
+    _write_scores(scores)
+    _write_poses(poses)
+
+    out = export_sdf(poses, scores, tmp_path / "hits.sdf", limit=1)
+    mols = [m for m in Chem.SDMolSupplier(str(out)) if m is not None]
+    assert len(mols) == 1
+    assert mols[0].GetProp("name") == "alpha"
+
+
 def test_export_sdf_attaches_scores(tmp_path):
     scores = tmp_path / "scores.csv"
     poses = tmp_path / "poses.sdf"
