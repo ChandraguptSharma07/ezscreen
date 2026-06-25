@@ -368,6 +368,43 @@ def _pose_validity_section_html(rows: list[dict]) -> str:
     return badges + bar_html + invalid_html + note
 
 
+_FLAG_HEX = {"green": "#3fb950", "yellow": "#e3b341", "red": "#f85149"}
+
+
+def _annotations_section_html(rows: list[dict], annotations: dict[str, dict]) -> str:
+    if not annotations:
+        return ""
+
+    def _cid(row: dict) -> str:
+        return row.get("ligand") or row.get("name") or ""
+
+    score_col = _detect_score_col(list(rows[0].keys())) if rows else ""
+    trs = []
+    for i, row in enumerate(rows, 1):
+        ann = annotations.get(_cid(row))
+        if not ann or (not ann.get("flag") and not ann.get("note")):
+            continue
+        flag = ann.get("flag", "")
+        hex_ = _FLAG_HEX.get(flag)
+        swatch = (
+            f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+            f'background:{hex_}"></span> {flag}'
+            if hex_ else "—"
+        )
+        name  = row.get("name") or row.get("ligand", "—")
+        score = row.get(score_col, "—")
+        note  = (ann.get("note") or "").replace("<", "&lt;").replace(">", "&gt;")
+        trs.append(
+            f"<tr><td>{i}</td><td>{name}</td><td>{score}</td>"
+            f"<td>{swatch}</td><td>{note}</td></tr>"
+        )
+
+    if not trs:
+        return ""
+    header = "<tr><th>#</th><th>Compound</th><th>Score</th><th>Flag</th><th>Note</th></tr>"
+    return f"<table>{header}{''.join(trs)}</table>"
+
+
 def _interactions_heatmap_html(
     interactions: dict[str, dict[str, dict[str, int]]],
 ) -> str:
@@ -434,6 +471,7 @@ def write_results_report(
     metadata: dict | None = None,
     cluster: bool = True,
     interactions: dict | None = None,
+    annotations: dict | None = None,
 ) -> Path:
     metadata = metadata or {}
 
@@ -474,11 +512,15 @@ def write_results_report(
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
     validity_html  = _pose_validity_section_html(rows)
+    annotations_html = _annotations_section_html(rows, annotations or {})
     cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
     interactions_html = _interactions_heatmap_html(interactions) if interactions else ""
 
     validity_section = (
         f"\n<h2>Pose Validity</h2>\n{validity_html}" if validity_html else ""
+    )
+    annotations_section = (
+        f"\n<h2>Flagged Hits</h2>\n{annotations_html}" if annotations_html else ""
     )
     cluster_section = (
         f"\n<h2>Scaffold Clusters</h2>\n{cluster_html}" if cluster_html else ""
@@ -508,6 +550,7 @@ def write_results_report(
 {structs_html}
 </div>
 {validity_section}
+{annotations_section}
 {cluster_section}
 {interactions_section}
 </body></html>
