@@ -9,12 +9,17 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
 _SKIP_COLS = {"rmsd_lb", "rmsd_ub", "pb_valid", "pb_failed"}
+
+# none -> green -> yellow -> red -> none
+_FLAG_CYCLE = ["", "green", "yellow", "red"]
+_FLAG_HEX = {"green": "#3fb950", "yellow": "#e3b341", "red": "#f85149"}
 
 
 class ResultsScreen(Screen):
@@ -23,6 +28,7 @@ class ResultsScreen(Screen):
     BINDINGS = [
         Binding("escape", "app.pop_screen", "Back"),
         Binding("o", "open_viewer", "Open 3D Viewer"),
+        Binding("f", "cycle_flag", "Flag"),
     ]
 
     def __init__(self, run_id: str) -> None:
@@ -32,6 +38,9 @@ class ResultsScreen(Screen):
         self._rows:  list[dict] = []
         self._headers: list[str] = []
         self._score_col: str = ""
+        self._annotations: dict[str, dict[str, str]] = {}
+        self._selected_idx: int | None = None
+        self._flag_col_index: int | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -46,6 +55,7 @@ class ResultsScreen(Screen):
                     "[#6e7681]Select a hit to see details.[/#6e7681]",
                     id="compound-info",
                 )
+                yield Input(placeholder="Note (press f to flag) — Enter to save", id="note-input")
                 yield Button("Open 3D Viewer",        id="btn-3d",        variant="default")
                 yield Button("Open Report",            id="btn-report",    variant="default")
                 yield Button("Copy Methods",           id="btn-methods",   variant="default")
@@ -65,6 +75,7 @@ class ResultsScreen(Screen):
 
     def on_mount(self) -> None:
         self.query_one("#btn-3d").display      = False
+        self.query_one("#note-input").display  = False
         self.query_one("#btn-report").display  = False
         self.query_one("#btn-methods").display = False
         self.query_one("#export-count").display = False
@@ -107,6 +118,12 @@ class ResultsScreen(Screen):
         self._headers   = headers
         self._score_col = score_col
 
+        try:
+            from ezscreen import checkpoint
+            self._annotations = checkpoint.get_annotations(self._run_id)
+        except Exception:
+            self._annotations = {}
+
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
         self.app.call_from_thread(self._refresh_plip_button)
@@ -127,6 +144,8 @@ class ResultsScreen(Screen):
         has_validity = any("pb_valid" in row for row in rows)
         if has_validity:
             table.add_column("Valid")
+        table.add_column("Flag")
+        self._flag_col_index = 1 + len(headers) + (1 if has_validity else 0)
 
         for i, row in enumerate(rows, 1):
             cells: list = [str(i)]
@@ -146,6 +165,8 @@ class ResultsScreen(Screen):
                     cells.append(val)
             if has_validity:
                 cells.append(self._validity_cell(row.get("pb_valid", "")))
+            cid = self._compound_id(row)
+            cells.append(self._flag_cell(self._annotations.get(cid, {}).get("flag", "")))
             table.add_row(*cells, key=str(i - 1))
 
     @staticmethod
@@ -156,6 +177,17 @@ class ResultsScreen(Screen):
             return Text("invalid", style="#f85149")
         return Text("—", style="#6e7681")
 
+    @staticmethod
+    def _compound_id(row: dict) -> str:
+        return row.get("ligand") or row.get("name") or ""
+
+    @staticmethod
+    def _flag_cell(flag: str) -> Text:
+        hex_ = _FLAG_HEX.get(flag)
+        if hex_:
+            return Text("●", style=hex_)
+        return Text("·", style="#484f58")
+
     # ------------------------------------------------------------------
     # Events
     # ------------------------------------------------------------------
@@ -164,11 +196,20 @@ class ResultsScreen(Screen):
         idx = int(event.row_key.value) if event.row_key else None
         if idx is None or idx >= len(self._rows):
             return
+        self._selected_idx = idx
+        row = self._rows[idx]
+        cid = self._compound_id(row)
+        note_input = self.query_one("#note-input", Input)
+        note_input.display = True
+        note_input.value = self._annotations.get(cid, {}).get("note", "")
+        self._render_detail(idx)
 
+    def _render_detail(self, idx: int) -> None:
         row    = self._rows[idx]
         name   = row.get("name") or row.get("ligand", "—")
         score  = row.get(self._score_col, "—") if self._score_col else "—"
         smiles = row.get("smiles", "")
+        ann    = self._annotations.get(self._compound_id(row), {})
 
         lines = [
             f"[bold #f0f6fc]{name}[/bold #f0f6fc]",
@@ -192,8 +233,61 @@ class ResultsScreen(Screen):
                     f"[#6e7681]Failed checks:[/#6e7681] [#8b949e]{checks}[/#8b949e]",
                 ]
 
+        flag = ann.get("flag", "")
+        flag_hex = _FLAG_HEX.get(flag)
+        flag_label = f"[{flag_hex}]{flag}[/{flag_hex}]" if flag_hex else "[#6e7681]none[/#6e7681]"
+        lines += ["", f"[#6e7681]Flag (press f):[/#6e7681] {flag_label}"]
+
         self.query_one("#compound-info", Static).update("\n".join(lines))
         self.query_one("#btn-3d").display = self._viewer_html() is not None
+
+    def action_cycle_flag(self) -> None:
+        idx = self._selected_idx
+        if idx is None or idx >= len(self._rows):
+            self.app.notify("Select a hit first, then press f to flag.", timeout=3)
+            return
+        row = self._rows[idx]
+        cid = self._compound_id(row)
+        if not cid:
+            return
+        current = self._annotations.get(cid, {}).get("flag", "")
+        nxt = _FLAG_CYCLE[(_FLAG_CYCLE.index(current) + 1) % len(_FLAG_CYCLE)] if current in _FLAG_CYCLE else "green"
+        note = self._annotations.get(cid, {}).get("note", "")
+        self._persist_annotation(cid, nxt, note)
+
+        # repaint the flag cell for the cursor row
+        table = self.query_one("#hits-table", DataTable)
+        if self._flag_col_index is not None:
+            try:
+                table.update_cell_at(
+                    Coordinate(table.cursor_row, self._flag_col_index),
+                    self._flag_cell(nxt),
+                )
+            except Exception:
+                pass
+        # refresh the detail flag line
+        self._render_detail(idx)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id != "note-input":
+            return
+        idx = self._selected_idx
+        if idx is None or idx >= len(self._rows):
+            return
+        cid = self._compound_id(self._rows[idx])
+        if not cid:
+            return
+        flag = self._annotations.get(cid, {}).get("flag", "")
+        self._persist_annotation(cid, flag, event.value)
+        self.app.notify("Note saved.", timeout=2)
+
+    def _persist_annotation(self, cid: str, flag: str, note: str) -> None:
+        self._annotations[cid] = {"flag": flag, "note": note}
+        try:
+            from ezscreen import checkpoint
+            checkpoint.set_annotation(self._run_id, cid, flag, note)
+        except Exception as exc:
+            self.app.notify(f"Could not save annotation: {exc}", severity="error", timeout=5)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-3d":
@@ -241,18 +335,23 @@ class ResultsScreen(Screen):
             return
 
         report = self._report_path()
-        if report.exists():
+        # Regenerate when the run has annotations so freshly-set flags/notes appear;
+        # otherwise reuse the cached report (generation is matplotlib-heavy).
+        if report.exists() and not self._annotations:
             webbrowser.open(report.as_uri())
             self.app.notify("Report opened in browser.", timeout=3)
             return
 
         self.app.notify("Generating report...", timeout=3)
         self.query_one("#btn-report").disabled = True
+        annotations = dict(self._annotations)
 
         def _worker() -> None:
             from ezscreen.results.report_html import write_results_report
             try:
-                write_results_report(scores_csv, report, run_id=self._run_id)
+                write_results_report(
+                    scores_csv, report, run_id=self._run_id, annotations=annotations,
+                )
                 self.app.call_from_thread(self._on_report_ready, report)
             except Exception as exc:
                 self.app.call_from_thread(
