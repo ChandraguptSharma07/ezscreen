@@ -155,14 +155,14 @@ def _compute_props(smiles_list: list[str]) -> list[dict]:
     return out
 
 
-def _score_histogram_b64(scores: list[float], score_col: str) -> str:
+def _score_histogram_b64(scores: list[float], score_col: str, score_label: str | None = None) -> str:
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(5, 3.5))
     ax.hist(scores, bins=40, color="#2c5f8a", edgecolor="#1a3a5c", alpha=0.85)
-    ax.set_xlabel(score_col.replace("_", " ").title())
+    ax.set_xlabel(score_label or score_col.replace("_", " ").title())
     ax.set_ylabel("Count")
     ax.set_title("Score Distribution")
     fig.tight_layout()
@@ -178,6 +178,7 @@ def _scatter_b64(
     prop_vals: list[float],
     prop_name: str,
     score_col: str,
+    score_label: str | None = None,
 ) -> str:
     import matplotlib
     matplotlib.use("Agg")
@@ -191,7 +192,7 @@ def _scatter_b64(
     fig, ax = plt.subplots(figsize=(5, 3.5))
     ax.scatter(ys, xs, alpha=0.4, s=12, color="#2c5f8a")
     ax.set_xlabel(prop_name)
-    ax.set_ylabel(score_col.replace("_", " ").title())
+    ax.set_ylabel(score_label or score_col.replace("_", " ").title())
     ax.set_title(f"Score vs {prop_name}")
     fig.tight_layout()
 
@@ -501,9 +502,12 @@ def write_results_report(
     mw_vals     = [p.get("mw") for p in props]
     logp_vals   = [p.get("logp") for p in props]
 
-    hist_b64    = _score_histogram_b64(scores, score_col) if scores else ""
-    mw_b64      = _scatter_b64(scores, mw_vals,   "MW (Da)",   score_col)
-    logp_b64    = _scatter_b64(scores, logp_vals,  "LogP",      score_col)
+    from ezscreen.results import score_types
+    score_label = score_types.label(score_types.read_score_type(scores_csv.parent))
+
+    hist_b64    = _score_histogram_b64(scores, score_col, score_label) if scores else ""
+    mw_b64      = _scatter_b64(scores, mw_vals,   "MW (Da)",   score_col, score_label)
+    logp_b64    = _scatter_b64(scores, logp_vals,  "LogP",      score_col, score_label)
     structs_html = _struct_cards_html(rows, score_col)
 
     plots_html = ""
