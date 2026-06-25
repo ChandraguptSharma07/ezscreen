@@ -48,6 +48,7 @@ class ResultsScreen(Screen):
                 )
                 yield Button("Open 3D Viewer",        id="btn-3d",        variant="default")
                 yield Button("Open Report",            id="btn-report",    variant="default")
+                yield Button("Export Hits",            id="btn-export",    variant="default")
                 yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
                 yield Button("Analyse Interactions",   id="btn-plip",      variant="default")
                 yield Static("", id="cluster-result")
@@ -63,6 +64,7 @@ class ResultsScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#btn-3d").display      = False
         self.query_one("#btn-report").display  = False
+        self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
         self.query_one("#btn-plip").display    = False
         table = self.query_one("#hits-table", DataTable)
@@ -194,6 +196,8 @@ class ResultsScreen(Screen):
             self.action_open_viewer()
         elif event.button.id == "btn-report":
             self._open_report()
+        elif event.button.id == "btn-export":
+            self._run_export()
         elif event.button.id == "btn-cluster":
             self._run_clustering()
         elif event.button.id == "btn-plip":
@@ -216,6 +220,7 @@ class ResultsScreen(Screen):
     def _refresh_report_button(self) -> None:
         has_results = (self._output / "scores.csv").exists()
         self.query_one("#btn-report").display  = has_results
+        self.query_one("#btn-export").display  = has_results
         self.query_one("#btn-cluster").display = has_results
 
     def _report_path(self) -> Path:
@@ -259,6 +264,40 @@ class ResultsScreen(Screen):
         self.query_one("#btn-report").disabled = False
         webbrowser.open(report.as_uri())
         self.app.notify("Report opened in browser.", timeout=3)
+
+    def _run_export(self) -> None:
+        scores_csv = self._output / "scores.csv"
+        if not scores_csv.exists():
+            self.app.notify("No docking results found for this run.", severity="error", timeout=5)
+            return
+
+        self.query_one("#btn-export").disabled = True
+        self.app.notify("Exporting hits...", timeout=3)
+
+        poses_sdf  = self._output / "poses.sdf"
+        out_xlsx   = self._output / "hits.xlsx"
+        out_sdf    = self._output / "hits.sdf"
+
+        def _worker() -> None:
+            from ezscreen.results.export import export_sdf, export_xlsx
+            try:
+                export_xlsx(scores_csv, out_xlsx)
+                if poses_sdf.exists():
+                    export_sdf(poses_sdf, scores_csv, out_sdf)
+                self.app.call_from_thread(self._on_export_done, out_xlsx)
+            except Exception as exc:
+                self.app.call_from_thread(self._on_export_error, str(exc))
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_export_done(self, out_xlsx: Path) -> None:
+        self.query_one("#btn-export").disabled = False
+        self.app.notify(f"Exported to {out_xlsx.parent}", timeout=5)
+
+    def _on_export_error(self, msg: str) -> None:
+        self.query_one("#btn-export").disabled = False
+        self.app.notify(f"Export failed: {msg}", severity="error", timeout=8)
 
     def _run_clustering(self) -> None:
         if not self._rows:
