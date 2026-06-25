@@ -123,3 +123,35 @@ def test_increment_shard_retry():
     count2 = cp.increment_shard_retry("run-r", 0)
     assert count1 == 1
     assert count2 == 2
+
+
+# ---------------------------------------------------------------------------
+# annotations — flags + notes
+# ---------------------------------------------------------------------------
+
+def test_get_annotations_empty_for_unannotated_run():
+    cp.create_run("run-a", {}, 10)
+    assert cp.get_annotations("run-a") == {}
+
+
+def test_set_and_get_annotation_round_trip():
+    cp.create_run("run-a2", {}, 10)
+    cp.set_annotation("run-a2", "ligX", flag="green", note="promising")
+    anns = cp.get_annotations("run-a2")
+    assert anns == {"ligX": {"flag": "green", "note": "promising"}}
+
+
+def test_set_annotation_upsert_overwrites():
+    cp.create_run("run-a3", {}, 10)
+    cp.set_annotation("run-a3", "ligY", flag="green", note="first")
+    cp.set_annotation("run-a3", "ligY", flag="red", note="second")
+    anns = cp.get_annotations("run-a3")
+    assert anns["ligY"] == {"flag": "red", "note": "second"}
+    assert len(anns) == 1
+
+
+def test_annotations_isolated_per_run():
+    cp.create_run("run-a4", {}, 10)
+    cp.create_run("run-a5", {}, 10)
+    cp.set_annotation("run-a4", "lig1", flag="yellow")
+    assert cp.get_annotations("run-a5") == {}
