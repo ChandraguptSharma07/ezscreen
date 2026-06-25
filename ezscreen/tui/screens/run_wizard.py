@@ -884,6 +884,16 @@ class RunWizardScreen(Screen):
                 else:
                     checkpoint.mark_run_complete(run_id)
                     log(f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]")
+                try:
+                    from ezscreen.results.methods import (
+                        run_meta_from_checkpoint,
+                        write_methods,
+                    )
+                    _rm = run_meta_from_checkpoint(run_id)
+                    if _rm and result.get("output_dir"):
+                        write_methods(_rm, Path(result["output_dir"]))
+                except Exception:
+                    pass
                 self.app.call_from_thread(self._on_complete, run_id)
             else:
                 checkpoint.mark_run_failed(run_id)
