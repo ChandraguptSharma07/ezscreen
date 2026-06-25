@@ -48,6 +48,7 @@ class ResultsScreen(Screen):
                 )
                 yield Button("Open 3D Viewer",        id="btn-3d",        variant="default")
                 yield Button("Open Report",            id="btn-report",    variant="default")
+                yield Input(placeholder="Export top N (blank = all)", id="export-count")
                 yield Button("Export Hits",            id="btn-export",    variant="default")
                 yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
                 yield Button("Analyse Interactions",   id="btn-plip",      variant="default")
@@ -64,6 +65,7 @@ class ResultsScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#btn-3d").display      = False
         self.query_one("#btn-report").display  = False
+        self.query_one("#export-count").display = False
         self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
         self.query_one("#btn-plip").display    = False
@@ -220,6 +222,7 @@ class ResultsScreen(Screen):
     def _refresh_report_button(self) -> None:
         has_results = (self._output / "scores.csv").exists()
         self.query_one("#btn-report").display  = has_results
+        self.query_one("#export-count").display = has_results
         self.query_one("#btn-export").display  = has_results
         self.query_one("#btn-cluster").display = has_results
 
@@ -271,6 +274,8 @@ class ResultsScreen(Screen):
             self.app.notify("No docking results found for this run.", severity="error", timeout=5)
             return
 
+        limit = self._parse_export_count()
+
         self.query_one("#btn-export").disabled = True
         self.app.notify("Exporting hits...", timeout=3)
 
@@ -281,19 +286,28 @@ class ResultsScreen(Screen):
         def _worker() -> None:
             from ezscreen.results.export import export_sdf, export_xlsx
             try:
-                export_xlsx(scores_csv, out_xlsx)
+                export_xlsx(scores_csv, out_xlsx, limit=limit)
                 if poses_sdf.exists():
-                    export_sdf(poses_sdf, scores_csv, out_sdf)
-                self.app.call_from_thread(self._on_export_done, out_xlsx)
+                    export_sdf(poses_sdf, scores_csv, out_sdf, limit=limit)
+                self.app.call_from_thread(self._on_export_done, out_xlsx, limit)
             except Exception as exc:
                 self.app.call_from_thread(self._on_export_error, str(exc))
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
 
-    def _on_export_done(self, out_xlsx: Path) -> None:
+    def _parse_export_count(self) -> int | None:
+        raw = self.query_one("#export-count", Input).value.strip()
+        try:
+            n = int(raw)
+        except ValueError:
+            return None
+        return n if n > 0 else None
+
+    def _on_export_done(self, out_xlsx: Path, limit: int | None) -> None:
         self.query_one("#btn-export").disabled = False
-        self.app.notify(f"Exported to {out_xlsx.parent}", timeout=5)
+        scope = f"top {limit}" if limit else "all hits"
+        self.app.notify(f"Exported {scope} to {out_xlsx.parent}", timeout=5)
 
     def _on_export_error(self, msg: str) -> None:
         self.query_one("#btn-export").disabled = False
