@@ -41,6 +41,7 @@ DEFAULTS: dict[str, Any] = {
     },
     "results": {
         "interaction_top_n": 20,
+        "poses_returned": 25,
     },
 }
 

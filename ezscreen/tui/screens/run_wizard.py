@@ -859,6 +859,7 @@ class RunWizardScreen(Screen):
                         max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                         max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                         mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
+                        poses_returned=int(cfg.get("results", {}).get("poses_returned", 25)),
                         gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4" else "",
                     )
                     notebook_path = work_dir / "notebook.ipynb"

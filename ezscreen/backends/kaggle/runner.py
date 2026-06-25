@@ -646,9 +646,12 @@ def run_multi_account_screening(
 
     try:
         from ezscreen import config as _cfg
-        _prep_cfg = _cfg.load().get("prep", {})
+        _full_cfg = _cfg.load()
+        _prep_cfg = _full_cfg.get("prep", {})
+        _results_cfg = _full_cfg.get("results", {})
     except Exception:
         _prep_cfg = {}
+        _results_cfg = {}
 
     submissions: list[dict] = []
     for spec in account_specs:
@@ -682,6 +685,7 @@ def run_multi_account_screening(
                 max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                 max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                 mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
+                poses_returned=int(_results_cfg.get("poses_returned", 25)),
                 gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
             )
             nb_path = nb_dir / "notebook.ipynb"
