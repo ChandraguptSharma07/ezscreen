@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.11.0 — 2026-06-26
+
+> Theme: trust the results. Quality and export features that run locally and post-run on a run's existing `scores.csv` / `poses.sdf` — no Kaggle kernel, no extra GPU cost.
+
+### Added
+
+- **Pose validity gate (PoseBusters)** — every docked pose is checked against PoseBusters' "dock" geometry/energy/clash checks; the results viewer shows a green/red **Valid** column (with the failed checks per compound), and the HTML report gets a Pose Validity section (valid/invalid counts + a bar of the most frequent failed checks). Requires the optional `analysis` extra; degrades gracefully when absent
+- **Excel + SDF export** — an "Export Hits" button writes `hits.xlsx` (styled: frozen header, numeric score, amber high-LE cells) and `hits.sdf` (poses with score/LE/BEI and other fields as SD properties) into the run output dir
+- **Export count selector** — an "Export top N" field; the xlsx honours any N (the full scores list is local and cheap), the sdf is bounded by the poses actually returned
+- **Configurable poses-return cap** — the number of 3D poses brought back per shard from Kaggle (previously hardcoded at 25) is now a `[results] poses_returned` setting, exposed in Settings — the lever for trading 3D detail against transfer cost
+- **Methods paragraph** — a "Copy Methods" button generates a publication-ready Methods paragraph (receptor/AlphaFold + chains, pocket method + box, prep, ADMET, engine + search depth, with tool citations) from the run's metadata; also written to `methods.txt` on completion
+- **Hit flags + notes** — flag any hit green/yellow/red (press `f`) and attach a note; persisted per run in the checkpoint DB and surfaced as a Flagged Hits section in the HTML report
+- **Score-type-aware results** — merged runs record their native score type in a `results_meta.json` sidecar; the viewer's score column and the report's score axes are labelled accordingly (Vina kcal/mol today; the seam for GNINA/DiffDock score types later)
+
+### Changed
+
+- `openpyxl` is now a core dependency (Excel export). PoseBusters/ProLIF/MDAnalysis live in a new optional `analysis` extra — install with `pip install ezscreen[analysis]`
+
 ## v1.10.1 — 2026-06-24
 
 ### Added
