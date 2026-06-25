@@ -48,6 +48,7 @@ class ResultsScreen(Screen):
                 )
                 yield Button("Open 3D Viewer",        id="btn-3d",        variant="default")
                 yield Button("Open Report",            id="btn-report",    variant="default")
+                yield Button("Copy Methods",           id="btn-methods",   variant="default")
                 yield Input(placeholder="Export top N (blank = all)", id="export-count")
                 yield Button("Export Hits",            id="btn-export",    variant="default")
                 yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
@@ -65,6 +66,7 @@ class ResultsScreen(Screen):
     def on_mount(self) -> None:
         self.query_one("#btn-3d").display      = False
         self.query_one("#btn-report").display  = False
+        self.query_one("#btn-methods").display = False
         self.query_one("#export-count").display = False
         self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
@@ -198,6 +200,8 @@ class ResultsScreen(Screen):
             self.action_open_viewer()
         elif event.button.id == "btn-report":
             self._open_report()
+        elif event.button.id == "btn-methods":
+            self._copy_methods()
         elif event.button.id == "btn-export":
             self._run_export()
         elif event.button.id == "btn-cluster":
@@ -222,6 +226,7 @@ class ResultsScreen(Screen):
     def _refresh_report_button(self) -> None:
         has_results = (self._output / "scores.csv").exists()
         self.query_one("#btn-report").display  = has_results
+        self.query_one("#btn-methods").display = has_results
         self.query_one("#export-count").display = has_results
         self.query_one("#btn-export").display  = has_results
         self.query_one("#btn-cluster").display = has_results
@@ -267,6 +272,40 @@ class ResultsScreen(Screen):
         self.query_one("#btn-report").disabled = False
         webbrowser.open(report.as_uri())
         self.app.notify("Report opened in browser.", timeout=3)
+
+    def _copy_methods(self) -> None:
+        from ezscreen.results.methods import (
+            build_methods_text,
+            run_meta_from_checkpoint,
+        )
+
+        methods_file = self._output / "methods.txt"
+        text: str | None = None
+        if methods_file.exists():
+            text = methods_file.read_text(encoding="utf-8")
+        else:
+            run_meta = run_meta_from_checkpoint(self._run_id)
+            if run_meta:
+                text = build_methods_text(run_meta)
+                try:
+                    self._output.mkdir(parents=True, exist_ok=True)
+                    methods_file.write_text(text, encoding="utf-8")
+                except Exception:
+                    pass
+
+        if not text:
+            self.app.notify("Methods unavailable — run metadata not found.", severity="error", timeout=5)
+            return
+
+        try:
+            import subprocess
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "$input | Set-Clipboard"],
+                input=text, text=True, timeout=5,
+            )
+            self.app.notify(f"Methods copied to clipboard (also saved to {methods_file.name}).", timeout=5)
+        except Exception:
+            self.app.notify(f"Methods saved to {methods_file}", timeout=6)
 
     def _run_export(self) -> None:
         scores_csv = self._output / "scores.csv"
