@@ -357,12 +357,22 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
     reason_counts["no_pose"] = sum(1 for lid in index if lid not in all_accounted)
     reason_counts["gpu_size_filter"] = len(gpu_filtered)
 
+    # Record the native score type so the viewer/report can label the scale.
+    # Default is Vina kcal/mol; the engine selector (Phase 32) will set this per engine.
+    import json
+
+    from ezscreen.results.score_types import DEFAULT_SCORE_TYPE
+    (output_dir / "results_meta.json").write_text(
+        json.dumps({"score_type": DEFAULT_SCORE_TYPE, "score_col": score_col}, indent=2)
+    )
+
     return {
         "scores_csv": scores_out,
         "poses_sdf": poses_out,
         "failed_prep_sdf": failed_out if has_failures else None,
         "total_hits": len(deduped),
         "score_col": score_col,
+        "score_type": DEFAULT_SCORE_TYPE,
         "unscored_reasons_csv": reasons_out,
         "unscored_reason_counts": reason_counts,
     }
