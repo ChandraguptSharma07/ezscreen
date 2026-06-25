@@ -71,6 +71,64 @@ def _add_efficiency_cols(
     return rows, new_fields
 
 
+def _find_receptor_pdb(output_dir: Path) -> Path | None:
+    """Locate the prepared receptor PDB for a run, checking the known locations."""
+    work_dir = output_dir.parent
+    resume = work_dir / "resume.json"
+    if resume.exists():
+        try:
+            import json
+            info = json.loads(resume.read_text())
+            p = info.get("receptor_pdb")
+            if p and Path(p).exists():
+                return Path(p)
+        except Exception:
+            pass
+    for cand in (
+        work_dir / "receptor" / "receptor_prep.pdb",
+        output_dir / "receptor_prep.pdb",
+    ):
+        if cand.exists():
+            return cand
+    return None
+
+
+def _add_pose_validity_cols(
+    rows: list[dict],
+    fieldnames: list[str],
+    poses_sdf: Path,
+    output_dir: Path,
+    id_col: str | None,
+) -> tuple[list[dict], list[str]]:
+    """Tag each row with PoseBusters validity. No-op if posebusters is unavailable."""
+    if not id_col:
+        return rows, fieldnames
+    try:
+        from ezscreen.results.pose_validity import check_poses
+
+        receptor_pdb = _find_receptor_pdb(output_dir)
+        if receptor_pdb is None:
+            return rows, fieldnames
+        validity = check_poses(poses_sdf, receptor_pdb)
+        if not validity:
+            return rows, fieldnames
+
+        new_fields = list(fieldnames)
+        if "pb_valid" not in new_fields:
+            new_fields += ["pb_valid", "pb_failed"]
+        for row in rows:
+            entry = validity.get(row.get(id_col, ""))
+            if entry is None:
+                row["pb_valid"] = ""
+                row["pb_failed"] = ""
+            else:
+                row["pb_valid"] = entry["passed"]
+                row["pb_failed"] = ";".join(entry["failed_checks"])
+        return rows, new_fields
+    except Exception:
+        return rows, fieldnames
+
+
 def _load_failed_docking(shard_dirs: list[Path]) -> list[dict]:
     """Return per-ligand docking failure rows from failed_docking.csv files."""
     rows: list[dict] = []
@@ -251,13 +309,6 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
 
     deduped, fieldnames = _add_efficiency_cols(deduped, fieldnames, score_col)
 
-    scores_out = output_dir / "scores.csv"
-    if deduped and fieldnames:
-        with scores_out.open("w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(deduped)
-
     poses_out = output_dir / "poses.sdf"
     with poses_out.open("w") as f:
         for d in shard_dirs:
@@ -267,6 +318,17 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
                 f.write(content)
                 if content and not content.endswith("\n"):
                     f.write("\n")
+
+    deduped, fieldnames = _add_pose_validity_cols(
+        deduped, fieldnames, poses_out, output_dir, id_col,
+    )
+
+    scores_out = output_dir / "scores.csv"
+    if deduped and fieldnames:
+        with scores_out.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(deduped)
 
     failed_out = output_dir / "failed_prep.sdf"
     has_failures = False
