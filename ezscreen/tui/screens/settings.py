@@ -73,6 +73,8 @@ class SettingsScreen(Screen):
             yield Label("Results", classes="form-section")
             yield Label("Interaction viewer compounds (top N)", classes="form-label")
             yield Input(id="cfg-interaction-top-n", placeholder="20")
+            yield Label("3D poses returned per shard", classes="form-label")
+            yield Input(id="cfg-poses-returned", placeholder="25")
 
             yield Label("Local Docking", classes="form-section")
             yield Label("Enable score filter", classes="form-label")
@@ -131,6 +133,7 @@ class SettingsScreen(Screen):
 
         rc = cfg.get("results", {})
         self.query_one("#cfg-interaction-top-n", Input).value = str(rc.get("interaction_top_n", 20))
+        self.query_one("#cfg-poses-returned", Input).value = str(rc.get("poses_returned", 25))
 
         lc = cfg.get("local", {})
         self.query_one("#cfg-score-floor-enable", Switch).value = bool(lc.get("enable_score_floor", True))
@@ -199,6 +202,7 @@ class SettingsScreen(Screen):
             },
             "results": {
                 "interaction_top_n": _i("#cfg-interaction-top-n", 20),
+                "poses_returned":    _i("#cfg-poses-returned", 25),
             },
             "local": {
                 "enable_score_floor": self.query_one("#cfg-score-floor-enable", Switch).value,
