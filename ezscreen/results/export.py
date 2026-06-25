@@ -13,8 +13,12 @@ def _detect_score_col(headers: list[str]) -> str | None:
     return headers[-1] if headers else None
 
 
-def export_xlsx(scores_csv: Path, out_xlsx: Path) -> Path:
-    """Write a styled Excel hit list from a merged scores.csv."""
+def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None) -> Path:
+    """Write a styled Excel hit list from a merged scores.csv.
+
+    limit caps the number of rows written (top N, since scores.csv is sorted best-first);
+    None writes every row.
+    """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
     from openpyxl.utils import get_column_letter
@@ -23,6 +27,9 @@ def export_xlsx(scores_csv: Path, out_xlsx: Path) -> Path:
         reader = csv.DictReader(f)
         headers = list(reader.fieldnames or [])
         rows = list(reader)
+
+    if limit is not None and limit > 0:
+        rows = rows[:limit]
 
     wb = Workbook()
     ws = wb.active
@@ -66,19 +73,30 @@ def export_xlsx(scores_csv: Path, out_xlsx: Path) -> Path:
     return out_xlsx
 
 
-def export_sdf(poses_sdf: Path, scores_csv: Path, out_sdf: Path) -> Path:
-    """Write poses.sdf with score/LE/BEI and other scores.csv fields attached as SD properties."""
+def export_sdf(poses_sdf: Path, scores_csv: Path, out_sdf: Path, limit: int | None = None) -> Path:
+    """Write poses.sdf with score/LE/BEI and other scores.csv fields attached as SD properties.
+
+    limit keeps only poses among the top N ligands of scores.csv (best-first); None keeps
+    every pose present locally. Poses beyond the run's returned cap simply aren't available.
+    """
     from rdkit import Chem
 
     index: dict[str, dict] = {}
     id_col = "ligand"
+    ordered_ids: list[str] = []
     with scores_csv.open(newline="") as f:
         reader = csv.DictReader(f)
         headers = list(reader.fieldnames or [])
         if headers:
             id_col = headers[0]
         for row in reader:
-            index[row.get(id_col, "")] = row
+            lig = row.get(id_col, "")
+            index[lig] = row
+            ordered_ids.append(lig)
+
+    allowed: set[str] | None = None
+    if limit is not None and limit > 0:
+        allowed = set(ordered_ids[:limit])
 
     supplier = Chem.SDMolSupplier(str(poses_sdf), removeHs=False, sanitize=True)
     writer = Chem.SDWriter(str(out_sdf))
@@ -89,6 +107,8 @@ def export_sdf(poses_sdf: Path, scores_csv: Path, out_sdf: Path) -> Path:
             lig_id = mol.GetProp("lig_id") if mol.HasProp("lig_id") else (
                 mol.GetProp("_Name") if mol.HasProp("_Name") else f"pose_{i}"
             )
+            if allowed is not None and lig_id not in allowed:
+                continue
             row = index.get(lig_id, {})
             for key, val in row.items():
                 if key == id_col or val in ("", None):
