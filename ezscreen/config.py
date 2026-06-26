@@ -22,7 +22,6 @@ DEFAULTS: dict[str, Any] = {
     },
     "defaults": {
         "box_padding": 5.0,
-        "enumerate_tautomers": False,
     },
     "local": {
         "enable_score_floor": True,
@@ -39,6 +38,12 @@ DEFAULTS: dict[str, Any] = {
         "mmff_max_iters": 0,
         "force_field": "MMFF94",
         "prep_on_kaggle": True,
+        "enumerate_enabled": False,
+        "enumerate_protonation": True,
+        "enumerate_tautomers": True,
+        "enumerate_stereo": False,
+        "enumerate_ring": False,
+        "max_variants_per_ligand": 4,
     },
     "results": {
         "interaction_top_n": 20,

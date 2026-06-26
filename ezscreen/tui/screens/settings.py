@@ -45,8 +45,6 @@ class SettingsScreen(Screen):
             yield Label("Docking Defaults", classes="form-section")
             yield Label("Box padding (Å)", classes="form-label")
             yield Input(id="cfg-padding", placeholder="5.0")
-            yield Label("Enumerate tautomers", classes="form-label")
-            yield Switch(id="cfg-tautomers")
 
             yield Label("Notifications", classes="form-section")
             yield Label("Desktop notifications", classes="form-label")
@@ -73,6 +71,18 @@ class SettingsScreen(Screen):
             yield Switch(id="cfg-prep-on-kaggle")
             yield Label("Conformer force field", classes="form-label")
             yield Select(_FORCE_FIELD_OPTIONS, id="cfg-force-field", allow_blank=False)
+            yield Label("Enumerate ligand variants (Gypsum-DL, runs on Kaggle)", classes="form-label")
+            yield Switch(id="cfg-enum-enabled")
+            yield Label("  · protonation states", classes="form-label")
+            yield Switch(id="cfg-enum-protonation")
+            yield Label("  · tautomers", classes="form-label")
+            yield Switch(id="cfg-enum-tautomers")
+            yield Label("  · stereoisomers", classes="form-label")
+            yield Switch(id="cfg-enum-stereo")
+            yield Label("  · ring conformations", classes="form-label")
+            yield Switch(id="cfg-enum-ring")
+            yield Label("Max variants per ligand", classes="form-label")
+            yield Input(id="cfg-max-variants", placeholder="4")
             yield Label("MMFF minimisation", classes="form-label")
             yield Switch(id="cfg-mmff-converge", name="Run to convergence (maxIters=0, faster)")
             yield Label("Fixed MMFF iterations (ignored when convergence mode on)", classes="form-label")
@@ -120,7 +130,6 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-retries",  Input).value  = str(r.get("shard_retry_limit",    3))
         self.query_one("#cfg-resume",   Input).value  = str(r.get("auto_resume_threshold", 10))
         self.query_one("#cfg-padding",  Input).value  = str(d.get("box_padding",          5.0))
-        self.query_one("#cfg-tautomers", Switch).value = bool(d.get("enumerate_tautomers", False))
 
         n = cfg.get("notify", {})
         self.query_one("#cfg-desktop-notify", Switch).value = bool(n.get("desktop_enabled", False))
@@ -142,6 +151,12 @@ class SettingsScreen(Screen):
         ff_sel = self.query_one("#cfg-force-field", Select)
         if ff in {v for _, v in _FORCE_FIELD_OPTIONS}:
             ff_sel.value = ff
+        self.query_one("#cfg-enum-enabled", Switch).value = bool(pc.get("enumerate_enabled", False))
+        self.query_one("#cfg-enum-protonation", Switch).value = bool(pc.get("enumerate_protonation", True))
+        self.query_one("#cfg-enum-tautomers", Switch).value = bool(pc.get("enumerate_tautomers", True))
+        self.query_one("#cfg-enum-stereo", Switch).value = bool(pc.get("enumerate_stereo", False))
+        self.query_one("#cfg-enum-ring", Switch).value = bool(pc.get("enumerate_ring", False))
+        self.query_one("#cfg-max-variants", Input).value = str(pc.get("max_variants_per_ligand", 4))
 
         rc = cfg.get("results", {})
         self.query_one("#cfg-interaction-top-n", Input).value = str(rc.get("interaction_top_n", 20))
@@ -195,7 +210,6 @@ class SettingsScreen(Screen):
             },
             "defaults": {
                 "box_padding":          _f("#cfg-padding",   5.0),
-                "enumerate_tautomers":  self.query_one("#cfg-tautomers", Switch).value,
             },
             "notify": {
                 "desktop_enabled": self.query_one("#cfg-desktop-notify", Switch).value,
@@ -212,6 +226,12 @@ class SettingsScreen(Screen):
                 "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
                 "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
                 "force_field":            str(self.query_one("#cfg-force-field", Select).value),
+                "enumerate_enabled":      self.query_one("#cfg-enum-enabled", Switch).value,
+                "enumerate_protonation":  self.query_one("#cfg-enum-protonation", Switch).value,
+                "enumerate_tautomers":    self.query_one("#cfg-enum-tautomers", Switch).value,
+                "enumerate_stereo":       self.query_one("#cfg-enum-stereo", Switch).value,
+                "enumerate_ring":         self.query_one("#cfg-enum-ring", Switch).value,
+                "max_variants_per_ligand": _i("#cfg-max-variants", 4),
             },
             "results": {
                 "interaction_top_n": _i("#cfg-interaction-top-n", 20),

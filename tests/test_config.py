@@ -78,10 +78,12 @@ def test_deep_merge_override_wins(monkeypatch, tmp_path):
 
 def test_deep_merge_nested_dict_merged_not_replaced(monkeypatch, tmp_path):
     _patch(monkeypatch, tmp_path)
-    cfg.save({"defaults": {"box_padding": 10.0}})
+    # saving a partial [prep] section must not drop the other [prep] defaults
+    cfg.save({"prep": {"force_field": "UFF"}})
     loaded = cfg.load()
-    assert loaded["defaults"]["box_padding"] == pytest.approx(10.0)
-    assert loaded["defaults"]["enumerate_tautomers"] is False  # from DEFAULTS
+    assert loaded["prep"]["force_field"] == "UFF"
+    assert loaded["prep"]["max_heavy_atoms"] == 70           # from DEFAULTS
+    assert loaded["prep"]["enumerate_enabled"] is False      # from DEFAULTS
 
 
 # ---------------------------------------------------------------------------
