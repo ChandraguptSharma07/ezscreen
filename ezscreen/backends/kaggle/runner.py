@@ -540,6 +540,7 @@ def run_multi_account_screening(
     retry_limit: int = 3,
     accelerator: str = "nvidiaTeslaP100",
     prep_on_kaggle: bool = True,
+    force_field: str | None = None,
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -685,6 +686,7 @@ def run_multi_account_screening(
                 max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                 max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                 mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
+                force_field=force_field or str(_prep_cfg.get("force_field", "MMFF94")),
                 poses_returned=int(_results_cfg.get("poses_returned", 25)),
                 gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
             )

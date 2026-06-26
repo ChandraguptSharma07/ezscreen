@@ -71,14 +71,24 @@ def _scrub(mol, Scrubber, ph: float):
         return None
 
 
-def _embed_3d(mol, mmff_max_iters: int = 0):
+def _optimise(mol_h, force_field: str, max_iters: int) -> None:
+    from rdkit.Chem import AllChem
+    ff = (force_field or "MMFF94").upper()
+    if ff == "UFF":
+        AllChem.UFFOptimizeMolecule(mol_h, maxIters=max_iters)
+    else:
+        variant = "MMFF94s" if ff == "MMFF94S" else "MMFF94"
+        AllChem.MMFFOptimizeMolecule(mol_h, mmffVariant=variant, maxIters=max_iters)
+
+
+def _embed_3d(mol, mmff_max_iters: int = 0, force_field: str = "MMFF94"):
     from rdkit.Chem import AddHs, AllChem
     mol_h = AddHs(mol)
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
     if AllChem.EmbedMolecule(mol_h, params) == -1:
         return None
-    AllChem.MMFFOptimizeMolecule(mol_h, maxIters=mmff_max_iters)
+    _optimise(mol_h, force_field, mmff_max_iters)
     return mol_h
 
 
@@ -113,7 +123,7 @@ _AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
 })
 
 
-def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0) -> tuple[str | None, str | None]:
+def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0, force_field: str = "MMFF94") -> tuple[str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
         SanitizeMol(mol)
@@ -145,7 +155,7 @@ def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max
     if scrubbed is None:
         return None, "sanitization"
 
-    mol_3d = _embed_3d(scrubbed, mmff_max_iters)
+    mol_3d = _embed_3d(scrubbed, mmff_max_iters, force_field)
     if mol_3d is None:
         return None, "conformer_generation"
 
@@ -219,6 +229,7 @@ def prep_ligands(
     enumerate_tautomers: bool = False,
     shard_size: int = _SHARD_SIZE,
     n_shards: int | None = None,
+    force_field: str | None = None,
 ) -> dict[str, Any]:
     from rdkit.Chem import SDWriter
 
@@ -238,9 +249,14 @@ def prep_ligands(
             "max_rotatable_bonds": int(_pc.get("max_rotatable_bonds", 20)),
         } if _pc.get("enable_gpu_size_filter", True) else None
         mmff_max_iters: int = int(_pc.get("mmff_max_iters", 0))
+        _cfg_force_field = str(_pc.get("force_field", "MMFF94"))
     except Exception:
         gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
         mmff_max_iters = 0
+        _cfg_force_field = "MMFF94"
+
+    # explicit per-run override wins over the config default
+    force_field = force_field or _cfg_force_field
 
     failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0, "too_large_for_gpu": 0}
     filtered_too_large: list[dict] = []
@@ -297,7 +313,7 @@ def prep_ligands(
         task = prog.add_task("Prepping ligands...", total=len(all_mols))
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             future_to_idx = {
-                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter, mmff_max_iters): i
+                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter, mmff_max_iters, force_field): i
                 for i, mol in enumerate(all_mols)
             }
             for fut in as_completed(future_to_idx):
@@ -381,6 +397,7 @@ def prep_ligands(
             "filtered_gpu_size": len(filtered_too_large),
             "tautomers_enumerated": enumerate_tautomers,
             "protonation_ph": ph,
+            "force_field": force_field,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
             "warnings": warnings,
         },
