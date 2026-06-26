@@ -8,7 +8,7 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
@@ -29,6 +29,7 @@ class ResultsScreen(Screen):
         Binding("escape", "app.pop_screen", "Back"),
         Binding("o", "open_viewer", "Open 3D Viewer"),
         Binding("f", "cycle_flag", "Flag"),
+        Binding("c", "toggle_collapse", "Collapse variants"),
     ]
 
     def __init__(self, run_id: str) -> None:
@@ -42,6 +43,8 @@ class ResultsScreen(Screen):
         self._selected_idx: int | None = None
         self._flag_col_index: int | None = None
         self._score_type: str = "vina_kcal_mol"
+        self._all_rows: list[dict] = []   # raw, every form
+        self._collapsed: bool = False     # showing one row per source molecule?
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -50,7 +53,7 @@ class ResultsScreen(Screen):
             with Vertical(id="hits-panel"):
                 yield Label(f"Top Hits  ({self._run_id})", classes="section-title")
                 yield DataTable(id="hits-table", cursor_type="row")
-            with Vertical(id="compound-detail"):
+            with VerticalScroll(id="compound-detail"):
                 yield Label("Selected Compound", classes="section-title")
                 yield Static(
                     "[#6e7681]Select a hit to see details.[/#6e7681]",
@@ -72,6 +75,9 @@ class ResultsScreen(Screen):
                     "Run Enrichment Benchmark", id="btn-validate", variant="primary"
                 )
                 yield Static("", id="benchmark-result")
+                yield Label("Variants", classes="section-title", id="variant-label")
+                yield Static("", id="variant-status")
+                yield Button("Collapse variants", id="btn-collapse", variant="default")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -83,6 +89,9 @@ class ResultsScreen(Screen):
         self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
         self.query_one("#btn-plip").display    = False
+        self.query_one("#btn-collapse").display = False
+        self.query_one("#variant-status").display = False
+        self.query_one("#variant-label").display = False
         table = self.query_one("#hits-table", DataTable)
         table.add_column("Info")
         table.add_row("Loading results…")
@@ -115,6 +124,7 @@ class ResultsScreen(Screen):
             headers[-1],
         )
 
+        self._all_rows  = rows
         self._rows      = rows
         self._headers   = headers
         self._score_col = score_col
@@ -134,6 +144,7 @@ class ResultsScreen(Screen):
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
         self.app.call_from_thread(self._refresh_plip_button)
+        self.app.call_from_thread(self._refresh_collapse_button)
 
     def _populate_error(self, msg: str) -> None:
         table = self.query_one("#hits-table", DataTable)
@@ -236,6 +247,10 @@ class ResultsScreen(Screen):
             truncated = smiles if len(smiles) <= 38 else smiles[:35] + "..."
             lines += ["", "[#6e7681]SMILES:[/#6e7681]", f"[#8b949e]{truncated}[/#8b949e]"]
 
+        vcount = row.get("variant_count")
+        if self._collapsed and vcount:
+            lines += ["", f"[#6e7681]Best of[/#6e7681] [#f0f6fc]{vcount}[/#f0f6fc] [#6e7681]enumerated form(s)[/#6e7681]"]
+
         pb_valid = row.get("pb_valid", "")
         if pb_valid in ("True", "False"):
             if pb_valid == "True":
@@ -316,6 +331,8 @@ class ResultsScreen(Screen):
             self._run_export()
         elif event.button.id == "btn-cluster":
             self._run_clustering()
+        elif event.button.id == "btn-collapse":
+            self.action_toggle_collapse()
         elif event.button.id == "btn-plip":
             self._handle_plip()
         elif event.button.id == "btn-validate":
@@ -340,6 +357,42 @@ class ResultsScreen(Screen):
         self.query_one("#export-count").display = has_results
         self.query_one("#btn-export").display  = has_results
         self.query_one("#btn-cluster").display = has_results
+
+    def _refresh_collapse_button(self) -> None:
+        from ezscreen.results import variants
+        show = variants.has_variants(self._all_rows)
+        self.query_one("#btn-collapse").display = show
+        self.query_one("#variant-label").display = show
+        status = self.query_one("#variant-status", Static)
+        status.display = show
+        if show:
+            self._update_variant_status()
+
+    def _update_variant_status(self) -> None:
+        from ezscreen.results import variants
+        n_forms = len(self._all_rows)
+        n_src = len(variants.collapse_variants(self._all_rows))
+        status = self.query_one("#variant-status", Static)
+        if self._collapsed:
+            status.update(f"[#3fb950]Collapsed[/#3fb950] — {n_src} molecules (best of {n_forms} forms)")
+        else:
+            status.update(f"[#6e7681]Showing all {n_forms} forms ({n_src} molecules)[/#6e7681]")
+
+    def action_toggle_collapse(self) -> None:
+        from ezscreen.results import variants
+        if not variants.has_variants(self._all_rows):
+            return
+        self._collapsed = not self._collapsed
+        self._rows = (
+            variants.collapse_variants(self._all_rows)
+            if self._collapsed else self._all_rows
+        )
+        self._selected_idx = None
+        self.query_one("#btn-collapse").label = (
+            "Show all forms" if self._collapsed else "Collapse variants"
+        )
+        self._populate_table(self._rows[:200], self._headers, self._score_col)
+        self._update_variant_status()
 
     def _report_path(self) -> Path:
         return self._output / "results_report.html"
@@ -429,6 +482,7 @@ class ResultsScreen(Screen):
             return
 
         limit = self._parse_export_count()
+        collapse = self._collapsed
 
         self.query_one("#btn-export").disabled = True
         self.app.notify("Exporting hits...", timeout=3)
@@ -440,9 +494,9 @@ class ResultsScreen(Screen):
         def _worker() -> None:
             from ezscreen.results.export import export_sdf, export_xlsx
             try:
-                export_xlsx(scores_csv, out_xlsx, limit=limit)
+                export_xlsx(scores_csv, out_xlsx, limit=limit, collapse=collapse)
                 if poses_sdf.exists():
-                    export_sdf(poses_sdf, scores_csv, out_sdf, limit=limit)
+                    export_sdf(poses_sdf, scores_csv, out_sdf, limit=limit, collapse=collapse)
                 self.app.call_from_thread(self._on_export_done, out_xlsx, limit)
             except Exception as exc:
                 self.app.call_from_thread(self._on_export_error, str(exc))

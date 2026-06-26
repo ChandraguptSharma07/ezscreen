@@ -13,11 +13,12 @@ def _detect_score_col(headers: list[str]) -> str | None:
     return headers[-1] if headers else None
 
 
-def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None) -> Path:
+def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None, collapse: bool = False) -> Path:
     """Write a styled Excel hit list from a merged scores.csv.
 
     limit caps the number of rows written (top N, since scores.csv is sorted best-first);
-    None writes every row.
+    None writes every row. collapse keeps only the best-scoring enumerated form per source
+    molecule and adds a "forms" column with how many forms collapsed.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
@@ -27,6 +28,13 @@ def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None) -> P
         reader = csv.DictReader(f)
         headers = list(reader.fieldnames or [])
         rows = list(reader)
+
+    if collapse:
+        from ezscreen.results.variants import collapse_variants
+        rows = collapse_variants(rows)
+        for r in rows:
+            r["forms"] = r.pop("variant_count", 1)
+        headers = headers + ["forms"]
 
     if limit is not None and limit > 0:
         rows = rows[:limit]
@@ -73,28 +81,35 @@ def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None) -> P
     return out_xlsx
 
 
-def export_sdf(poses_sdf: Path, scores_csv: Path, out_sdf: Path, limit: int | None = None) -> Path:
+def export_sdf(poses_sdf: Path, scores_csv: Path, out_sdf: Path, limit: int | None = None, collapse: bool = False) -> Path:
     """Write poses.sdf with score/LE/BEI and other scores.csv fields attached as SD properties.
 
     limit keeps only poses among the top N ligands of scores.csv (best-first); None keeps
-    every pose present locally. Poses beyond the run's returned cap simply aren't available.
+    every pose present locally. collapse keeps only the best enumerated form per source
+    molecule. Poses beyond the run's returned cap simply aren't available.
     """
     from rdkit import Chem
 
     index: dict[str, dict] = {}
     id_col = "ligand"
-    ordered_ids: list[str] = []
     with scores_csv.open(newline="") as f:
         reader = csv.DictReader(f)
         headers = list(reader.fieldnames or [])
         if headers:
             id_col = headers[0]
-        for row in reader:
-            lig = row.get(id_col, "")
-            index[lig] = row
-            ordered_ids.append(lig)
+        all_rows = list(reader)
+    for row in all_rows:
+        index[row.get(id_col, "")] = row
+
+    ranked_rows = all_rows
+    if collapse:
+        from ezscreen.results.variants import collapse_variants
+        ranked_rows = collapse_variants(all_rows)
+    ordered_ids = [r.get(id_col, "") for r in ranked_rows]
 
     allowed: set[str] | None = None
+    if collapse:
+        allowed = set(ordered_ids)
     if limit is not None and limit > 0:
         allowed = set(ordered_ids[:limit])
 
