@@ -235,11 +235,15 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
         for row in all_rows:
             lig_id = row.get("ligand", "")
             all_scored_ids.add(lig_id)
-            if lig_id in index and "smiles" not in row:
-                row["name"]   = index[lig_id]["name"]
-                row["smiles"] = index[lig_id]["smiles"]
+            if lig_id in index:
+                if "smiles" not in row:
+                    row["name"]   = index[lig_id]["name"]
+                    row["smiles"] = index[lig_id]["smiles"]
+                row["conformer_qc"] = index[lig_id].get("conformer_qc", "")
         if all_rows and "smiles" in all_rows[0] and "name" not in fieldnames:
             fieldnames += ["name", "smiles"]
+        if any(r.get("conformer_qc") for r in all_rows) and "conformer_qc" not in fieldnames:
+            fieldnames += ["conformer_qc"]
     else:
         for row in all_rows:
             all_scored_ids.add(row.get("ligand", ""))
