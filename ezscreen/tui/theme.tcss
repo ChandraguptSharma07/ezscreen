@@ -174,8 +174,10 @@ DataTable > .datatable--header-cursor {
 }
 
 #compound-detail {
-    width: 36;
-    padding: 1 1;
+    width: 32;
+    padding: 0 1;
+    overflow-y: auto;
+    scrollbar-size: 1 1;
 }
 
 #compound-info {
@@ -183,9 +185,30 @@ DataTable > .datatable--header-cursor {
     padding: 0 0 1 0;
 }
 
+/* Right-panel controls: uniform, full-width, tightly stacked. */
+#compound-detail Button {
+    width: 100%;
+    height: 1;
+    border: none;
+    margin: 0 0 1 0;
+}
+
+#compound-detail Button:focus {
+    border: none;
+    background: $dim;
+    text-style: bold;
+}
+
+#compound-detail Input {
+    margin: 0 0 1 0;
+}
+
+#compound-detail .section-title {
+    margin: 1 0 0 0;
+}
+
 #btn-3d {
     width: 100%;
-    margin-top: 1;
 }
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
