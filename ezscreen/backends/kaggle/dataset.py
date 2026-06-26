@@ -27,8 +27,24 @@ def _api():
     return kaggle.api
 
 
+def _error_detail(exc: Exception) -> str:
+    """str(exc) plus the Kaggle HTTP response body, which carries the real reason
+    (e.g. why a 400 was rejected). The SDK's HTTPError keeps it on .response."""
+    base = str(exc)
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        try:
+            body = resp.text
+        except Exception:
+            body = ""
+        if body and body.strip() and body.strip() not in base:
+            return f"{base} :: {body.strip()[:600]}"
+    return base
+
+
 def _handle_error(exc: Exception) -> None:
-    msg = str(exc).lower()
+    detail = _error_detail(exc)
+    msg = detail.lower()
     if "401" in msg or "unauthorized" in msg:
         raise KaggleUnauthorizedError(
             "API key rejected — go to kaggle.com/settings → API → Create New Token"
@@ -38,18 +54,18 @@ def _handle_error(exc: Exception) -> None:
             "Account needs phone verification — complete at kaggle.com/settings"
         ) from exc
     if "404" in msg or "not found" in msg:
-        raise KaggleNotFoundError(str(exc)) from exc
+        raise KaggleNotFoundError(detail) from exc
     if "429" in msg or "rate limit" in msg:
-        raise KaggleRateLimitError(str(exc)) from exc
+        raise KaggleRateLimitError(detail) from exc
     if any(c in msg for c in ("500", "502", "503", "504")):
-        raise KaggleServerError(str(exc)) from exc
+        raise KaggleServerError(detail) from exc
     # Empty/non-JSON response body — Kaggle's edge layer returned a 5xx-equivalent
     # without a JSON body. Treat as a transient server error so callers can retry.
     if "expecting value" in msg or "jsondecodeerror" in msg:
         raise KaggleServerError(
-            f"Kaggle returned an empty response (likely transient server issue): {exc}"
+            f"Kaggle returned an empty response (likely transient server issue): {detail}"
         ) from exc
-    raise KaggleBadRequestError(str(exc)) from exc
+    raise KaggleBadRequestError(detail) from exc
 
 
 def sha256(path: Path) -> str:
