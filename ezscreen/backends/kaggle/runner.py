@@ -541,6 +541,7 @@ def run_multi_account_screening(
     accelerator: str = "nvidiaTeslaP100",
     prep_on_kaggle: bool = True,
     force_field: str | None = None,
+    enumerate_opts: dict | None = None,
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -654,6 +655,9 @@ def run_multi_account_screening(
         _prep_cfg = {}
         _results_cfg = {}
 
+    _eo = enumerate_opts or {}
+    _enum_enabled = bool(_eo.get("enabled", _prep_cfg.get("enumerate_enabled", False)))
+
     submissions: list[dict] = []
     for spec in account_specs:
         kj_path     = spec["kj_path"]
@@ -680,13 +684,18 @@ def run_multi_account_screening(
                 shard_filenames=filenames,
                 ph=ph,
                 search_mode=search_mode,
-                enumerate_tautomers=False,
                 prep_on_kaggle=prep_on_kaggle,
                 max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
                 max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                 max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                 mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
                 force_field=force_field or str(_prep_cfg.get("force_field", "MMFF94")),
+                enumerate_enabled=_enum_enabled,
+                enumerate_protonation=bool(_eo.get("protonation", _prep_cfg.get("enumerate_protonation", True))),
+                enumerate_tautomers=bool(_eo.get("tautomers", _prep_cfg.get("enumerate_tautomers", True))),
+                enumerate_stereo=bool(_eo.get("stereo", _prep_cfg.get("enumerate_stereo", False))),
+                enumerate_ring=bool(_eo.get("ring", _prep_cfg.get("enumerate_ring", False))),
+                max_variants_per_ligand=int(_eo.get("max_variants", _prep_cfg.get("max_variants_per_ligand", 4))),
                 poses_returned=int(_results_cfg.get("poses_returned", 25)),
                 gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
             )
