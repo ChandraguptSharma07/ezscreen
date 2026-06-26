@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.12.0 — 2026-06-27
+
+> Theme: better chemistry in. Make ligand prep correct and explicit — the right force field, the right protonation/tautomer/stereo form, and a check that the 3D conformer isn't broken — instead of silently docking one fixed guess.
+
+### Added
+
+- **Ligand force-field choice** — pick `MMFF94` / `MMFF94s` / `UFF` for conformer minimisation instead of MMFF-only. Set a default in Settings and override it per run in the wizard (shown in the confirm summary). Threaded through local prep and the Kaggle prep cell. GAFF is deliberately out (needs AmberTools, too heavy for the Kaggle image)
+- **Protonation / tautomer / stereo / ring enumeration** — optional Gypsum-DL backend fans each input SMILES out to its plausible forms; enumeration runs on Kaggle's GPUs (off by default, per-run toggle in the wizard, variant types + cap in Settings). Variants are tagged `<name>_v{k}` and dock independently so the best-scoring form wins. Fails soft to the single input form when Gypsum-DL is unavailable. New optional `enumerate` extra (`gypsum-dl`)
+- **Collapse variants in results** — toggle (press `c`, or the Variants panel button) to fold enumerated forms back to one row per source molecule (best form kept, with a form count); export honours the toggle (xlsx gains a `forms` column). Appears only when a run has variants
+- **3D conformer QC** — after embed+optimise (locally and in the Kaggle prep cell), flag `non_finite_coords` / `bad_bond_length` / `steric_clash`; surfaced per-compound in the results viewer detail panel and counted in the prep report. Flags but does not reject — strained conformers still dock, labelled
+
+### Changed
+
+- Results detail panel is now scrollable with slimmer, full-width controls (it previously clipped lower sections off-screen)
+- Kaggle dataset-upload errors now include the API response body, so the actual reason for a 4xx is visible instead of a bare status code
+
 ## v1.11.0 — 2026-06-26
 
 > Theme: trust the results. Quality and export features that run locally and post-run on a run's existing `scores.csv` / `poses.sdf` — no Kaggle kernel, no extra GPU cost.
