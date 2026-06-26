@@ -14,6 +14,12 @@ _DEPTH_OPTIONS: list[tuple[str, str]] = [
     ("Thorough — flexible ligands",  "Thorough"),
 ]
 
+_FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
+    ("MMFF94 — general purpose ★",      "MMFF94"),
+    ("MMFF94s — planar amides/aromatics", "MMFF94s"),
+    ("UFF — broad element coverage",    "UFF"),
+]
+
 
 class SettingsScreen(Screen):
     """Edit ~/.ezscreen/config.toml preferences."""
@@ -65,6 +71,8 @@ class SettingsScreen(Screen):
             yield Input(id="cfg-max-rb", placeholder="20")
             yield Label("Run 3D prep on Kaggle GPU (disable to prep locally before upload)", classes="form-label")
             yield Switch(id="cfg-prep-on-kaggle")
+            yield Label("Conformer force field", classes="form-label")
+            yield Select(_FORCE_FIELD_OPTIONS, id="cfg-force-field", allow_blank=False)
             yield Label("MMFF minimisation", classes="form-label")
             yield Switch(id="cfg-mmff-converge", name="Run to convergence (maxIters=0, faster)")
             yield Label("Fixed MMFF iterations (ignored when convergence mode on)", classes="form-label")
@@ -130,6 +138,10 @@ class SettingsScreen(Screen):
         mmff = int(pc.get("mmff_max_iters", 0))
         self.query_one("#cfg-mmff-converge", Switch).value = (mmff == 0)
         self.query_one("#cfg-mmff-iters", Input).value = str(mmff if mmff > 0 else 200)
+        ff = str(pc.get("force_field", "MMFF94"))
+        ff_sel = self.query_one("#cfg-force-field", Select)
+        if ff in {v for _, v in _FORCE_FIELD_OPTIONS}:
+            ff_sel.value = ff
 
         rc = cfg.get("results", {})
         self.query_one("#cfg-interaction-top-n", Input).value = str(rc.get("interaction_top_n", 20))
@@ -199,6 +211,7 @@ class SettingsScreen(Screen):
                 "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
                 "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
                 "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
+                "force_field":            str(self.query_one("#cfg-force-field", Select).value),
             },
             "results": {
                 "interaction_top_n": _i("#cfg-interaction-top-n", 20),
