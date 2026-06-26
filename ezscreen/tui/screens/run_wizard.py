@@ -18,11 +18,18 @@ from textual.widgets import (
     RadioButton,
     RadioSet,
     RichLog,
+    Select,
     Static,
     Switch,
 )
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
+
+_FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
+    ("MMFF94 — general purpose", "MMFF94"),
+    ("MMFF94s — planar amides/aromatics", "MMFF94s"),
+    ("UFF — broad element coverage", "UFF"),
+]
 
 _STEPS = [
     "step-receptor",
@@ -176,6 +183,11 @@ class RunWizardScreen(Screen):
                             "Thorough   \u2014 flexible ligands, induced-fit targets",
                             id="rb-thorough",
                         )
+                    yield Label("Conformer force field", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Defaults to your settings choice; change it for this run only.[/#6e7681]"
+                    )
+                    yield Select(_FORCE_FIELD_OPTIONS, id="opt-force-field", allow_blank=False)
                     yield VerticalScroll(id="acct-assignment-section")
 
                 # ── Step 5: Confirm & Submit ──────────────────────────
@@ -214,6 +226,9 @@ class RunWizardScreen(Screen):
             cfg   = config.load()
             admet = cfg.get("run", {}).get("admet_pre_filter", True)
             self.query_one("#opt-admet", Switch).value = bool(admet)
+            ff = str(cfg.get("prep", {}).get("force_field", "MMFF94"))
+            if ff in {v for _, v in _FORCE_FIELD_OPTIONS}:
+                self.query_one("#opt-force-field", Select).value = ff
         except Exception:
             pass
 
@@ -544,6 +559,7 @@ class RunWizardScreen(Screen):
         elif step == "step-options":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
             self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
+            self._ctx["force_field"] = str(self.query_one("#opt-force-field", Select).value)
             gpu_btn = self.query_one("#opt-gpu-type", RadioSet).pressed_button
             self._ctx["gpu_type"] = (
                 "nvidiaTeslaT4"
@@ -640,6 +656,7 @@ class RunWizardScreen(Screen):
         lig   = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
         admet   = "yes" if ctx.get("admet_pre_filter") else "no"
         depth   = ctx.get("search_label", "Balanced")
+        force_field = ctx.get("force_field", "MMFF94")
         if ctx.get("run_locally"):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
@@ -656,6 +673,7 @@ class RunWizardScreen(Screen):
             f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
             f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
             f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
+            f"[bold #6e7681]Force field  [/bold #6e7681][#f0f6fc]{force_field}[/#f0f6fc]",
             f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
             af_note,
         ]))
@@ -745,6 +763,7 @@ class RunWizardScreen(Screen):
 
             # Ligand prep
             _prep_cfg = cfg.get("prep", {})
+            _force_field = ctx.get("force_field") or str(_prep_cfg.get("force_field", "MMFF94"))
             account_assignments = ctx.get("account_assignments")
             _active = [a for a in (account_assignments or []) if a["shard_count"] != 0]
             if _active and len(_active) > 1:
@@ -759,6 +778,7 @@ class RunWizardScreen(Screen):
                     output_dir=work_dir / "shards",
                     ph=cfg["run"].get("default_ph", 7.4),
                     n_shards=n_shards_target,
+                    force_field=_force_field,
                 )
                 log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['prep_passed']:,} ligands prepped)[/#6e7681]")
             else:
@@ -767,10 +787,15 @@ class RunWizardScreen(Screen):
                     log("[#79c0ff]Sharding ligands for Kaggle prep...[/#79c0ff]")
                 else:
                     log("[#79c0ff]Prepping ligands locally before upload...[/#79c0ff]")
+                _prep_kwargs = {
+                    "input_path": ligand_input,
+                    "output_dir": work_dir / "shards",
+                    "n_shards": n_shards_target,
+                }
+                if not _prep_on_kaggle:
+                    _prep_kwargs["force_field"] = _force_field
                 lig_result = (ligand_prep.shard_raw if _prep_on_kaggle else ligand_prep.prep_ligands)(
-                    input_path=ligand_input,
-                    output_dir=work_dir / "shards",
-                    n_shards=n_shards_target,
+                    **_prep_kwargs
                 )
                 log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['total_input']:,} ligands)[/#6e7681]")
 
@@ -822,6 +847,7 @@ class RunWizardScreen(Screen):
                         retry_limit=cfg["run"].get("shard_retry_limit", 3),
                         accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
                         prep_on_kaggle=_prep_on_kaggle,
+                        force_field=_force_field,
                     )
                 else:
                     # Single-account Kaggle path
@@ -859,6 +885,7 @@ class RunWizardScreen(Screen):
                         max_mw=float(_prep_cfg.get("max_mw", 700.0)),
                         max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
                         mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
+                        force_field=_force_field,
                         poses_returned=int(cfg.get("results", {}).get("poses_returned", 25)),
                         gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4" else "",
                     )
