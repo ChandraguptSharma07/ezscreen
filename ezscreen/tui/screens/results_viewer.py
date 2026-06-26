@@ -15,7 +15,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Sta
 
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
-_SKIP_COLS = {"rmsd_lb", "rmsd_ub", "pb_valid", "pb_failed"}
+_SKIP_COLS = {"rmsd_lb", "rmsd_ub", "pb_valid", "pb_failed", "conformer_qc"}
 
 # none -> green -> yellow -> red -> none
 _FLAG_CYCLE = ["", "green", "yellow", "red"]
@@ -250,6 +250,17 @@ class ResultsScreen(Screen):
         vcount = row.get("variant_count")
         if self._collapsed and vcount:
             lines += ["", f"[#6e7681]Best of[/#6e7681] [#f0f6fc]{vcount}[/#f0f6fc] [#6e7681]enumerated form(s)[/#6e7681]"]
+
+        if "conformer_qc" in row:
+            qc = row.get("conformer_qc", "")
+            if qc:
+                lines += [
+                    "",
+                    "[#6e7681]Conformer QC:[/#6e7681] [#e3b341]flagged[/#e3b341]",
+                    f"[#6e7681]Reason:[/#6e7681] [#8b949e]{qc}[/#8b949e]",
+                ]
+            else:
+                lines += ["", "[#6e7681]Conformer QC:[/#6e7681] [#3fb950]clean[/#3fb950]"]
 
         pb_valid = row.get("pb_valid", "")
         if pb_valid in ("True", "False"):
