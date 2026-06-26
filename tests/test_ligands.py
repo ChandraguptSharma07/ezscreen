@@ -40,3 +40,25 @@ def test_prep_ligands_records_force_field_override(tmp_path):
     result = prep_ligands(input_path=smi, output_dir=out, force_field="UFF")
     assert result["report"]["force_field"] == "UFF"
     assert result["report"]["prep_passed"] == 1
+
+
+def test_prep_ligands_expands_enumerated_variants(tmp_path, monkeypatch):
+    import ezscreen.prep.enumerate as enum
+    from ezscreen.prep.ligands import prep_ligands
+
+    # stub enumeration: one acid → two protomers, so prep should embed both
+    monkeypatch.setattr(
+        enum, "enumerate_variants",
+        lambda smi, *a, **k: ["CC(=O)O", "CC(=O)[O-]"],
+    )
+
+    src = tmp_path / "in.smi"
+    src.write_text("CC(=O)O\tacid\n")
+    out = tmp_path / "shards"
+    opts = {"enabled": True, "protonation": True, "tautomers": True,
+            "stereo": False, "ring": False, "max_variants": 4}
+    result = prep_ligands(input_path=src, output_dir=out, enumerate_opts=opts)
+
+    assert result["report"]["enumeration_enabled"] is True
+    assert result["report"]["variants_generated"] == 2
+    assert result["report"]["prep_passed"] == 2

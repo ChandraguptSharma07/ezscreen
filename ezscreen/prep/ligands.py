@@ -226,10 +226,10 @@ def prep_ligands(
     input_path: Path,
     output_dir: Path,
     ph: float = 7.4,
-    enumerate_tautomers: bool = False,
     shard_size: int = _SHARD_SIZE,
     n_shards: int | None = None,
     force_field: str | None = None,
+    enumerate_opts: dict | None = None,
 ) -> dict[str, Any]:
     from rdkit.Chem import SDWriter
 
@@ -254,9 +254,21 @@ def prep_ligands(
         gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
         mmff_max_iters = 0
         _cfg_force_field = "MMFF94"
+        _pc = {}
 
     # explicit per-run override wins over the config default
     force_field = force_field or _cfg_force_field
+
+    # enumeration: per-run override (enumerate_opts) wins over the config defaults
+    _eo = enumerate_opts if enumerate_opts is not None else {
+        "enabled":      bool(_pc.get("enumerate_enabled", False)),
+        "protonation":  bool(_pc.get("enumerate_protonation", True)),
+        "tautomers":    bool(_pc.get("enumerate_tautomers", True)),
+        "stereo":       bool(_pc.get("enumerate_stereo", False)),
+        "ring":         bool(_pc.get("enumerate_ring", False)),
+        "max_variants": int(_pc.get("max_variants_per_ligand", 4)),
+    }
+    _enum_on = bool(_eo.get("enabled"))
 
     failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0, "too_large_for_gpu": 0}
     filtered_too_large: list[dict] = []
@@ -299,6 +311,38 @@ def prep_ligands(
 
     prep_failed += len(bad_mols)
     failures["sanitization"] += len(bad_mols)
+
+    # Phase 1b: optional protonation/tautomer/stereo/ring enumeration.
+    # Each input SMILES fans out to its variants; the source name gets a _v{k}
+    # suffix so variants stay traceable through merge. Fails soft per ligand —
+    # enumerate_variants returns [smiles] unchanged when Gypsum-DL is unavailable.
+    variants_generated = 0
+    if _enum_on and all_mols:
+        from rdkit.Chem import MolFromSmiles
+
+        from ezscreen.prep.enumerate import enumerate_variants
+        exp_mols: list = []
+        exp_meta: list[tuple[str, str]] = []
+        for (smiles, mol_name), mol in zip(all_meta, all_mols):
+            variants = enumerate_variants(
+                smiles, ph, int(_eo.get("max_variants", 4)),
+                protonation=bool(_eo.get("protonation", True)),
+                tautomers=bool(_eo.get("tautomers", True)),
+                stereo=bool(_eo.get("stereo", False)),
+                ring=bool(_eo.get("ring", False)),
+            )
+            if len(variants) <= 1:
+                exp_mols.append(mol)
+                exp_meta.append((smiles, mol_name))
+                continue
+            for k, vsmi in enumerate(variants, 1):
+                vmol = MolFromSmiles(vsmi)
+                if vmol is None:
+                    continue
+                exp_mols.append(vmol)
+                exp_meta.append((vsmi, f"{mol_name}_v{k}" if mol_name else f"v{k}"))
+                variants_generated += 1
+        all_mols, all_meta = exp_mols, exp_meta
 
     # Phase 2: parallel conformer generation + PDBQT conversion.
     # RDKit's ETKDGv3 and MMFF are C++ extensions that release the GIL,
@@ -395,7 +439,8 @@ def prep_ligands(
             "prep_failures": failures,
             "failed_prep_file": str(failed_path) if prep_failed else None,
             "filtered_gpu_size": len(filtered_too_large),
-            "tautomers_enumerated": enumerate_tautomers,
+            "enumeration_enabled": _enum_on,
+            "variants_generated": variants_generated,
             "protonation_ph": ph,
             "force_field": force_field,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
