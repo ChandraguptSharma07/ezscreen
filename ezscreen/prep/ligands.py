@@ -102,6 +102,51 @@ def _to_pdbqt(mol) -> str | None:
         return None
 
 
+def _conformer_qc(mol_h) -> str | None:
+    """Flag an obviously bad 3D conformer; return a reason string or None.
+
+    Catches the embed/optimise failures that still produce a writable molecule:
+    non-finite coordinates, bonded atoms at impossible distances, and internal
+    steric clashes between heavy atoms that aren't 1-2/1-3 bonded.
+    """
+    try:
+        conf = mol_h.GetConformer()
+    except Exception:
+        return "no_conformer"
+    n = conf.GetNumAtoms()
+    pos = [conf.GetAtomPosition(i) for i in range(n)]
+
+    for p in pos:
+        if not (math.isfinite(p.x) and math.isfinite(p.y) and math.isfinite(p.z)):
+            return "non_finite_coords"
+
+    excluded: set[tuple[int, int]] = set()
+    for b in mol_h.GetBonds():
+        i, j = b.GetBeginAtomIdx(), b.GetEndAtomIdx()
+        d = pos[i].Distance(pos[j])
+        if d < 0.5 or d > 3.0:
+            return "bad_bond_length"
+        excluded.add((min(i, j), max(i, j)))
+
+    # 1-3 pairs (two atoms sharing a neighbour) are not clashes
+    for atom in mol_h.GetAtoms():
+        nbrs = [nb.GetIdx() for nb in atom.GetNeighbors()]
+        for a in range(len(nbrs)):
+            for c in range(a + 1, len(nbrs)):
+                i, j = nbrs[a], nbrs[c]
+                excluded.add((min(i, j), max(i, j)))
+
+    heavy = [a.GetIdx() for a in mol_h.GetAtoms() if a.GetAtomicNum() > 1]
+    for a in range(len(heavy)):
+        for c in range(a + 1, len(heavy)):
+            i, j = heavy[a], heavy[c]
+            if (min(i, j), max(i, j)) in excluded:
+                continue
+            if pos[i].Distance(pos[j]) < 0.9:
+                return "steric_clash"
+    return None
+
+
 # Atomic numbers AutoDock4 / UniDock can handle.
 # Elements outside this set produce atom-type parse errors at docking time.
 _AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
@@ -123,12 +168,12 @@ _AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
 })
 
 
-def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0, force_field: str = "MMFF94") -> tuple[str | None, str | None]:
+def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0, force_field: str = "MMFF94") -> tuple[str | None, str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
         SanitizeMol(mol)
     except Exception:
-        return None, "sanitization"
+        return None, "sanitization", None
 
     # GPU size pre-filter — cheapest check, done before expensive 3-D embedding.
     # UniDock GPU overflows float32 for large/flexible molecules, producing FLT_MAX
@@ -138,32 +183,34 @@ def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max
         from rdkit.Chem.Descriptors import MolWt
         from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms, CalcNumRotatableBonds
         if CalcNumHeavyAtoms(mol) > gpu_filter["max_heavy_atoms"]:
-            return None, "too_large_for_gpu"
+            return None, "too_large_for_gpu", None
         if MolWt(mol) > gpu_filter["max_mw"]:
-            return None, "too_large_for_gpu"
+            return None, "too_large_for_gpu", None
         if CalcNumRotatableBonds(mol) > gpu_filter["max_rotatable_bonds"]:
-            return None, "too_large_for_gpu"
+            return None, "too_large_for_gpu", None
 
     # Reject molecules with elements AutoDock/UniDock can't handle.
     # Meeko writes these as bare element symbols (e.g. "B" for Boron) which
     # UniDock rejects at runtime with "Atom type B is not a valid AutoDock type".
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum() not in _AUTODOCK_SUPPORTED_ATOMIC_NUMS:
-            return None, "unsupported_atoms"
+            return None, "unsupported_atoms", None
 
     scrubbed = _scrub(mol, Scrubber, ph)
     if scrubbed is None:
-        return None, "sanitization"
+        return None, "sanitization", None
 
     mol_3d = _embed_3d(scrubbed, mmff_max_iters, force_field)
     if mol_3d is None:
-        return None, "conformer_generation"
+        return None, "conformer_generation", None
+
+    qc = _conformer_qc(mol_3d)
 
     pdbqt = _to_pdbqt(mol_3d)
     if pdbqt is None:
-        return None, "unsupported_atoms"
+        return None, "unsupported_atoms", None
 
-    return pdbqt, None
+    return pdbqt, None, qc
 
 
 # ---------------------------------------------------------------------------
@@ -373,12 +420,15 @@ def prep_ligands(
             shard_size = max(1, math.ceil(n_passing / n_shards))
 
     # Phase 3: assemble shards in original order (preserves lig_id sequence)
+    qc_flagged: list[dict] = []
     for (smiles, mol_name), mol, result in zip(all_meta, all_mols, results):
-        pdbqt, reason = result  # type: ignore[misc]
+        pdbqt, reason, qc = result  # type: ignore[misc]
         if pdbqt:
             lig_id = f"lig_{prep_passed:05d}"
-            index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles})
+            index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles, "conformer_qc": qc or ""})
             shard_buf.append(f"REMARK lig_id {lig_id}\n" + pdbqt)
+            if qc:
+                qc_flagged.append({"ligand": lig_id, "name": mol_name, "reason": qc})
             prep_passed += 1
             if len(shard_buf) >= shard_size:
                 _flush()
@@ -393,7 +443,7 @@ def prep_ligands(
 
     index_path = output_dir / "index.csv"
     with index_path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles"])
+        w = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles", "conformer_qc"])
         w.writeheader()
         w.writerows(index_rows)
 
@@ -441,6 +491,8 @@ def prep_ligands(
             "filtered_gpu_size": len(filtered_too_large),
             "enumeration_enabled": _enum_on,
             "variants_generated": variants_generated,
+            "conformer_qc_flagged": len(qc_flagged),
+            "conformer_qc_list": qc_flagged,
             "protonation_ph": ph,
             "force_field": force_field,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},

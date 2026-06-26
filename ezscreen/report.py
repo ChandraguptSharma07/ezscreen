@@ -70,6 +70,8 @@ def write_report(
             "failed_prep_file":       ligand_data.get("failed_prep_file"),
             "enumeration_enabled":    ligand_data.get("enumeration_enabled", False),
             "variants_generated":     ligand_data.get("variants_generated", 0),
+            "conformer_qc_flagged":   ligand_data.get("conformer_qc_flagged", 0),
+            "conformer_qc_list":      ligand_data.get("conformer_qc_list", []),
             "protonation_ph":         ligand_data.get("protonation_ph", 7.4),
             "tools":                  ligand_data.get("tools", {}),
         },
@@ -161,6 +163,7 @@ def _render_txt(r: dict[str, Any]) -> str:
         f"Prep passed       : {lig['prep_passed']:,}",
         f"Prep failed       : {lig['prep_failed']:,}",
         f"Enumeration       : {'on' if lig['enumeration_enabled'] else 'off'} ({lig['variants_generated']:,} variants)",
+        f"Conformer QC      : {lig['conformer_qc_flagged']:,} flagged",
         f"Protonation pH    : {lig['protonation_ph']}",
         f"Tools             : {lig['tools']}",
         "",
@@ -176,5 +179,13 @@ def _render_txt(r: dict[str, Any]) -> str:
                 lines.append(f"         Action: {w['action']}")
     else:
         lines.append("None.")
+
+    qc_list = lig.get("conformer_qc_list", [])
+    if qc_list:
+        lines += ["", "CONFORMER QC — FLAGGED", "----------------------"]
+        for q in qc_list[:25]:
+            lines.append(f"{q.get('ligand','')}  {q.get('name','')}  ({q.get('reason','')})")
+        if len(qc_list) > 25:
+            lines.append(f"... and {len(qc_list) - 25:,} more")
 
     return "\n".join(lines) + "\n"

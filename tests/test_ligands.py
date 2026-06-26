@@ -2,10 +2,25 @@ from __future__ import annotations
 
 import pytest
 from rdkit import Chem
+from rdkit.Geometry import Point3D
 
-from ezscreen.prep.ligands import _embed_3d
+from ezscreen.prep.ligands import _conformer_qc, _embed_3d
 
 IBUPROFEN = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"
+
+
+def _two_carbons(dist: float, bonded: bool) -> Chem.Mol:
+    rw = Chem.RWMol()
+    rw.AddAtom(Chem.Atom(6))
+    rw.AddAtom(Chem.Atom(6))
+    if bonded:
+        rw.AddBond(0, 1, Chem.BondType.SINGLE)
+    mol = rw.GetMol()
+    conf = Chem.Conformer(2)
+    conf.SetAtomPosition(0, Point3D(0.0, 0.0, 0.0))
+    conf.SetAtomPosition(1, Point3D(dist, 0.0, 0.0))
+    mol.AddConformer(conf)
+    return mol
 
 
 @pytest.mark.parametrize("force_field", ["MMFF94", "MMFF94s", "UFF"])
@@ -40,6 +55,28 @@ def test_prep_ligands_records_force_field_override(tmp_path):
     result = prep_ligands(input_path=smi, output_dir=out, force_field="UFF")
     assert result["report"]["force_field"] == "UFF"
     assert result["report"]["prep_passed"] == 1
+
+
+def test_conformer_qc_passes_clean_molecule():
+    mol = _embed_3d(Chem.MolFromSmiles(IBUPROFEN), force_field="MMFF94")
+    assert _conformer_qc(mol) is None
+
+
+def test_conformer_qc_flags_steric_clash():
+    # two non-bonded carbons overlapping → clash; no bonds means no bond-length flag
+    assert _conformer_qc(_two_carbons(0.5, bonded=False)) == "steric_clash"
+    # same atoms far apart → clean
+    assert _conformer_qc(_two_carbons(2.0, bonded=False)) is None
+
+
+def test_conformer_qc_flags_bad_bond_length():
+    assert _conformer_qc(_two_carbons(4.0, bonded=True)) == "bad_bond_length"
+
+
+def test_conformer_qc_flags_non_finite_coords():
+    mol = _two_carbons(2.0, bonded=True)
+    mol.GetConformer().SetAtomPosition(1, Point3D(float("inf"), 0.0, 0.0))
+    assert _conformer_qc(mol) == "non_finite_coords"
 
 
 def test_prep_ligands_expands_enumerated_variants(tmp_path, monkeypatch):
