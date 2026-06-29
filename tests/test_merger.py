@@ -50,3 +50,50 @@ def test_merge_omits_conformer_qc_when_all_clean(tmp_path):
     rows = list(csv.DictReader((out / "scores.csv").open()))
     # no flags anywhere → column is omitted to avoid an all-empty column
     assert "conformer_qc" not in rows[0]
+
+
+def test_merge_joins_cnn_scores_when_present(tmp_path):
+    sd = tmp_path / "shard"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score"], [
+        {"ligand": "nb0_lig_00000", "score": "-8.1"},
+        {"ligand": "nb0_lig_00001", "score": "-7.0"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles", "conformer_qc"], [
+        {"ligand": "nb0_lig_00000", "name": "A", "smiles": "CCO", "conformer_qc": ""},
+        {"ligand": "nb0_lig_00001", "name": "B", "smiles": "c1ccccc1", "conformer_qc": ""},
+    ])
+
+    out = tmp_path / "output"
+    out.mkdir()
+    # gnina_runner drops cnn_scores.csv into the run output before a re-merge
+    _write(out / "cnn_scores.csv", ["lig_id", "CNNscore", "CNNaffinity"], [
+        {"lig_id": "nb0_lig_00000", "CNNscore": "0.91", "CNNaffinity": "6.2"},
+    ])
+
+    merge_shard_results([sd], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    by_name = {r["name"]: r for r in rows}
+    assert "CNNscore" in rows[0] and "CNNaffinity" in rows[0]
+    assert by_name["A"]["CNNscore"] == "0.91"
+    assert by_name["A"]["CNNaffinity"] == "6.2"
+    # a ligand with no CNN entry gets blank cells, never an error
+    assert by_name["B"]["CNNscore"] == ""
+
+
+def test_merge_without_cnn_scores_has_no_cnn_cols(tmp_path):
+    sd = tmp_path / "shard"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score"], [
+        {"ligand": "nb0_lig_00000", "score": "-8.1"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles", "conformer_qc"], [
+        {"ligand": "nb0_lig_00000", "name": "A", "smiles": "CCO", "conformer_qc": ""},
+    ])
+
+    out = tmp_path / "output"
+    merge_shard_results([sd], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    assert "CNNscore" not in rows[0]

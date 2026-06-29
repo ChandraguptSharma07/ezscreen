@@ -129,6 +129,41 @@ def _add_pose_validity_cols(
         return rows, fieldnames
 
 
+def _add_cnn_score_cols(
+    rows: list[dict],
+    fieldnames: list[str],
+    output_dir: Path,
+    id_col: str | None,
+) -> tuple[list[dict], list[str]]:
+    """Left-join GNINA CNN scores from cnn_scores.csv. No-op if the file is absent."""
+    if not id_col:
+        return rows, fieldnames
+    cnn_path = output_dir / "cnn_scores.csv"
+    if not cnn_path.exists():
+        return rows, fieldnames
+    try:
+        cnn: dict[str, dict] = {}
+        with cnn_path.open() as f:
+            for r in csv.DictReader(f):
+                key = r.get("lig_id") or r.get("ligand") or ""
+                if key:
+                    cnn[key] = r
+        if not cnn:
+            return rows, fieldnames
+
+        new_fields = list(fieldnames)
+        for col in ("CNNscore", "CNNaffinity"):
+            if col not in new_fields:
+                new_fields.append(col)
+        for row in rows:
+            entry = cnn.get(row.get(id_col, ""))
+            row["CNNscore"]    = entry.get("CNNscore", "")    if entry else ""
+            row["CNNaffinity"] = entry.get("CNNaffinity", "") if entry else ""
+        return rows, new_fields
+    except Exception:
+        return rows, fieldnames
+
+
 def _load_failed_docking(shard_dirs: list[Path]) -> list[dict]:
     """Return per-ligand docking failure rows from failed_docking.csv files."""
     rows: list[dict] = []
@@ -326,6 +361,8 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
     deduped, fieldnames = _add_pose_validity_cols(
         deduped, fieldnames, poses_out, output_dir, id_col,
     )
+
+    deduped, fieldnames = _add_cnn_score_cols(deduped, fieldnames, output_dir, id_col)
 
     scores_out = output_dir / "scores.csv"
     if deduped and fieldnames:
