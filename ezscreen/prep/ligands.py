@@ -93,8 +93,10 @@ def _embed_3d(mol, mmff_max_iters: int = 0, force_field: str = "MMFF94"):
 
 
 def _to_pdbqt(mol) -> str | None:
+    # Import outside the try so a broken/missing meeko install raises loudly
+    # instead of being charged to every ligand as an "unsupported atoms" failure.
+    from meeko import MoleculePreparation, PDBQTWriterLegacy
     try:
-        from meeko import MoleculePreparation, PDBQTWriterLegacy
         setups = MoleculePreparation().prepare(mol)
         pdbqt, ok, _ = PDBQTWriterLegacy.write_string(setups[0])
         return pdbqt if ok else None
