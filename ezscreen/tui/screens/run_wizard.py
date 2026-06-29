@@ -873,48 +873,20 @@ class RunWizardScreen(Screen):
                     )
                 else:
                     # Single-account Kaggle path
-                    import jinja2
-
-                    from ezscreen import __version__
-
-                    template_path = (
-                        Path(__file__).parent.parent.parent
-                        / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2"
-                    )
-                    env = jinja2.Environment(
-                        variable_start_string="<<",
-                        variable_end_string=">>",
-                        block_start_string="<%",
-                        block_end_string="%>",
-                        loader=jinja2.FileSystemLoader(str(template_path.parent)),
-                    )
                     _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
-                    notebook_src = env.get_template(template_path.name).render(
-                        ezscreen_version=__version__,
+                    notebook_src = kaggle_runner.render_vina_notebook(
                         run_id=run_id,
-                        engine="unidock",
-                        mode="hybrid",
+                        shard_filenames=[p.name for p in shard_paths],
                         box_center=box["center"],
                         box_size=box["size"],
-                        notebook_index=0,
-                        total_notebooks=1,
-                        shard_filenames=[p.name for p in shard_paths],
-                        ph=cfg["run"].get("default_ph", 7.4),
                         search_mode=ctx["search_params"].get("search_mode", "balance"),
+                        ph=cfg["run"].get("default_ph", 7.4),
                         prep_on_kaggle=_prep_on_kaggle,
-                        max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
-                        max_mw=float(_prep_cfg.get("max_mw", 700.0)),
-                        max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
-                        mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
+                        accelerator=_gpu_type,
                         force_field=_force_field,
-                        enumerate_enabled=_enum_enabled,
-                        enumerate_protonation=_enum_opts["protonation"],
-                        enumerate_tautomers=_enum_opts["tautomers"],
-                        enumerate_stereo=_enum_opts["stereo"],
-                        enumerate_ring=_enum_opts["ring"],
-                        max_variants_per_ligand=_enum_opts["max_variants"],
-                        poses_returned=int(cfg.get("results", {}).get("poses_returned", 25)),
-                        gpu_ids="0,1" if _gpu_type == "nvidiaTeslaT4" else "",
+                        enumerate_opts=_enum_opts,
+                        prep_cfg=_prep_cfg,
+                        results_cfg=cfg.get("results", {}),
                     )
                     notebook_path = work_dir / "notebook.ipynb"
                     notebook_path.write_text(notebook_src, encoding="utf-8")

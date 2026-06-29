@@ -527,6 +527,82 @@ def _set_account_creds(kaggle_json_path: str | Path) -> str:
     return username
 
 
+def render_vina_notebook(
+    *,
+    run_id: str,
+    shard_filenames: list[str],
+    notebook_index: int = 0,
+    total_notebooks: int = 1,
+    box_center: list[float] | None = None,
+    box_size: list[float] | None = None,
+    search_mode: str = "balance",
+    ph: float = 7.4,
+    prep_on_kaggle: bool = True,
+    accelerator: str = "nvidiaTeslaP100",
+    force_field: str | None = None,
+    enumerate_opts: dict | None = None,
+    prep_cfg: dict | None = None,
+    results_cfg: dict | None = None,
+) -> str:
+    """Render the vina_shard docking notebook to source text for a single kernel.
+
+    Shared by the multi-account runner and the headless driver so the template var
+    set lives in one place.  Loads [prep]/[results] config when not supplied.
+    """
+    import jinja2
+
+    from ezscreen import __version__
+
+    if prep_cfg is None or results_cfg is None:
+        try:
+            from ezscreen import config as _cfg
+            _full = _cfg.load()
+            if prep_cfg is None:
+                prep_cfg = _full.get("prep", {})
+            if results_cfg is None:
+                results_cfg = _full.get("results", {})
+        except Exception:
+            prep_cfg = prep_cfg or {}
+            results_cfg = results_cfg or {}
+
+    _eo = enumerate_opts or {}
+    _enum_enabled = bool(_eo.get("enabled", prep_cfg.get("enumerate_enabled", False)))
+
+    template_path = Path(__file__).parent / "templates" / "vina_shard.ipynb.j2"
+    j2_env = jinja2.Environment(
+        variable_start_string="<<", variable_end_string=">>",
+        block_start_string="<%",    block_end_string="%>",
+        loader=jinja2.FileSystemLoader(str(template_path.parent)),
+    )
+    return j2_env.get_template(template_path.name).render(
+        ezscreen_version=__version__,
+        run_id=run_id,
+        engine="unidock",
+        mode="hybrid",
+        box_center=box_center or [],
+        box_size=box_size or [],
+        notebook_index=notebook_index,
+        total_notebooks=total_notebooks,
+        shard_filenames=shard_filenames,
+        ph=ph,
+        search_mode=search_mode,
+        prep_on_kaggle=prep_on_kaggle,
+        max_heavy_atoms=int(prep_cfg.get("max_heavy_atoms", 70)),
+        max_mw=float(prep_cfg.get("max_mw", 700.0)),
+        max_rotatable_bonds=int(prep_cfg.get("max_rotatable_bonds", 20)),
+        mmff_max_iters=int(prep_cfg.get("mmff_max_iters", 0)),
+        force_field=force_field or str(prep_cfg.get("force_field", "MMFF94")),
+        enumerate_enabled=_enum_enabled,
+        enumerate_protonation=bool(_eo.get("protonation", prep_cfg.get("enumerate_protonation", True))),
+        enumerate_tautomers=bool(_eo.get("tautomers", prep_cfg.get("enumerate_tautomers", True))),
+        enumerate_stereo=bool(_eo.get("stereo", prep_cfg.get("enumerate_stereo", False))),
+        enumerate_ring=bool(_eo.get("ring", prep_cfg.get("enumerate_ring", False))),
+        max_variants_per_ligand=int(_eo.get("max_variants", prep_cfg.get("max_variants_per_ligand", 4))),
+        poses_returned=int(results_cfg.get("poses_returned", 25)),
+        gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
+    )
+
+
 def run_multi_account_screening(
     run_id: str,
     receptor_pdbqt: Path,
@@ -550,10 +626,6 @@ def run_multi_account_screening(
     in one dataset per account; shards are distributed evenly across all notebooks.
     Kernels are submitted sequentially (env-var safety), then polled concurrently.
     """
-    import jinja2
-
-    from ezscreen import __version__
-
     n_shards = len(shard_paths)
 
     # shard_count semantics: None = auto (1 notebook), 0 = excluded, N > 0 = explicit
@@ -639,13 +711,6 @@ def run_multi_account_screening(
     time.sleep(90)
 
     # Render and submit each notebook sequentially (env-var safety)
-    template_path = Path(__file__).parent / "templates" / "vina_shard.ipynb.j2"
-    j2_env = jinja2.Environment(
-        variable_start_string="<<", variable_end_string=">>",
-        block_start_string="<%",    block_end_string="%>",
-        loader=jinja2.FileSystemLoader(str(template_path.parent)),
-    )
-
     try:
         from ezscreen import config as _cfg
         _full_cfg = _cfg.load()
@@ -654,9 +719,6 @@ def run_multi_account_screening(
     except Exception:
         _prep_cfg = {}
         _results_cfg = {}
-
-    _eo = enumerate_opts or {}
-    _enum_enabled = bool(_eo.get("enabled", _prep_cfg.get("enumerate_enabled", False)))
 
     submissions: list[dict] = []
     for spec in account_specs:
@@ -672,32 +734,21 @@ def run_multi_account_screening(
             nb_dir      = sub_work / f"nb_{nb_idx}"
             nb_dir.mkdir(parents=True, exist_ok=True)
 
-            nb_src = j2_env.get_template(template_path.name).render(
-                ezscreen_version=__version__,
+            nb_src = render_vina_notebook(
                 run_id=nb_run_id,
-                engine="unidock",
-                mode="hybrid",
-                box_center=box_center or [],
-                box_size=box_size or [],
+                shard_filenames=filenames,
                 notebook_index=nb_idx,
                 total_notebooks=total_notebooks,
-                shard_filenames=filenames,
-                ph=ph,
+                box_center=box_center,
+                box_size=box_size,
                 search_mode=search_mode,
+                ph=ph,
                 prep_on_kaggle=prep_on_kaggle,
-                max_heavy_atoms=int(_prep_cfg.get("max_heavy_atoms", 70)),
-                max_mw=float(_prep_cfg.get("max_mw", 700.0)),
-                max_rotatable_bonds=int(_prep_cfg.get("max_rotatable_bonds", 20)),
-                mmff_max_iters=int(_prep_cfg.get("mmff_max_iters", 0)),
-                force_field=force_field or str(_prep_cfg.get("force_field", "MMFF94")),
-                enumerate_enabled=_enum_enabled,
-                enumerate_protonation=bool(_eo.get("protonation", _prep_cfg.get("enumerate_protonation", True))),
-                enumerate_tautomers=bool(_eo.get("tautomers", _prep_cfg.get("enumerate_tautomers", True))),
-                enumerate_stereo=bool(_eo.get("stereo", _prep_cfg.get("enumerate_stereo", False))),
-                enumerate_ring=bool(_eo.get("ring", _prep_cfg.get("enumerate_ring", False))),
-                max_variants_per_ligand=int(_eo.get("max_variants", _prep_cfg.get("max_variants_per_ligand", 4))),
-                poses_returned=int(_results_cfg.get("poses_returned", 25)),
-                gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
+                accelerator=accelerator,
+                force_field=force_field,
+                enumerate_opts=enumerate_opts,
+                prep_cfg=_prep_cfg,
+                results_cfg=_results_cfg,
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)
