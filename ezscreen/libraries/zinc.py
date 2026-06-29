@@ -4,7 +4,10 @@ from pathlib import Path
 
 import requests
 
-# ZINC15 REST API — still operational, simpler than ZINC22 tranche system
+from ezscreen.errors import LibrarySourceUnavailableError
+
+# ZINC15 REST API — bot-gated as of 2026-06: returns 403, or 200 with an HTML
+# "Verification Required" page, so it is no longer usable programmatically
 _ZINC15_API = "https://zinc15.docking.org/substances.txt"
 _PAGE_SIZE = 1000
 
@@ -60,9 +63,20 @@ def _fetch_page(
     try:
         resp = session.get(_ZINC15_API, params=params, timeout=30)
         resp.raise_for_status()
-        return _parse_lines(resp.text)
-    except Exception:
-        return []
+    except requests.RequestException as exc:
+        raise LibrarySourceUnavailableError(
+            f"ZINC15 request failed: {exc}. The ZINC15 query API is no longer "
+            "reachable programmatically. Use the ChEMBL source or a local "
+            "SMILES/SDF file instead."
+        ) from exc
+    head = resp.text[:2000].lower()
+    if "<html" in head or "verification required" in head:
+        raise LibrarySourceUnavailableError(
+            "ZINC15 returned an anti-bot verification page instead of data. Its "
+            "query API is no longer usable programmatically. Use the ChEMBL "
+            "source or a local SMILES/SDF file instead."
+        )
+    return _parse_lines(resp.text)
 
 
 def download_zinc_library(
@@ -119,7 +133,14 @@ def download_zinc_library(
             )
             page = 1
             while len(rows) < n_wanted:
-                batch = _fetch_page(session, filters, page)
+                try:
+                    batch = _fetch_page(session, filters, page)
+                except LibrarySourceUnavailableError:
+                    # keep whatever we already pulled; only fail outright if the
+                    # source was dead from the first page (no empty file written)
+                    if rows:
+                        break
+                    raise
                 if not batch:
                     break
                 for smi, zid in batch:

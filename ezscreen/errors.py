@@ -110,6 +110,18 @@ class KernelPreemptedError(KaggleError):
 
 
 # ---------------------------------------------------------------------------
+# Compound library errors
+# ---------------------------------------------------------------------------
+
+class LibraryError(EzscreenError):
+    """Base class for compound-library download errors."""
+
+
+class LibrarySourceUnavailableError(LibraryError):
+    """A library source endpoint is unreachable or is blocking automated requests."""
+
+
+# ---------------------------------------------------------------------------
 # Network errors — transient
 # ---------------------------------------------------------------------------
 

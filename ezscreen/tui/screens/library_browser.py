@@ -170,9 +170,11 @@ class LibraryBrowserScreen(Screen[str | None]):
                 preset=preset,
                 purchasable=purchasable,
             )
-            msg = f"[#3fb950]Done.[/#3fb950]  {n:,} compounds saved to {output_path}"
-            self.app.call_from_thread(self._finish, msg, output_path)
-            return
+            if n:
+                msg = f"[#3fb950]Done.[/#3fb950]  {n:,} compounds saved to {output_path}"
+                self.app.call_from_thread(self._finish, msg, output_path)
+                return
+            msg = f"[#e3b341]No compounds returned for {preset}.[/#e3b341]"
         except Exception as exc:
             msg = f"[#f85149]Error: {exc}[/#f85149]"
 
