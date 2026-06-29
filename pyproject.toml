@@ -32,6 +32,10 @@ dependencies = [
     "rdkit>=2024.3.1",
     "pdbfixer>=1.9.0",
     "meeko>=0.5.0",
+    # meeko 0.7.x imports scipy and gemmi but declares no dependencies of its own,
+    # so a clean install is missing them and every PDBQT conversion fails silently
+    "scipy>=1.10.0",
+    "gemmi>=0.6.0",
     "py3Dmol>=2.0.0",
     "requests>=2.31.0",
     "textual>=0.86.0,<1.0.0",
