@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.12.1 — 2026-06-30
+
+> Theme: quality of life. The run wizard's overloaded options step is split into clear, single-purpose screens.
+
+### Changed
+
+- **Run wizard reorganised into concern-based steps** — the crowded "Run Options" step (which mixed prep, search, and compute choices) is now three separate screens: **Ligand Prep** (ADMET pre-filter, force field, enumeration), **Engine & Scoring** (search depth), and **Compute** (local CPU / Kaggle GPU, exhaustiveness, multi-account assignment). Same options, clearer flow — no change to how a run is configured or submitted
+
+### Internal
+
+- Groundwork for upcoming engine selection (a docking-engine profile registry and a GNINA CNN-rescore Kaggle kernel + runner) is included but not yet wired into the UI
+
 ## v1.12.0 — 2026-06-27
 
 > Theme: better chemistry in. Make ligand prep correct and explicit — the right force field, the right protonation/tautomer/stereo form, and a check that the 3D conformer isn't broken — instead of silently docking one fixed guess.
