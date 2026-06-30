@@ -33,6 +33,9 @@ class EngineProfile:
     native_score_type: str  # key into results.score_types
     implemented: bool
     note: str = ""
+    # Kaggle notebook template that drives this engine's docking, or None when no
+    # docking path exists yet. The wizard only offers engines that have one.
+    kaggle_template: str | None = None
 
 
 _ENGINES: dict[str, EngineProfile] = {
@@ -47,6 +50,7 @@ _ENGINES: dict[str, EngineProfile] = {
         native_score_type="vina_kcal_mol",
         implemented=True,
         note="Fast GPU Vina-family docking; the default.",
+        kaggle_template="vina_shard.ipynb.j2",
     ),
     "unidock-pro": EngineProfile(
         key="unidock-pro",
@@ -57,8 +61,10 @@ _ENGINES: dict[str, EngineProfile] = {
         default_scoring="vina",
         supports_cnn=False,
         native_score_type="vina_kcal_mol",
-        implemented=True,
-        note="UniDock with improved sampling; built from source on Kaggle.",
+        implemented=False,
+        note="UniDock-Pro's real value is ligand-based + hybrid screening (a separate "
+             "fork). Its structure-based docking is the same engine as UniDock, so it is "
+             "not offered as a docking engine; the LBVS/hybrid modes are a future feature.",
     ),
     "gnina": EngineProfile(
         key="gnina",
@@ -68,9 +74,12 @@ _ENGINES: dict[str, EngineProfile] = {
         scoring_functions=_VINA_FAMILY,
         default_scoring="vina",
         supports_cnn=True,
-        native_score_type="cnn_affinity",
+        # Ranks by the Vina-style affinity (kcal/mol) so the merger's floor/ceiling/
+        # sort logic is unchanged; CNNscore/CNNaffinity ride along as extra columns.
+        native_score_type="vina_kcal_mol",
         implemented=True,
-        note="Vina-family docking plus CNN scoring; slower per ligand than UniDock.",
+        note="Vina-family docking with CNN scores added per pose; slower per ligand than UniDock.",
+        kaggle_template="vina_shard.ipynb.j2",
     ),
     # ---- declared, not yet implemented (Phase 33 slots) ----
     "vina-local": EngineProfile(
@@ -134,8 +143,13 @@ def all_engines() -> list[EngineProfile]:
 
 
 def implemented_engines() -> list[EngineProfile]:
-    """Engines the wizard can actually submit — the only ones offered for now."""
+    """Engines that are implemented in some form (docking and/or rescore)."""
     return [e for e in _ENGINES.values() if e.implemented]
+
+
+def dockable_engines() -> list[EngineProfile]:
+    """Engines the run wizard offers — those with a working docking template."""
+    return [e for e in _ENGINES.values() if e.implemented and e.kaggle_template]
 
 
 def scoring_functions(key: str) -> tuple[str, ...]:

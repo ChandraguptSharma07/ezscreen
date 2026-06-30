@@ -543,15 +543,21 @@ def render_vina_notebook(
     enumerate_opts: dict | None = None,
     prep_cfg: dict | None = None,
     results_cfg: dict | None = None,
+    engine: str = "unidock",
 ) -> str:
-    """Render the vina_shard docking notebook to source text for a single kernel.
+    """Render the docking notebook to source text for a single kernel.
 
     Shared by the multi-account runner and the headless driver so the template var
     set lives in one place.  Loads [prep]/[results] config when not supplied.
+    The template is chosen from the engine's registry profile (UniDock variants
+    share vina_shard and switch on the `engine` template var).
     """
     import jinja2
 
     from ezscreen import __version__
+    from ezscreen.backends import engines as _engines
+
+    template_name = _engines.get(engine).kaggle_template or "vina_shard.ipynb.j2"
 
     if prep_cfg is None or results_cfg is None:
         try:
@@ -568,7 +574,7 @@ def render_vina_notebook(
     _eo = enumerate_opts or {}
     _enum_enabled = bool(_eo.get("enabled", prep_cfg.get("enumerate_enabled", False)))
 
-    template_path = Path(__file__).parent / "templates" / "vina_shard.ipynb.j2"
+    template_path = Path(__file__).parent / "templates" / template_name
     j2_env = jinja2.Environment(
         variable_start_string="<<", variable_end_string=">>",
         block_start_string="<%",    block_end_string="%>",
@@ -577,7 +583,7 @@ def render_vina_notebook(
     return j2_env.get_template(template_path.name).render(
         ezscreen_version=__version__,
         run_id=run_id,
-        engine="unidock",
+        engine=engine,
         mode="hybrid",
         box_center=box_center or [],
         box_size=box_size or [],
@@ -618,6 +624,7 @@ def run_multi_account_screening(
     prep_on_kaggle: bool = True,
     force_field: str | None = None,
     enumerate_opts: dict | None = None,
+    engine: str = "unidock",
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -749,6 +756,7 @@ def run_multi_account_screening(
                 enumerate_opts=enumerate_opts,
                 prep_cfg=_prep_cfg,
                 results_cfg=_results_cfg,
+                engine=engine,
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)
