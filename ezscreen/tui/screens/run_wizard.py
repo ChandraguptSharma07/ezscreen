@@ -35,16 +35,20 @@ _STEPS = [
     "step-receptor",
     "step-site",
     "step-ligands",
-    "step-options",
+    "step-prep",
+    "step-engine",
+    "step-compute",
     "step-confirm",
 ]
 
 _STEP_LABELS = [
-    "Step 1 of 5 — Receptor & Chains",
-    "Step 2 of 5 — Binding Site",
-    "Step 3 of 5 — Ligand Library",
-    "Step 4 of 5 — Run Options",
-    "Step 5 of 5 — Confirm & Submit",
+    "Step 1 of 7 — Receptor & Chains",
+    "Step 2 of 7 — Binding Site",
+    "Step 3 of 7 — Ligand Library",
+    "Step 4 of 7 — Ligand Prep",
+    "Step 5 of 7 — Engine & Scoring",
+    "Step 6 of 7 — Compute",
+    "Step 7 of 7 — Confirm & Submit",
 ]
 
 
@@ -141,8 +145,49 @@ class RunWizardScreen(Screen):
                         yield Button("Download library", id="btn-lib-browser")
                     yield Static("", id="lig-status", classes="form-status")
 
-                # ── Step 4: Run Options ───────────────────────────────
-                with VerticalScroll(id="step-options", classes="wizard-step"):
+                # -- Step 4: Ligand Prep --
+                with VerticalScroll(id="step-prep", classes="wizard-step"):
+                    yield Label("ADMET pre-filter", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Remove obvious drug-like failures before docking"
+                        " (recommended)[/#6e7681]"
+                    )
+                    yield Switch(id="opt-admet", value=True)
+                    yield Label("Conformer force field", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Defaults to your settings choice; change it for this run only.[/#6e7681]"
+                    )
+                    yield Select(_FORCE_FIELD_OPTIONS, id="opt-force-field", allow_blank=False)
+                    yield Label("Enumerate ligand variants", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Protonation/tautomer/stereo/ring variants via Gypsum-DL on Kaggle."
+                        " Which variant types & the cap come from Settings.[/#6e7681]"
+                    )
+                    yield Switch(id="opt-enumerate")
+
+                # -- Step 5: Engine & Scoring --
+                with VerticalScroll(id="step-engine", classes="wizard-step"):
+                    # Reserved for the engine selector + scoring-function selector
+                    # + CNN-rescore toggle (Phase 30 Features C/D/E). For now this
+                    # step carries the search-depth control moved out of Run Options.
+                    yield Label("Search depth", classes="form-section", id="lbl-depth")
+                    with RadioSet(id="opt-depth"):
+                        yield RadioButton(
+                            "Fast       \u2014 triage only, misses ~25% best poses",
+                            id="rb-fast",
+                        )
+                        yield RadioButton(
+                            "Balanced \u2605 \u2014 standard VS, good for rigid pockets",
+                            id="rb-balanced",
+                            value=True,
+                        )
+                        yield RadioButton(
+                            "Thorough   \u2014 flexible ligands, induced-fit targets",
+                            id="rb-thorough",
+                        )
+
+                # -- Step 6: Compute --
+                with VerticalScroll(id="step-compute", classes="wizard-step"):
                     yield Label("Compute backend", classes="form-section")
                     yield Static(
                         "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
@@ -162,41 +207,9 @@ class RunWizardScreen(Screen):
                             "T4 × 2 (32 GB) — more memory, uses both GPUs",
                             id="rb-t4x2",
                         )
-                    yield Label("ADMET pre-filter", classes="form-section")
-                    yield Static(
-                        "[#6e7681]Remove obvious drug-like failures before docking"
-                        " (recommended)[/#6e7681]"
-                    )
-                    yield Switch(id="opt-admet", value=True)
-                    yield Label("Search depth", classes="form-section", id="lbl-depth")
-                    with RadioSet(id="opt-depth"):
-                        yield RadioButton(
-                            "Fast       \u2014 triage only, misses ~25% best poses",
-                            id="rb-fast",
-                        )
-                        yield RadioButton(
-                            "Balanced \u2605 \u2014 standard VS, good for rigid pockets",
-                            id="rb-balanced",
-                            value=True,
-                        )
-                        yield RadioButton(
-                            "Thorough   \u2014 flexible ligands, induced-fit targets",
-                            id="rb-thorough",
-                        )
-                    yield Label("Conformer force field", classes="form-section")
-                    yield Static(
-                        "[#6e7681]Defaults to your settings choice; change it for this run only.[/#6e7681]"
-                    )
-                    yield Select(_FORCE_FIELD_OPTIONS, id="opt-force-field", allow_blank=False)
-                    yield Label("Enumerate ligand variants", classes="form-section")
-                    yield Static(
-                        "[#6e7681]Protonation/tautomer/stereo/ring variants via Gypsum-DL on Kaggle."
-                        " Which variant types & the cap come from Settings.[/#6e7681]"
-                    )
-                    yield Switch(id="opt-enumerate")
                     yield VerticalScroll(id="acct-assignment-section")
 
-                # ── Step 5: Confirm & Submit ──────────────────────────
+                # -- Step 7: Confirm & Submit --
                 with Vertical(id="step-confirm", classes="wizard-step"):
                     yield Label("Ready to submit", classes="form-section")
                     yield Static("", id="confirm-summary", classes="confirm-summary")
@@ -565,11 +578,26 @@ class RunWizardScreen(Screen):
                 return f"File not found: {p}"
             self._ctx["ligand_path"] = p
 
-        elif step == "step-options":
+        elif step == "step-prep":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
-            self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
             self._ctx["force_field"] = str(self.query_one("#opt-force-field", Select).value)
             self._ctx["enumerate_enabled"] = self.query_one("#opt-enumerate", Switch).value
+
+        elif step == "step-engine":
+            depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
+            label     = str(depth_btn.label) if depth_btn else ""
+            if "Fast" in label:
+                self._ctx["search_params"] = {"search_mode": "fast"}
+                self._ctx["search_label"]  = "Fast"
+            elif "Thorough" in label:
+                self._ctx["search_params"] = {"search_mode": "detail"}
+                self._ctx["search_label"]  = "Thorough"
+            else:
+                self._ctx["search_params"] = {"search_mode": "balance"}
+                self._ctx["search_label"]  = "Balanced"
+
+        elif step == "step-compute":
+            self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
             gpu_btn = self.query_one("#opt-gpu-type", RadioSet).pressed_button
             self._ctx["gpu_type"] = (
                 "nvidiaTeslaT4"
@@ -600,17 +628,6 @@ class RunWizardScreen(Screen):
                     self._ctx["account_assignments"] = None
             else:
                 self._ctx["account_assignments"] = None
-            depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
-            label     = str(depth_btn.label) if depth_btn else ""
-            if "Fast" in label:
-                self._ctx["search_params"] = {"search_mode": "fast"}
-                self._ctx["search_label"]  = "Fast"
-            elif "Thorough" in label:
-                self._ctx["search_params"] = {"search_mode": "detail"}
-                self._ctx["search_label"]  = "Thorough"
-            else:
-                self._ctx["search_params"] = {"search_mode": "balance"}
-                self._ctx["search_label"]  = "Balanced"
 
         return None
 
