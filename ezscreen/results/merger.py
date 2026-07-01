@@ -164,6 +164,32 @@ def _add_cnn_score_cols(
         return rows, fieldnames
 
 
+def join_cnn_scores(output_dir: Path) -> bool:
+    """Left-join cnn_scores.csv into an existing scores.csv in place.
+
+    Used by the results viewer after an on-demand GNINA rescore, so CNN columns
+    appear without a full re-merge. Returns True if CNN columns were added.
+    """
+    scores_csv = output_dir / "scores.csv"
+    if not scores_csv.exists():
+        return False
+    with scores_csv.open(newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = list(reader.fieldnames or [])
+    if not rows or not fieldnames:
+        return False
+    id_col = fieldnames[0]
+    new_rows, new_fields = _add_cnn_score_cols(rows, fieldnames, output_dir, id_col)
+    if "CNNscore" not in new_fields:
+        return False
+    with scores_csv.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=new_fields, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(new_rows)
+    return True
+
+
 def _load_failed_docking(shard_dirs: list[Path]) -> list[dict]:
     """Return per-ligand docking failure rows from failed_docking.csv files."""
     rows: list[dict] = []

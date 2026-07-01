@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 
-from ezscreen.results.merger import merge_shard_results
+from ezscreen.results.merger import join_cnn_scores, merge_shard_results
 
 
 def _write(path, fieldnames, rows):
@@ -79,6 +79,28 @@ def test_merge_joins_cnn_scores_when_present(tmp_path):
     assert by_name["A"]["CNNscore"] == "0.91"
     assert by_name["A"]["CNNaffinity"] == "6.2"
     # a ligand with no CNN entry gets blank cells, never an error
+    assert by_name["B"]["CNNscore"] == ""
+
+
+def test_join_cnn_scores_updates_existing_scores_csv(tmp_path):
+    out = tmp_path / "output"
+    out.mkdir()
+    _write(out / "scores.csv", ["ligand", "score", "name", "smiles"], [
+        {"ligand": "nb0_lig_00000", "score": "-8.1", "name": "A", "smiles": "CCO"},
+        {"ligand": "nb0_lig_00001", "score": "-7.0", "name": "B", "smiles": "c1ccccc1"},
+    ])
+    # no cnn_scores.csv yet → no-op
+    assert join_cnn_scores(out) is False
+    assert "CNNscore" not in list(csv.DictReader((out / "scores.csv").open()))[0]
+
+    _write(out / "cnn_scores.csv", ["lig_id", "CNNscore", "CNNaffinity"], [
+        {"lig_id": "nb0_lig_00000", "CNNscore": "0.91", "CNNaffinity": "6.2"},
+    ])
+    assert join_cnn_scores(out) is True
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["A"]["CNNscore"] == "0.91"
+    assert by_name["A"]["CNNaffinity"] == "6.2"
     assert by_name["B"]["CNNscore"] == ""
 
 
