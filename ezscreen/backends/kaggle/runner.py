@@ -544,6 +544,7 @@ def render_vina_notebook(
     prep_cfg: dict | None = None,
     results_cfg: dict | None = None,
     engine: str = "unidock",
+    scoring: str = "vina",
 ) -> str:
     """Render the docking notebook to source text for a single kernel.
 
@@ -584,6 +585,7 @@ def render_vina_notebook(
         ezscreen_version=__version__,
         run_id=run_id,
         engine=engine,
+        scoring=scoring,
         mode="hybrid",
         box_center=box_center or [],
         box_size=box_size or [],
@@ -625,6 +627,7 @@ def run_multi_account_screening(
     force_field: str | None = None,
     enumerate_opts: dict | None = None,
     engine: str = "unidock",
+    scoring: str = "vina",
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -757,6 +760,7 @@ def run_multi_account_screening(
                 prep_cfg=_prep_cfg,
                 results_cfg=_results_cfg,
                 engine=engine,
+                scoring=scoring,
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)

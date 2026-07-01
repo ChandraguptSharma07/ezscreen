@@ -15,8 +15,10 @@ from dataclasses import dataclass
 # AutoDock-GPU slot in later (Phase 33) as one new entry + their runner, without
 # rewiring the wizard.
 
-# Scoring functions shared across the Vina-family engines.
-_VINA_FAMILY = ("vina", "vinardo", "ad4")
+# Scoring functions shared across the Vina-family engines that are drop-in (no
+# extra setup). ad4 is deliberately excluded: it needs precomputed AutoDock4
+# affinity maps (autogrid, --maps instead of --receptor) — a separate feature.
+_VINA_FAMILY = ("vina", "vinardo")
 
 DEFAULT_ENGINE = "unidock"
 

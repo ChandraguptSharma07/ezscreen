@@ -177,6 +177,8 @@ class RunWizardScreen(Screen):
                                 _eng.label, id=f"engine-{_eng.key}", value=(_i == 0)
                             )
                     yield Static("", id="engine-note", classes="form-status")
+                    yield Label("Scoring function", classes="form-section", id="lbl-scoring")
+                    yield Select([("Vina", "vina")], id="opt-scoring", allow_blank=False)
                     yield Label("Search depth", classes="form-section", id="lbl-depth")
                     with RadioSet(id="opt-depth"):
                         yield RadioButton(
@@ -245,6 +247,7 @@ class RunWizardScreen(Screen):
         self.query_one("#opt-gpu-type").display = True
         self._load_defaults()
         self._update_engine_note()
+        self._update_scoring_options()
         self._populate_account_assignment()
 
     def _load_defaults(self) -> None:
@@ -299,6 +302,8 @@ class RunWizardScreen(Screen):
             self.query_one("#lbl-engine").display = not local_on
             self.query_one("#opt-engine").display = not local_on
             self.query_one("#engine-note").display = not local_on
+            self.query_one("#lbl-scoring").display = not local_on
+            self.query_one("#opt-scoring").display = not local_on
             acct_section = self.query_one("#acct-assignment-section", VerticalScroll)
             if local_on:
                 acct_section.display = False
@@ -344,12 +349,23 @@ class RunWizardScreen(Screen):
             self._show_site_sub(label)
         elif event.radio_set.id == "opt-engine":
             self._update_engine_note()
+            self._update_scoring_options()
+
+    def _selected_engine(self) -> str:
+        btn = self.query_one("#opt-engine", RadioSet).pressed_button
+        return btn.id.removeprefix("engine-") if btn and btn.id else "unidock"
 
     def _update_engine_note(self) -> None:
-        btn = self.query_one("#opt-engine", RadioSet).pressed_button
-        key = btn.id.removeprefix("engine-") if btn and btn.id else "unidock"
-        prof = engines.get(key)
+        prof = engines.get(self._selected_engine())
         self.query_one("#engine-note", Static).update(f"[#6e7681]{prof.note}[/#6e7681]")
+
+    def _update_scoring_options(self) -> None:
+        key = self._selected_engine()
+        fns = engines.scoring_functions(key) or ("vina",)
+        sel = self.query_one("#opt-scoring", Select)
+        current = sel.value if sel.value != Select.BLANK else None
+        sel.set_options([(f.capitalize(), f) for f in fns])
+        sel.value = current if current in fns else (engines.default_scoring(key) or fns[0])
 
     def _show_site_sub(self, label: str) -> None:
         for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
@@ -603,10 +619,9 @@ class RunWizardScreen(Screen):
             self._ctx["enumerate_enabled"] = self.query_one("#opt-enumerate", Switch).value
 
         elif step == "step-engine":
-            eng_btn = self.query_one("#opt-engine", RadioSet).pressed_button
-            self._ctx["engine"] = (
-                eng_btn.id.removeprefix("engine-") if eng_btn and eng_btn.id else "unidock"
-            )
+            self._ctx["engine"] = self._selected_engine()
+            _scoring = self.query_one("#opt-scoring", Select).value
+            self._ctx["scoring"] = str(_scoring) if _scoring != Select.BLANK else "vina"
             depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
             label     = str(depth_btn.label) if depth_btn else ""
             if "Fast" in label:
@@ -712,6 +727,7 @@ class RunWizardScreen(Screen):
             if ctx.get("run_locally")
             else engines.get(ctx.get("engine", "unidock")).label
         )
+        scoring_label = ctx.get("scoring", "vina").capitalize()
         if ctx.get("run_locally"):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
@@ -728,6 +744,7 @@ class RunWizardScreen(Screen):
             f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
             f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
             f"[bold #6e7681]Engine       [/bold #6e7681][#f0f6fc]{engine_label}[/#f0f6fc]",
+            f"[bold #6e7681]Scoring      [/bold #6e7681][#f0f6fc]{scoring_label}[/#f0f6fc]",
             f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
             f"[bold #6e7681]Force field  [/bold #6e7681][#f0f6fc]{force_field}[/#f0f6fc]",
             f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
@@ -917,6 +934,7 @@ class RunWizardScreen(Screen):
                         force_field=_force_field,
                         enumerate_opts=_enum_opts,
                         engine=ctx.get("engine", "unidock"),
+                        scoring=ctx.get("scoring", "vina"),
                     )
                 else:
                     # Single-account Kaggle path
@@ -935,6 +953,7 @@ class RunWizardScreen(Screen):
                         prep_cfg=_prep_cfg,
                         results_cfg=cfg.get("results", {}),
                         engine=ctx.get("engine", "unidock"),
+                        scoring=ctx.get("scoring", "vina"),
                     )
                     notebook_path = work_dir / "notebook.ipynb"
                     notebook_path.write_text(notebook_src, encoding="utf-8")

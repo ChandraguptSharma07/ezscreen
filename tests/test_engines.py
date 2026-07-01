@@ -54,3 +54,25 @@ def test_scoring_function_membership():
     assert engines.supports_scoring("unidock", "vinardo")
     assert not engines.supports_scoring("unidock", "cnn")
     assert not engines.supports_scoring("autodock-gpu", "vina")
+
+
+def test_offered_engines_exclude_ad4_scoring():
+    # ad4 needs precomputed affinity maps, so it is not a drop-in scoring choice.
+    for e in engines.dockable_engines():
+        assert "ad4" not in e.scoring_functions
+        assert set(e.scoring_functions) == {"vina", "vinardo"}
+
+
+def test_scoring_flag_threaded_into_docking_command():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    for eng in ("unidock", "gnina"):
+        src = runner.render_vina_notebook(
+            run_id="ezs-x", shard_filenames=["s0.smi"],
+            box_center=[1, 2, 3], box_size=[20, 20, 20],
+            engine=eng, scoring="vinardo",
+        )
+        joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+        assert "'--scoring', 'vinardo'" in joined, eng
