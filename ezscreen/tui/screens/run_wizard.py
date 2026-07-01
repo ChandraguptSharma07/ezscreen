@@ -823,6 +823,29 @@ class RunWizardScreen(Screen):
             ctx["box"] = box
             log(f"[#6e7681]Box: center {box['center']}  size {box['size']}[/#6e7681]")
 
+            # Optional box confidence: redock the co-crystal ligand and measure how
+            # well the docked pose reproduces the crystal pose. Fail-soft, opt-in.
+            if site["type"] == "cocrystal" and bool(cfg.get("prep", {}).get("redock_validation", False)):
+                try:
+                    from ezscreen.benchmark.redock import (
+                        RMSD_WARN_THRESHOLD,
+                        redock_cocrystal,
+                    )
+                    log("[#79c0ff]Validating box (redocking co-crystal ligand)...[/#79c0ff]")
+                    _rd = redock_cocrystal(
+                        receptor_pdbqt, ctx["pdb_path"], site["ligands"][0], box, work_dir,
+                    )
+                    if _rd and _rd.get("rmsd") is not None:
+                        ctx["redock_rmsd"] = _rd["rmsd"]
+                        if _rd["reliable"]:
+                            log(f"[#3fb950]Redock RMSD: {_rd['rmsd']:.2f} Å — box reproduces the crystal pose[/#3fb950]")
+                        else:
+                            log(f"[#e3b341]⚠ Redock RMSD: {_rd['rmsd']:.2f} Å (> {RMSD_WARN_THRESHOLD:.0f} Å) — box may be unreliable[/#e3b341]")
+                    else:
+                        log("[#6e7681]Redock validation skipped (could not extract/dock the ligand).[/#6e7681]")
+                except Exception:
+                    pass
+
             # ADMET pre-filter
             ligand_input = ctx["ligand_path"]
             if ctx.get("admet_pre_filter"):

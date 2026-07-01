@@ -45,6 +45,8 @@ class SettingsScreen(Screen):
             yield Label("Docking Defaults", classes="form-section")
             yield Label("Box padding (Å)", classes="form-label")
             yield Input(id="cfg-padding", placeholder="5.0")
+            yield Label("Validate box by redocking co-crystal ligand (local Vina)", classes="form-label")
+            yield Switch(id="cfg-redock-validation")
 
             yield Label("Notifications", classes="form-section")
             yield Label("Desktop notifications", classes="form-label")
@@ -144,6 +146,7 @@ class SettingsScreen(Screen):
         self.query_one("#cfg-max-mw", Input).value = str(pc.get("max_mw",           700.0))
         self.query_one("#cfg-max-rb", Input).value = str(pc.get("max_rotatable_bonds", 20))
         self.query_one("#cfg-prep-on-kaggle", Switch).value = bool(pc.get("prep_on_kaggle", True))
+        self.query_one("#cfg-redock-validation", Switch).value = bool(pc.get("redock_validation", False))
         mmff = int(pc.get("mmff_max_iters", 0))
         self.query_one("#cfg-mmff-converge", Switch).value = (mmff == 0)
         self.query_one("#cfg-mmff-iters", Input).value = str(mmff if mmff > 0 else 200)
@@ -224,6 +227,7 @@ class SettingsScreen(Screen):
                 "max_mw":                 _f("#cfg-max-mw", 700.0),
                 "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
                 "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
+                "redock_validation":      self.query_one("#cfg-redock-validation", Switch).value,
                 "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
                 "force_field":            str(self.query_one("#cfg-force-field", Select).value),
                 "enumerate_enabled":      self.query_one("#cfg-enum-enabled", Switch).value,
