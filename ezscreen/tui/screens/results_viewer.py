@@ -68,6 +68,7 @@ class ResultsScreen(Screen):
                 yield Button("Export Hits",            id="btn-export",    variant="default")
                 yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
                 yield Button("Analyse Interactions",   id="btn-plip",      variant="default")
+                yield Input(placeholder="CNN rescore top N (blank = default)", id="cnn-topn")
                 yield Button("CNN rescore (GNINA)",    id="btn-cnn",       variant="default")
                 yield Button("Sort by CNN affinity",   id="btn-sort-cnn",  variant="default")
                 yield Static("", id="cluster-result")
@@ -93,6 +94,7 @@ class ResultsScreen(Screen):
         self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
         self.query_one("#btn-plip").display    = False
+        self.query_one("#cnn-topn").display    = False
         self.query_one("#btn-cnn").display     = False
         self.query_one("#btn-sort-cnn").display = False
         self.query_one("#btn-collapse").display = False
@@ -679,12 +681,16 @@ class ResultsScreen(Screen):
 
     def _refresh_cnn_button(self) -> None:
         has_results = (self._output / "scores.csv").exists()
-        btn = self.query_one("#btn-cnn")
-        btn.display = has_results
-        already = (self._output / "cnn_scores.csv").exists()
-        btn.label = "CNN rescore (GNINA) — re-run" if already else "CNN rescore (GNINA)"
         has_cnn = any(r.get("CNNaffinity") for r in self._rows)
+        # A GNINA-engine run (or a prior rescore) already carries CNN scores, so
+        # re-running the rescore kernel is redundant — only offer it otherwise.
+        self.query_one("#btn-cnn").display = has_results and not has_cnn
+        self.query_one("#cnn-topn").display = has_results and not has_cnn
         self.query_one("#btn-sort-cnn").display = has_cnn
+        if has_cnn:
+            self.query_one("#cnn-result", Static).update(
+                "[#3fb950]CNN scores present — sort by CNN affinity above.[/#3fb950]"
+            )
 
     def _handle_cnn(self) -> None:
         work_dir = self._output.parent
@@ -706,10 +712,20 @@ class ResultsScreen(Screen):
             self.query_one("#cnn-result", Static).update("[#f85149]No poses.sdf to rescore.[/#f85149]")
             return
 
+        _raw_topn = self.query_one("#cnn-topn", Input).value.strip()
+        try:
+            top_n = int(_raw_topn) if _raw_topn else None
+        except ValueError:
+            self.query_one("#cnn-result", Static).update("[#f85149]Top N must be a whole number.[/#f85149]")
+            return
+        if top_n is not None and top_n <= 0:
+            top_n = None
+
         self.query_one("#btn-cnn").disabled = True
         self.query_one("#btn-cnn").label = "Rescoring..."
+        _scope = f"top {top_n}" if top_n else "default top-N"
         self.query_one("#cnn-result", Static).update(
-            "[#e3b341]Running GNINA rescore on Kaggle GPU...[/#e3b341]"
+            f"[#e3b341]Running GNINA rescore ({_scope}) on Kaggle GPU...[/#e3b341]"
         )
         run_id = self._run_id
         output = self._output
@@ -718,7 +734,7 @@ class ResultsScreen(Screen):
             from ezscreen.backends.kaggle.gnina_runner import run_gnina_rescore
             from ezscreen.results.merger import join_cnn_scores
             try:
-                result = run_gnina_rescore(run_id, work_dir)
+                result = run_gnina_rescore(run_id, work_dir, top_n=top_n)
                 joined = join_cnn_scores(output) if result["status"] == "complete" else False
                 self.app.call_from_thread(self._on_cnn_done, result, joined)
             except Exception as exc:

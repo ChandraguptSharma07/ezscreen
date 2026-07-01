@@ -124,18 +124,21 @@ def _download_gnina_output(kernel_ref: str, work_dir: Path) -> Path:
 
 
 def run_gnina_rescore(
-    run_id: str, work_dir: Path, accelerator: str = "nvidiaTeslaP100"
+    run_id: str,
+    work_dir: Path,
+    accelerator: str = "nvidiaTeslaP100",
+    top_n: int | None = None,
 ) -> dict[str, Any]:
     """CNN-rescore the top-N existing poses on a Kaggle GPU kernel, no re-docking.
 
     Mirrors plip_runner: upload receptor + poses, push a GPU kernel running
     `gnina --score_only`, poll, download cnn_scores.csv into the run output so the
-    next merge left-joins CNNscore/CNNaffinity. Returns dict with keys:
-    status, cnn_scores_path|None, error|None.
+    next merge left-joins CNNscore/CNNaffinity. `top_n` overrides the configured
+    default. Returns dict with keys: status, cnn_scores_path|None, error|None.
     """
     output_dir = work_dir / "output"
     cfg = config.load()
-    top_n = int(cfg.get("results", {}).get("interaction_top_n", 20))
+    top_n = int(top_n) if top_n else int(cfg.get("results", {}).get("interaction_top_n", 20))
 
     # Locate receptor PDB (resume.json → receptor/receptor_prep.pdb fallback)
     resume_json = work_dir / "resume.json"
