@@ -68,6 +68,80 @@ def cluster_hits(
     )
 
 
+@dataclass
+class InteractionClusterResult:
+    labels: list[int]                 # cluster index per entry (-1 = no interactions)
+    representative_indices: list[int] # entry index of each cluster's representative
+    sizes: list[int]
+    n_clusters: int
+
+
+def _interaction_fingerprint(entry: dict) -> frozenset:
+    """A hit's contact set: (chain, residue_number, interaction_type) tuples."""
+    feats = set()
+    for ix in entry.get("interactions", []) or []:
+        feats.add((
+            str(ix.get("chain", "")),
+            ix.get("residue_number", 0),
+            str(ix.get("type", "")),
+        ))
+    return frozenset(feats)
+
+
+def cluster_by_interactions(
+    entries: list[dict],
+    cutoff: float = 0.4,
+) -> InteractionClusterResult:
+    """Cluster hits by their PLIP interaction fingerprint (Jaccard + Butina).
+
+    `entries` is the interactions_top_n.json list. Complements scaffold clustering:
+    it groups hits that hit the same residues the same way, and picks the first
+    (best-ranked) member of each cluster as the representative.
+    """
+    from rdkit.ML.Cluster import Butina
+
+    fps       = [_interaction_fingerprint(e) for e in entries]
+    valid_idx = [i for i, f in enumerate(fps) if f]
+    labels    = [-1] * len(entries)
+
+    if len(valid_idx) < 2:
+        for cid, orig in enumerate(valid_idx):
+            labels[orig] = cid
+        return InteractionClusterResult(
+            labels=labels,
+            representative_indices=valid_idx,
+            sizes=[1] * len(valid_idx),
+            n_clusters=len(valid_idx),
+        )
+
+    vfps = [fps[i] for i in valid_idx]
+    dists: list[float] = []
+    for i in range(1, len(vfps)):
+        a = vfps[i]
+        for j in range(i):
+            b = vfps[j]
+            union = a | b
+            sim = (len(a & b) / len(union)) if union else 1.0
+            dists.append(1.0 - sim)
+
+    clusters = Butina.ClusterData(dists, len(vfps), 1.0 - cutoff, isDistData=True)
+
+    reps: list[int] = []
+    sizes: list[int] = []
+    for cid, members in enumerate(clusters):
+        reps.append(valid_idx[members[0]])
+        sizes.append(len(members))
+        for m in members:
+            labels[valid_idx[m]] = cid
+
+    return InteractionClusterResult(
+        labels=labels,
+        representative_indices=reps,
+        sizes=sizes,
+        n_clusters=len(clusters),
+    )
+
+
 def export_centroids(
     rows: list[dict],
     result: ClusterResult,
