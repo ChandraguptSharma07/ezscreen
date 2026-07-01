@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import json
 from pathlib import Path
 
 from ezscreen.benchmark.metrics import BenchmarkResult
@@ -465,6 +466,37 @@ def _interactions_heatmap_html(
     )
 
 
+def _interaction_cluster_section_html(entries: list[dict]) -> str:
+    """Cluster hits by PLIP interaction fingerprint; show a representative per cluster."""
+    if not entries or not any(e.get("interactions") for e in entries):
+        return ""
+    try:
+        from ezscreen.results.clustering import cluster_by_interactions
+        result = cluster_by_interactions(entries)
+    except Exception:
+        return ""
+    if result.n_clusters == 0:
+        return ""
+
+    summary = (
+        f"<p>{result.n_clusters} interaction cluster(s) across "
+        f"{sum(result.sizes)} profiled hit(s); "
+        f"largest {max(result.sizes)}, singletons {result.sizes.count(1)}.</p>"
+    )
+    header = "<tr><th>Cluster</th><th>Representative</th><th>Score</th><th>Contacts</th><th>Size</th></tr>"
+    body_rows = []
+    for cid, (idx, size) in enumerate(zip(result.representative_indices, result.sizes), 1):
+        e = entries[idx]
+        name = e.get("name") or e.get("lig_id", "")
+        score = e.get("score", "")
+        ncontacts = len(e.get("interactions", []) or [])
+        body_rows.append(
+            f"<tr><td>{cid}</td><td>{name}</td><td>{score}</td>"
+            f"<td>{ncontacts}</td><td>{size}</td></tr>"
+        )
+    return f"{summary}<table>{header}\n{''.join(body_rows)}</table>"
+
+
 def _cnn_section_html(
     rows: list[dict], score_col: str, score_label: str | None = None
 ) -> str:
@@ -575,6 +607,12 @@ def write_results_report(
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
     cnn_html       = _cnn_section_html(rows, score_col, score_label)
+    try:
+        _ix_path = scores_csv.parent / "interactions_top_n.json"
+        _ix_entries = json.loads(_ix_path.read_text()) if _ix_path.exists() else []
+    except Exception:
+        _ix_entries = []
+    ix_cluster_html = _interaction_cluster_section_html(_ix_entries)
     validity_html  = _pose_validity_section_html(rows)
     annotations_html = _annotations_section_html(rows, annotations or {})
     cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
@@ -591,6 +629,9 @@ def write_results_report(
     )
     cluster_section = (
         f"\n<h2>Scaffold Clusters</h2>\n{cluster_html}" if cluster_html else ""
+    )
+    ix_cluster_section = (
+        f"\n<h2>Interaction-Profile Clusters</h2>\n{ix_cluster_html}" if ix_cluster_html else ""
     )
     interactions_section = (
         f"\n<h2>Interaction Fingerprints</h2>\n{interactions_html}" if interactions_html else ""
@@ -620,6 +661,7 @@ def write_results_report(
 {validity_section}
 {annotations_section}
 {cluster_section}
+{ix_cluster_section}
 {interactions_section}
 </body></html>
 """
