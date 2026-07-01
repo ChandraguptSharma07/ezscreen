@@ -45,6 +45,7 @@ class ResultsScreen(Screen):
         self._score_type: str = "vina_kcal_mol"
         self._all_rows: list[dict] = []   # raw, every form
         self._collapsed: bool = False     # showing one row per source molecule?
+        self._sorted_by_cnn: bool = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -67,8 +68,11 @@ class ResultsScreen(Screen):
                 yield Button("Export Hits",            id="btn-export",    variant="default")
                 yield Button("Cluster Hits",           id="btn-cluster",   variant="default")
                 yield Button("Analyse Interactions",   id="btn-plip",      variant="default")
+                yield Button("CNN rescore (GNINA)",    id="btn-cnn",       variant="default")
+                yield Button("Sort by CNN affinity",   id="btn-sort-cnn",  variant="default")
                 yield Static("", id="cluster-result")
                 yield Static("", id="plip-result")
+                yield Static("", id="cnn-result")
                 yield Label("Validate Setup", classes="section-title", id="validate-label")
                 yield Input(placeholder="Path to known actives (.smi)", id="actives-input")
                 yield Button(
@@ -89,6 +93,8 @@ class ResultsScreen(Screen):
         self.query_one("#btn-export").display  = False
         self.query_one("#btn-cluster").display = False
         self.query_one("#btn-plip").display    = False
+        self.query_one("#btn-cnn").display     = False
+        self.query_one("#btn-sort-cnn").display = False
         self.query_one("#btn-collapse").display = False
         self.query_one("#variant-status").display = False
         self.query_one("#variant-label").display = False
@@ -144,6 +150,7 @@ class ResultsScreen(Screen):
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
         self.app.call_from_thread(self._refresh_plip_button)
+        self.app.call_from_thread(self._refresh_cnn_button)
         self.app.call_from_thread(self._refresh_collapse_button)
 
     def _populate_error(self, msg: str) -> None:
@@ -346,6 +353,10 @@ class ResultsScreen(Screen):
             self.action_toggle_collapse()
         elif event.button.id == "btn-plip":
             self._handle_plip()
+        elif event.button.id == "btn-cnn":
+            self._handle_cnn()
+        elif event.button.id == "btn-sort-cnn":
+            self.action_sort_cnn()
         elif event.button.id == "btn-validate":
             self._run_benchmark()
 
@@ -661,6 +672,134 @@ class ResultsScreen(Screen):
             self.app.notify("Interaction viewer opened in browser.", timeout=3)
         except Exception as exc:
             self.app.notify(f"Viewer generation failed: {exc}", severity="error", timeout=8)
+
+    # ------------------------------------------------------------------
+    # GNINA CNN rescore (engine-independent — works on any run's poses)
+    # ------------------------------------------------------------------
+
+    def _refresh_cnn_button(self) -> None:
+        has_results = (self._output / "scores.csv").exists()
+        btn = self.query_one("#btn-cnn")
+        btn.display = has_results
+        already = (self._output / "cnn_scores.csv").exists()
+        btn.label = "CNN rescore (GNINA) — re-run" if already else "CNN rescore (GNINA)"
+        has_cnn = any(r.get("CNNaffinity") for r in self._rows)
+        self.query_one("#btn-sort-cnn").display = has_cnn
+
+    def _handle_cnn(self) -> None:
+        work_dir = self._output.parent
+
+        resume_json = work_dir / "resume.json"
+        has_receptor_pdb = False
+        if resume_json.exists():
+            info = json.loads(resume_json.read_text())
+            p = info.get("receptor_pdb")
+            has_receptor_pdb = bool(p and Path(p).exists())
+        if not has_receptor_pdb:
+            has_receptor_pdb = (work_dir / "receptor" / "receptor_prep.pdb").exists()
+        if not has_receptor_pdb:
+            self.query_one("#cnn-result", Static).update(
+                "[#f85149]CNN rescore unavailable — receptor PDB not saved for this run (pre-dates v1.9.0)[/#f85149]"
+            )
+            return
+        if not (self._output / "poses.sdf").exists():
+            self.query_one("#cnn-result", Static).update("[#f85149]No poses.sdf to rescore.[/#f85149]")
+            return
+
+        self.query_one("#btn-cnn").disabled = True
+        self.query_one("#btn-cnn").label = "Rescoring..."
+        self.query_one("#cnn-result", Static).update(
+            "[#e3b341]Running GNINA rescore on Kaggle GPU...[/#e3b341]"
+        )
+        run_id = self._run_id
+        output = self._output
+
+        def _worker() -> None:
+            from ezscreen.backends.kaggle.gnina_runner import run_gnina_rescore
+            from ezscreen.results.merger import join_cnn_scores
+            try:
+                result = run_gnina_rescore(run_id, work_dir)
+                joined = join_cnn_scores(output) if result["status"] == "complete" else False
+                self.app.call_from_thread(self._on_cnn_done, result, joined)
+            except Exception as exc:
+                self.app.call_from_thread(self._on_cnn_error, str(exc))
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_cnn_done(self, result: dict, joined: bool) -> None:
+        btn = self.query_one("#btn-cnn")
+        btn.disabled = False
+        if result["status"] == "complete" and joined:
+            btn.label = "CNN rescore (GNINA) — re-run"
+            self.query_one("#cnn-result", Static).update(
+                "[#3fb950]CNN rescore complete — CNNscore/CNNaffinity columns added[/#3fb950]"
+            )
+            self._reload_scores()
+        elif result["status"] == "complete":
+            btn.label = "CNN rescore (GNINA) — re-run"
+            self.query_one("#cnn-result", Static).update(
+                "[#e3b341]GNINA ran but no CNN scores matched the top hits[/#e3b341]"
+            )
+        else:
+            btn.label = "CNN rescore (GNINA)"
+            self.query_one("#cnn-result", Static).update(
+                f"[#f85149]CNN rescore failed: {result.get('error', 'unknown error')}[/#f85149]"
+            )
+
+    def _on_cnn_error(self, msg: str) -> None:
+        btn = self.query_one("#btn-cnn")
+        btn.disabled = False
+        btn.label = "CNN rescore (GNINA)"
+        self.query_one("#cnn-result", Static).update(f"[#f85149]CNN rescore error: {msg}[/#f85149]")
+
+    def _reload_scores(self) -> None:
+        scores_csv = self._output / "scores.csv"
+        if not scores_csv.exists():
+            return
+        with scores_csv.open(newline="") as f:
+            rows = list(csv.DictReader(f))
+        if not rows:
+            return
+        headers = [h for h in rows[0].keys() if h not in _SKIP_COLS]
+        score_col = next(
+            (h for h in headers if "score" in h.lower() or "affinity" in h.lower()),
+            headers[-1],
+        )
+        self._all_rows = rows
+        self._headers = headers
+        self._score_col = score_col
+        if self._collapsed:
+            from ezscreen.results import variants
+            self._rows = variants.collapse_variants(rows)
+        else:
+            self._rows = rows
+        self._sorted_by_cnn = False
+        self._populate_table(self._rows[:200], headers, score_col)
+        self._refresh_cnn_button()
+
+    def action_sort_cnn(self) -> None:
+        if not any(r.get("CNNaffinity") for r in self._rows):
+            self.app.notify("No CNN scores yet — run a CNN rescore first.", timeout=3)
+            return
+        self._sorted_by_cnn = not self._sorted_by_cnn
+        if self._sorted_by_cnn:
+            def _key(r: dict) -> float:
+                try:
+                    return -float(r.get("CNNaffinity") or "nan")  # higher pK = better
+                except ValueError:
+                    return float("inf")
+            self._rows = sorted(self._rows, key=_key)
+            self.query_one("#btn-sort-cnn").label = "Sort by score"
+        else:
+            def _key(r: dict) -> float:
+                try:
+                    return float(r.get(self._score_col) or "inf")  # more negative kcal/mol = better
+                except ValueError:
+                    return float("inf")
+            self._rows = sorted(self._rows, key=_key)
+            self.query_one("#btn-sort-cnn").label = "Sort by CNN affinity"
+        self._populate_table(self._rows[:200], self._headers, self._score_col)
 
     def _run_benchmark(self) -> None:
         actives_str = self.query_one("#actives-input", Input).value.strip()
