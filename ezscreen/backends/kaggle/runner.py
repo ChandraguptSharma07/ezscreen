@@ -9,9 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import requests as _req
-from kagglesdk.kernels.types.kernels_api_service import (
-    ApiListKernelSessionOutputRequest,
-)
 from rich.console import Console
 
 from ezscreen.backends.kaggle.dataset import upload_run_dataset
@@ -191,6 +188,9 @@ def _fetch_output_urls(kernel_ref: str) -> list:
     Caller must hold _KAGGLE_API_LOCK and have already set credentials.
     """
     import kaggle
+    from kagglesdk.kernels.types.kernels_api_service import (
+        ApiListKernelSessionOutputRequest,
+    )
     if "/" in kernel_ref:
         owner_slug, kernel_slug = kernel_ref.split("/", 1)
     else:
