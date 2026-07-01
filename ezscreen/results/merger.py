@@ -157,8 +157,15 @@ def _add_cnn_score_cols(
                 new_fields.append(col)
         for row in rows:
             entry = cnn.get(row.get(id_col, ""))
-            row["CNNscore"]    = entry.get("CNNscore", "")    if entry else ""
-            row["CNNaffinity"] = entry.get("CNNaffinity", "") if entry else ""
+            if entry:
+                # fresh score for this row (a top-N rescore) — overwrite
+                row["CNNscore"]    = entry.get("CNNscore", row.get("CNNscore", ""))
+                row["CNNaffinity"] = entry.get("CNNaffinity", row.get("CNNaffinity", ""))
+            else:
+                # not in this batch — keep any existing value (e.g. from GNINA docking),
+                # don't blank it when only the top-N were rescored
+                row.setdefault("CNNscore", "")
+                row.setdefault("CNNaffinity", "")
         return rows, new_fields
     except Exception:
         return rows, fieldnames

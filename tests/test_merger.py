@@ -104,6 +104,24 @@ def test_join_cnn_scores_updates_existing_scores_csv(tmp_path):
     assert by_name["B"]["CNNscore"] == ""
 
 
+def test_join_cnn_scores_preserves_rows_outside_the_batch(tmp_path):
+    # a GNINA-engine run already carries CNN for every hit; re-rescoring only the
+    # top hit must update that hit and leave the others' CNN values intact.
+    out = tmp_path / "output"
+    out.mkdir()
+    _write(out / "scores.csv", ["ligand", "score", "CNNscore", "CNNaffinity"], [
+        {"ligand": "l0", "score": "-8.1", "CNNscore": "0.70", "CNNaffinity": "5.0"},
+        {"ligand": "l1", "score": "-7.0", "CNNscore": "0.60", "CNNaffinity": "4.5"},
+    ])
+    _write(out / "cnn_scores.csv", ["lig_id", "CNNscore", "CNNaffinity"], [
+        {"lig_id": "l0", "CNNscore": "0.95", "CNNaffinity": "6.8"},
+    ])
+    assert join_cnn_scores(out) is True
+    rows = {r["ligand"]: r for r in csv.DictReader((out / "scores.csv").open())}
+    assert rows["l0"]["CNNaffinity"] == "6.8"   # rescored hit updated
+    assert rows["l1"]["CNNaffinity"] == "4.5"   # untouched hit preserved, not blanked
+
+
 def test_merge_without_cnn_scores_has_no_cnn_cols(tmp_path):
     sd = tmp_path / "shard"
     sd.mkdir()
