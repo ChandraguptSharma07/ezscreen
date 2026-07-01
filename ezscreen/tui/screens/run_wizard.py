@@ -34,6 +34,7 @@ _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
 
 _STEPS = [
     "step-receptor",
+    "step-recprep",
     "step-site",
     "step-ligands",
     "step-prep",
@@ -43,13 +44,14 @@ _STEPS = [
 ]
 
 _STEP_LABELS = [
-    "Step 1 of 7 — Receptor & Chains",
-    "Step 2 of 7 — Binding Site",
-    "Step 3 of 7 — Ligand Library",
-    "Step 4 of 7 — Ligand Prep",
-    "Step 5 of 7 — Engine & Scoring",
-    "Step 6 of 7 — Compute",
-    "Step 7 of 7 — Confirm & Submit",
+    "Step 1 of 8 — Receptor & Chains",
+    "Step 2 of 8 — Receptor Prep",
+    "Step 3 of 8 — Binding Site",
+    "Step 4 of 8 — Ligand Library",
+    "Step 5 of 8 — Ligand Prep",
+    "Step 6 of 8 — Engine & Scoring",
+    "Step 7 of 8 — Compute",
+    "Step 8 of 8 — Confirm & Submit",
 ]
 
 
@@ -63,6 +65,7 @@ class RunWizardScreen(Screen):
         self._step = 0
         self._ctx: dict = {}
         self._chains: list[str] = []
+        self._hetero: list[dict] = []
         self._cocrystal_ligands: list[dict] = []
         self._pockets: list[dict] = []
         self._submitted = False
@@ -97,7 +100,19 @@ class RunWizardScreen(Screen):
                         yield Label("Select chains to include", classes="form-label")
                         yield Vertical(id="chain-list")
 
-                # ── Step 2: Binding Site ──────────────────────────────
+                # ── Step 2: Receptor Prep ─────────────────────────────
+                with VerticalScroll(id="step-recprep", classes="wizard-step"):
+                    yield Label("Heteroatoms (waters, ions, cofactors, ligands)", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Choose what to keep in the receptor. Cofactors/metals can be "
+                        "catalytic; waters, additives and the co-crystal ligand are usually "
+                        "removed. Validate the receptor first to populate this list.[/#6e7681]"
+                    )
+                    yield Checkbox("Remove all heteroatoms", id="hetero-remove-all")
+                    yield Vertical(id="hetero-list")
+                    yield Static("", id="hetero-status", classes="form-status")
+
+                # ── Step 3: Binding Site ──────────────────────────────
                 with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
                     with RadioSet(id="site-method"):
@@ -442,6 +457,11 @@ class RunWizardScreen(Screen):
             self._cocrystal_ligands        = cocrystal
             self._ctx["cocrystal_ligands"] = cocrystal
 
+            try:
+                self._hetero = rec_prep.heteroatom_inventory(pdb_path)
+            except Exception:
+                self._hetero = []
+
             self.app.call_from_thread(
                 self._show_rec_result, chains, is_af, af_ver, cocrystal
             )
@@ -469,6 +489,7 @@ class RunWizardScreen(Screen):
             chain_list.mount(Checkbox(label, id=f"chain-{safe_id}", value=True))
         self.query_one("#chain-section").display = True
         self._chains = chains
+        self._populate_hetero()
 
         if is_af:
             ver_label = {"af2": "AlphaFold 2", "af3": "AlphaFold 3"}.get(
@@ -493,6 +514,18 @@ class RunWizardScreen(Screen):
     def _show_rec_error(self, msg: str) -> None:
         self.query_one("#rec-status", Static).update(f"[#f85149]{msg}[/#f85149]")
         self.query_one("#btn-rec-validate").disabled = False
+
+    def _populate_hetero(self) -> None:
+        hlist = self.query_one("#hetero-list", Vertical)
+        hlist.remove_children()
+        status = self.query_one("#hetero-status", Static)
+        if not self._hetero:
+            status.update("[#6e7681]No heteroatoms found in this structure.[/#6e7681]")
+            return
+        status.update("")
+        for i, h in enumerate(self._hetero):
+            label = f"{h['resname']} {h['chain']}{h['resseq']} — {h['category']}, {h['n_atoms']} atom(s)"
+            hlist.mount(Checkbox(label, id=f"het-{i}", value=bool(h["keep_default"])))
 
     # ------------------------------------------------------------------
     # Step 2 — P2Rank
@@ -587,6 +620,19 @@ class RunWizardScreen(Screen):
             if not selected:
                 return "Select at least one chain."
             self._ctx["selected_chains"] = selected
+
+        elif step == "step-recprep":
+            if self.query_one("#hetero-remove-all", Checkbox).value:
+                self._ctx["keep_hetero"] = []
+            else:
+                keep = []
+                for i, h in enumerate(self._hetero):
+                    try:
+                        if self.query_one(f"#het-{i}", Checkbox).value:
+                            keep.append(h)
+                    except Exception:
+                        pass
+                self._ctx["keep_hetero"] = keep
 
         elif step == "step-site":
             btn = self.query_one("#site-method", RadioSet).pressed_button
@@ -802,6 +848,7 @@ class RunWizardScreen(Screen):
                 chains=ctx["selected_chains"],
                 output_dir=work_dir / "receptor",
                 ph=cfg["run"].get("default_ph", 7.4),
+                keep_hetero=ctx.get("keep_hetero"),
             )
             receptor_pdbqt = rec_result["pdbqt_path"]
 
