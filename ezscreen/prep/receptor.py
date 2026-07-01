@@ -163,10 +163,102 @@ def prompt_chain_selection(chains: list[str]) -> list[str] | object:
 
 
 # ---------------------------------------------------------------------------
+# Heteroatom inventory + selection
+# ---------------------------------------------------------------------------
+
+_WATERS: frozenset[str] = frozenset({"HOH", "WAT", "DOD", "D2O"})
+
+_METALS: frozenset[str] = frozenset({
+    "ZN", "MG", "MN", "FE", "FE2", "CA", "NA", "K", "CU", "CU1", "CO", "NI",
+    "CD", "HG", "MO", "W",
+})
+
+# Organic prosthetic groups / cofactors worth keeping in the receptor by default.
+_COFACTORS: frozenset[str] = frozenset({
+    "HEM", "HEC", "HEA", "HEB", "SRM", "VER",
+    "NAD", "NAP", "NAI", "NDP", "NAJ",
+    "FAD", "FMN", "FDA", "FADH",
+    "ATP", "ADP", "AMP", "ANP", "AGS", "GTP", "GDP", "GNP", "GSP",
+    "SAM", "SAH", "PLP", "PMP", "TPP", "TDP", "COA", "ACO", "BTN",
+    "CLA", "BCL", "B12", "COB", "PQQ", "MGD", "F43", "H4B", "BH4",
+})
+
+# Crystallographic additives that are never biologically relevant.
+_ADDITIVE_HET: frozenset[str] = frozenset({
+    "GOL", "EDO", "MPD", "PGO", "PG4", "1PE", "PE8", "PE3", "PE4", "PE5", "PE6",
+    "SO4", "PO4", "NO3", "CL", "BR", "IOD", "ACT", "ACY", "ACE", "DMS", "DMF",
+    "EOH", "IPA", "TRS", "HEP", "MES", "MOH", "TAR", "CIT", "FMT", "IMD", "DIO",
+    "TLA", "BOG", "OES", "FLC", "BME", "PEG",
+})
+
+
+def _classify_hetero(resname: str, n_atoms: int) -> tuple[str, bool]:
+    """Return (category, keep_by_default) for a HETATM residue."""
+    if resname in _WATERS:
+        return "water", False
+    if resname in _COFACTORS:
+        return "cofactor", True
+    if resname in _METALS:
+        return "metal", False
+    if resname in _ADDITIVE_HET:
+        return "additive", False
+    if n_atoms >= 5:
+        return "ligand", False   # a co-crystal ligand — usually the thing you displace
+    return "other", False
+
+
+def heteroatom_inventory(pdb_path: Path) -> list[dict[str, Any]]:
+    """List HETATM residues grouped by (resname, chain, resseq) with a keep suggestion."""
+    groups: dict[tuple, int] = {}
+    order: list[tuple] = []
+    for line in pdb_path.read_text(errors="ignore").splitlines():
+        if not line.startswith("HETATM"):
+            continue
+        try:
+            key = (line[17:20].strip(), line[21:22].strip(), int(line[22:26]))
+        except (ValueError, IndexError):
+            continue
+        if key not in groups:
+            groups[key] = 0
+            order.append(key)
+        groups[key] += 1
+
+    inventory = []
+    for (resname, chain, resseq) in order:
+        n = groups[(resname, chain, resseq)]
+        category, keep = _classify_hetero(resname, n)
+        inventory.append({
+            "resname": resname, "chain": chain, "resseq": resseq,
+            "n_atoms": n, "category": category, "keep_default": keep,
+        })
+    return inventory
+
+
+def _apply_hetero_selection(src: Path, dst: Path, keep_keys: set[tuple]) -> int:
+    """Write src → dst keeping every ATOM record but only the selected HETATM residues."""
+    removed = 0
+    lines = []
+    for line in src.read_text(errors="ignore").splitlines():
+        if line.startswith("HETATM"):
+            try:
+                key = (line[17:20].strip(), line[21:22].strip(), int(line[22:26]))
+            except (ValueError, IndexError):
+                key = None
+            if key not in keep_keys:
+                removed += 1
+                continue
+        lines.append(line)
+    dst.write_text("\n".join(lines) + "\n")
+    return removed
+
+
+# ---------------------------------------------------------------------------
 # pdbfixer + Meeko
 # ---------------------------------------------------------------------------
 
-def _run_pdbfixer(src: Path, dst: Path, keep_waters: bool) -> dict[str, Any]:
+def _run_pdbfixer(
+    src: Path, dst: Path, keep_waters: bool, remove_heterogens: bool = True
+) -> dict[str, Any]:
     try:
         from openmm.app import PDBFile
         from pdbfixer import PDBFixer
@@ -180,7 +272,10 @@ def _run_pdbfixer(src: Path, dst: Path, keep_waters: bool) -> dict[str, Any]:
 
     fixer.findNonstandardResidues()
     fixer.replaceNonstandardResidues()
-    fixer.removeHeterogens(keepWater=keep_waters)
+    # When the user has chosen specific heterogens to keep, the de-selected ones
+    # are already stripped upstream — don't let pdbfixer remove the kept ones.
+    if remove_heterogens:
+        fixer.removeHeterogens(keepWater=keep_waters)
     # Do NOT call addMissingAtoms or addMissingHydrogens — PDBFixer adds
     # N/C-terminal H and OXT atoms that cause ProDy to infer valence-4 O
     # or valence-5 C, crashing Meeko's RDKit sanitization. Meeko assigns
@@ -327,6 +422,7 @@ def prep_receptor(
     output_dir: Path,
     ph: float = 7.4,
     keep_waters: bool = False,
+    keep_hetero: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[dict] = []
@@ -344,9 +440,32 @@ def prep_receptor(
     chain_filtered = output_dir / "receptor_chains.pdb"
     _filter_chains(noalt, chains, chain_filtered)
 
+    # Honour explicit heteroatom keep/remove choices from the wizard. When any are
+    # kept, pre-strip the rest here and tell pdbfixer not to remove heterogens.
+    prefixer_src = chain_filtered
+    remove_heterogens = True
+    n_hetero_removed = 0
+    if keep_hetero is not None:
+        keep_keys = {
+            (d["resname"], d.get("chain", ""), int(d["resseq"])) for d in keep_hetero
+        }
+        hetero_filtered = output_dir / "receptor_hetero.pdb"
+        n_hetero_removed = _apply_hetero_selection(chain_filtered, hetero_filtered, keep_keys)
+        prefixer_src = hetero_filtered
+        remove_heterogens = False
+        warnings.append({
+            "severity": "low", "category": "heteroatoms_selected",
+            "affected_count": len(keep_keys),
+            "message": f"{len(keep_keys)} heteroatom group(s) kept, {n_hetero_removed} record(s) removed per user selection",
+            "action": "confirm kept cofactors/metals are correct",
+        })
+
     fixed = output_dir / "receptor_fixed.pdb"
     try:
-        fx = _run_pdbfixer(chain_filtered, fixed, keep_waters=keep_waters)
+        fx = _run_pdbfixer(
+            prefixer_src, fixed, keep_waters=keep_waters,
+            remove_heterogens=remove_heterogens,
+        )
     except ReceptorPrepError:
         raise
     except Exception as exc:
