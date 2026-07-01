@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.13.0 — 2026-07-01
+
+> Theme: rescoring & engines. Choose how a run is docked and scored, and judge poses with GNINA's CNN — the run wizard becomes an engine picker, and CNN scores can be added to any run after the fact.
+
+### Added
+
+- **Docking engine selector** — the run wizard's Engine & Scoring step now lets you pick the docking engine: **UniDock (GPU)** or **GNINA (GPU, CNN)**. Engines are described by a profile registry (GPU/box requirements, supported scoring functions, native score type), so more engines slot in later. This also makes **UniDock-Pro** deliberately *not* offered — its structure-based docking is identical to UniDock; its real value (ligand-based / hybrid screening) is tracked as a separate future feature
+- **GNINA as a docking engine** — GNINA docks in the box and reports a CNN score per pose. It ranks by the Vina affinity (kcal/mol) so the existing pipeline is unchanged, with `CNNscore`/`CNNaffinity` carried alongside as extra columns. Installed from the pinned v1.3.3 CUDA-12.8 static build to match Kaggle's toolkit
+- **Scoring-function selector** — pick **Vina** or **Vinardo** (engine-constrained, threaded into the docking command). ad4 is intentionally excluded for now (it needs precomputed AutoDock4 affinity maps)
+- **GNINA CNN rescoring (engine-independent)** — a "CNN rescore (GNINA)" action in the results viewer runs a GPU `--score_only` pass on any run's existing poses (works whatever engine docked them), with a **top-N picker** to choose how many top hits to score. Re-rescoring is supported and non-destructive — only the chosen hits are updated, others keep their scores. Results gain sortable `CNNscore`/`CNNaffinity` columns (a "Sort by CNN affinity" toggle), and the HTML report gains a GNINA CNN Rescoring section (score-vs-CNNaffinity scatter + top-hits table)
+
+### Changed
+
+- The docking notebook installs rdkit explicitly, so engine builds that don't pull it in transitively still work
+
 ## v1.12.1 — 2026-06-30
 
 > Theme: quality of life. The run wizard's overloaded options step is split into clear, single-purpose screens.
