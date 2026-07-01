@@ -682,15 +682,15 @@ class ResultsScreen(Screen):
     def _refresh_cnn_button(self) -> None:
         has_results = (self._output / "scores.csv").exists()
         has_cnn = any(r.get("CNNaffinity") for r in self._rows)
-        # A GNINA-engine run (or a prior rescore) already carries CNN scores, so
-        # re-running the rescore kernel is redundant — only offer it otherwise.
-        self.query_one("#btn-cnn").display = has_results and not has_cnn
-        self.query_one("#cnn-topn").display = has_results and not has_cnn
+        # Always offer the rescore (with a top-N picker) — even for runs that already
+        # carry CNN scores (GNINA engine or a prior rescore), so users can (re)score a
+        # chosen number of top hits. The join preserves CNN for rows outside the batch.
+        self.query_one("#btn-cnn").display = has_results
+        self.query_one("#cnn-topn").display = has_results
+        self.query_one("#btn-cnn").label = (
+            "Re-rescore top N (GNINA)" if has_cnn else "CNN rescore (GNINA)"
+        )
         self.query_one("#btn-sort-cnn").display = has_cnn
-        if has_cnn:
-            self.query_one("#cnn-result", Static).update(
-                "[#3fb950]CNN scores present — sort by CNN affinity above.[/#3fb950]"
-            )
 
     def _handle_cnn(self) -> None:
         work_dir = self._output.parent
