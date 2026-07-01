@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.14.0 — 2026-07-01
+
+> Theme: pose & box confidence. Judge how trustworthy a run's box and hits are — both run locally on results you already have.
+
+### Added
+
+- **Redock RMSD box validation** — an opt-in check (Settings → Docking Defaults, or `[prep] redock_validation`) that redocks the co-crystal ligand into the detected box with local AutoDock Vina and reports the symmetry-aware RMSD to the crystal pose. A low RMSD means the box reproduces a known binding mode; the run warns (amber) when it exceeds 2 Å. Off by default since it adds a local docking step. New `ezscreen/benchmark/redock.py`
+- **Interaction-profile clustering** — clusters hits by their PLIP interaction fingerprint (which residues they contact, and how), grouping compounds that engage the pocket the same way and picking a representative per cluster. Surfaced as an Interaction-Profile Clusters section in the HTML report (shown when a run has PLIP interaction data). Complements the existing scaffold clustering
+
 ## v1.13.0 — 2026-07-01
 
 > Theme: rescoring & engines. Choose how a run is docked and scored, and judge poses with GNINA's CNN — the run wizard becomes an engine picker, and CNN scores can be added to any run after the fact.
