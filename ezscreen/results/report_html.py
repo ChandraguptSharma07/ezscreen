@@ -465,6 +465,65 @@ def _interactions_heatmap_html(
     )
 
 
+def _cnn_section_html(
+    rows: list[dict], score_col: str, score_label: str | None = None
+) -> str:
+    """Scatter (docking score vs CNNaffinity) + top-hits CNN table. Empty if no CNN data."""
+    pairs: list[tuple[float, float]] = []
+    table_rows: list[tuple[str, str, str, float, str]] = []
+    for r in rows:
+        caff = r.get("CNNaffinity", "")
+        if not caff:
+            continue
+        try:
+            caff_f = float(caff)
+        except ValueError:
+            continue
+        try:
+            sc = float(r.get(score_col, ""))
+            pairs.append((sc, caff_f))
+        except (ValueError, TypeError):
+            pass
+        table_rows.append(
+            (r.get("name") or r.get("ligand", ""), r.get(score_col, ""),
+             r.get("CNNscore", ""), caff_f, caff)
+        )
+    if not table_rows:
+        return ""
+
+    scatter_b64 = ""
+    if pairs:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        xs = [p[1] for p in pairs]
+        ys = [p[0] for p in pairs]
+        fig, ax = plt.subplots(figsize=(5, 3.5))
+        ax.scatter(xs, ys, alpha=0.4, s=12, color="#8a5a2c")
+        ax.set_xlabel("GNINA CNNaffinity (pK)")
+        ax.set_ylabel(score_label or score_col.replace("_", " ").title())
+        ax.set_title("Docking score vs CNNaffinity")
+        fig.tight_layout()
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=120)
+        plt.close(fig)
+        scatter_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    table_rows.sort(key=lambda t: t[3], reverse=True)  # higher CNNaffinity = better
+    label = score_label or "Score"
+    header = f"<tr><th>#</th><th>Compound</th><th>{label}</th><th>CNNscore</th><th>CNNaffinity</th></tr>"
+    body = "\n".join(
+        f"<tr><td>{i}</td><td>{n}</td><td>{s}</td><td>{cs}</td><td>{ca}</td></tr>"
+        for i, (n, s, cs, _f, ca) in enumerate(table_rows[:15], 1)
+    )
+    img = (
+        f'<img src="data:image/png;base64,{scatter_b64}" alt="Score vs CNNaffinity">\n'
+        if scatter_b64 else ""
+    )
+    return f"{img}<table>{header}\n{body}</table>"
+
+
 def write_results_report(
     scores_csv: Path,
     output_path: Path,
@@ -515,11 +574,15 @@ def write_results_report(
         if b64:
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
+    cnn_html       = _cnn_section_html(rows, score_col, score_label)
     validity_html  = _pose_validity_section_html(rows)
     annotations_html = _annotations_section_html(rows, annotations or {})
     cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
     interactions_html = _interactions_heatmap_html(interactions) if interactions else ""
 
+    cnn_section = (
+        f"\n<h2>GNINA CNN Rescoring</h2>\n{cnn_html}" if cnn_html else ""
+    )
     validity_section = (
         f"\n<h2>Pose Validity</h2>\n{validity_html}" if validity_html else ""
     )
@@ -553,6 +616,7 @@ def write_results_report(
 <div class="structs">
 {structs_html}
 </div>
+{cnn_section}
 {validity_section}
 {annotations_section}
 {cluster_section}
