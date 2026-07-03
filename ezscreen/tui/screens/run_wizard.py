@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -31,6 +32,18 @@ _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
     ("MMFF94s — planar amides/aromatics", "MMFF94s"),
     ("UFF — broad element coverage", "UFF"),
 ]
+
+_HETERO_CATEGORY_ORDER = ("cofactor", "metal", "ligand", "water", "additive", "other")
+_HETERO_CATEGORY_LABELS = {
+    "water": "Waters",
+    "metal": "Metals",
+    "cofactor": "Cofactors",
+    "ligand": "Ligands",
+    "additive": "Additives",
+    "other": "Other heteroatoms",
+}
+_HETERO_NOISY_CATEGORIES = {"water", "additive"}
+
 
 _STEPS = [
     "step-receptor",
@@ -66,6 +79,9 @@ class RunWizardScreen(Screen):
         self._ctx: dict = {}
         self._chains: list[str] = []
         self._hetero: list[dict] = []
+        self._hetero_keep: set[int] = set()
+        self._hetero_expanded: set[str] = set()
+        self._refreshing_hetero_controls = False
         self._cocrystal_ligands: list[dict] = []
         self._pockets: list[dict] = []
         self._submitted = False
@@ -101,15 +117,18 @@ class RunWizardScreen(Screen):
                         yield Vertical(id="chain-list")
 
                 # ── Step 2: Receptor Prep ─────────────────────────────
-                with VerticalScroll(id="step-recprep", classes="wizard-step"):
+                with Vertical(id="step-recprep", classes="wizard-step"):
                     yield Label("Heteroatoms (waters, ions, cofactors, ligands)", classes="form-section")
                     yield Static(
-                        "[#6e7681]Choose what to keep in the receptor. Cofactors/metals can be "
-                        "catalytic; waters, additives and the co-crystal ligand are usually "
-                        "removed. Validate the receptor first to populate this list.[/#6e7681]"
+                        "[#6e7681]Choose the receptor cleanup policy, then adjust any group "
+                        "that needs special handling. Validate the receptor first to populate "
+                        "this list.[/#6e7681]"
                     )
-                    yield Checkbox("Remove all heteroatoms", id="hetero-remove-all")
-                    yield Vertical(id="hetero-list")
+                    with Horizontal(classes="hetero-presets"):
+                        yield Button("Recommended", id="hetero-preset-recommended")
+                        yield Button("Apo receptor", id="hetero-preset-apo")
+                        yield Button("Crystal complex", id="hetero-preset-crystal")
+                    yield VerticalScroll(id="hetero-list")
                     yield Static("", id="hetero-status", classes="form-status")
 
                 # ── Step 3: Binding Site ──────────────────────────────
@@ -348,6 +367,33 @@ class RunWizardScreen(Screen):
         }
         if fn := dispatch.get(event.button.id):
             fn()
+            return
+
+        button_id = event.button.id or ""
+        if button_id.startswith("hetero-preset-"):
+            self._apply_hetero_preset(button_id.removeprefix("hetero-preset-"))
+        elif button_id.startswith("hetcat-keep-"):
+            self._set_hetero_category(button_id.removeprefix("hetcat-keep-"), True)
+        elif button_id.startswith("hetcat-remove-"):
+            self._set_hetero_category(button_id.removeprefix("hetcat-remove-"), False)
+        elif button_id.startswith("hetcat-toggle-"):
+            self._toggle_hetero_category(button_id.removeprefix("hetcat-toggle-"))
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if self._refreshing_hetero_controls:
+            return
+        checkbox_id = event.checkbox.id or ""
+        if not checkbox_id.startswith("het-"):
+            return
+        try:
+            idx = int(checkbox_id.removeprefix("het-"))
+        except ValueError:
+            return
+        if event.value:
+            self._hetero_keep.add(idx)
+        else:
+            self._hetero_keep.discard(idx)
+        self._update_hetero_summary()
 
     def _open_lib_browser(self) -> None:
         from ezscreen.tui.screens.library_browser import LibraryBrowserScreen
@@ -516,19 +562,160 @@ class RunWizardScreen(Screen):
         self.query_one("#btn-rec-validate").disabled = False
 
     def _populate_hetero(self) -> None:
-        hlist = self.query_one("#hetero-list", Vertical)
+        hlist = self.query_one("#hetero-list", VerticalScroll)
         hlist.remove_children()
         status = self.query_one("#hetero-status", Static)
         if not self._hetero:
+            self._hetero_keep = set()
+            self._hetero_expanded = set()
             status.update("[#6e7681]No heteroatoms found in this structure.[/#6e7681]")
             return
-        status.update("")
+        self._hetero_keep = {
+            i for i, h in enumerate(self._hetero) if self._recommended_hetero_keep(h)
+        }
+        self._hetero_expanded = {
+            category
+            for category, items in self._hetero_by_category().items()
+            if category not in _HETERO_NOISY_CATEGORIES or len(items) <= 8
+        }
+        self._refresh_hetero_controls()
+
+    def _recommended_hetero_keep(self, hetero: dict) -> bool:
+        category = str(hetero.get("category", "other"))
+        return bool(hetero.get("keep_default")) or category in {"cofactor", "metal"}
+
+    def _hetero_by_category(self) -> dict[str, list[tuple[int, dict]]]:
+        grouped: dict[str, list[tuple[int, dict]]] = defaultdict(list)
         for i, h in enumerate(self._hetero):
-            label = f"{h['resname']} {h['chain']}{h['resseq']} — {h['category']}, {h['n_atoms']} atom(s)"
-            hlist.mount(Checkbox(label, id=f"het-{i}", value=bool(h["keep_default"])))
+            category = str(h.get("category") or "other")
+            grouped[category].append((i, h))
+        return grouped
+
+    def _refresh_hetero_controls(self) -> None:
+        hlist = self.query_one("#hetero-list", VerticalScroll)
+        self._refreshing_hetero_controls = True
+        try:
+            hlist.remove_children()
+            grouped = self._hetero_by_category()
+            for category in _HETERO_CATEGORY_ORDER:
+                items = grouped.get(category, [])
+                if not items:
+                    continue
+
+                count = len(items)
+                atoms = sum(int(h.get("n_atoms", 0)) for _, h in items)
+                kept = sum(1 for i, _ in items if i in self._hetero_keep)
+                label = _HETERO_CATEGORY_LABELS.get(category, category.title())
+                expanded = category in self._hetero_expanded
+                toggle_label = "Hide individual" if expanded else "Show individual"
+                children = [
+                    Static(
+                        f"{label}: {kept}/{count} kept, {atoms} atom(s)",
+                        classes="hetero-category-header",
+                    ),
+                    Horizontal(
+                        Button("Keep all", id=f"hetcat-keep-{category}"),
+                        Button("Remove all", id=f"hetcat-remove-{category}"),
+                        Button(toggle_label, id=f"hetcat-toggle-{category}"),
+                        classes="hetero-category-actions",
+                    ),
+                ]
+                if expanded:
+                    for i, h in items:
+                        children.append(
+                            Checkbox(
+                                self._hetero_label(h),
+                                id=f"het-{i}",
+                                value=i in self._hetero_keep,
+                            )
+                        )
+                else:
+                    children.append(
+                        Static(
+                            f"{count} {label.lower()} hidden. Use the category "
+                            "buttons above or show individual rows.",
+                            classes="hetero-collapsed-note",
+                        )
+                    )
+                hlist.mount(Vertical(*children, classes="hetero-category"))
+        finally:
+            self._refreshing_hetero_controls = False
+        self._update_hetero_summary()
+
+    def _hetero_label(self, hetero: dict) -> str:
+        chain = str(hetero.get("chain") or "").strip() or "-"
+        resseq = hetero.get("resseq", "?")
+        resname = hetero.get("resname", "?")
+        category = hetero.get("category", "other")
+        n_atoms = hetero.get("n_atoms", 0)
+        return f"{resname} {chain}{resseq} - {category}, {n_atoms} atom(s)"
+
+    def _apply_hetero_preset(self, preset: str) -> None:
+        keep_categories = {
+            "recommended": {"cofactor", "metal"},
+            "apo": set(),
+            "crystal": {"cofactor", "metal", "ligand"},
+        }.get(preset)
+        if keep_categories is None:
+            return
+        self._hetero_keep = {
+            i
+            for i, h in enumerate(self._hetero)
+            if str(h.get("category", "other")) in keep_categories
+        }
+        self._refresh_hetero_controls()
+
+    def _set_hetero_category(self, category: str, keep: bool) -> None:
+        for i, h in enumerate(self._hetero):
+            if str(h.get("category", "other")) != category:
+                continue
+            if keep:
+                self._hetero_keep.add(i)
+            else:
+                self._hetero_keep.discard(i)
+        self._refresh_hetero_controls()
+
+    def _toggle_hetero_category(self, category: str) -> None:
+        if category in self._hetero_expanded:
+            self._hetero_expanded.remove(category)
+        else:
+            self._hetero_expanded.add(category)
+        self._refresh_hetero_controls()
+
+    def _update_hetero_summary(self) -> None:
+        status = self.query_one("#hetero-status", Static)
+        if not self._hetero:
+            return
+        kept = [h for i, h in enumerate(self._hetero) if i in self._hetero_keep]
+        removed = [h for i, h in enumerate(self._hetero) if i not in self._hetero_keep]
+        kept_counts = Counter(str(h.get("category", "other")) for h in kept)
+        removed_counts = Counter(str(h.get("category", "other")) for h in removed)
+        kept_txt = self._format_hetero_counts(kept_counts) or "none"
+        removed_txt = self._format_hetero_counts(removed_counts) or "none"
+        warnings = []
+        if kept_counts.get("ligand", 0):
+            warnings.append("Keeping ligands can block the docking pocket.")
+        if removed_counts.get("metal", 0) or removed_counts.get("cofactor", 0):
+            warnings.append("Removing metals/cofactors can change active-site chemistry.")
+        warning_txt = ""
+        if warnings:
+            warning_txt = f"\n[#e3b341]{' '.join(warnings)}[/#e3b341]"
+        status.update(
+            f"Keeping {len(kept)} group(s): {kept_txt}\n"
+            f"Removing {len(removed)} group(s): {removed_txt}{warning_txt}"
+        )
+
+    def _format_hetero_counts(self, counts: Counter[str]) -> str:
+        parts = []
+        for category in _HETERO_CATEGORY_ORDER:
+            count = counts.get(category, 0)
+            if count:
+                label = _HETERO_CATEGORY_LABELS.get(category, category).lower()
+                parts.append(f"{count} {label}")
+        return ", ".join(parts)
 
     # ------------------------------------------------------------------
-    # Step 2 — P2Rank
+    # Step 2 - P2Rank
     # ------------------------------------------------------------------
 
     def _start_p2rank(self) -> None:
@@ -622,17 +809,9 @@ class RunWizardScreen(Screen):
             self._ctx["selected_chains"] = selected
 
         elif step == "step-recprep":
-            if self.query_one("#hetero-remove-all", Checkbox).value:
-                self._ctx["keep_hetero"] = []
-            else:
-                keep = []
-                for i, h in enumerate(self._hetero):
-                    try:
-                        if self.query_one(f"#het-{i}", Checkbox).value:
-                            keep.append(h)
-                    except Exception:
-                        pass
-                self._ctx["keep_hetero"] = keep
+            self._ctx["keep_hetero"] = [
+                h for i, h in enumerate(self._hetero) if i in self._hetero_keep
+            ]
 
         elif step == "step-site":
             btn = self.query_one("#site-method", RadioSet).pressed_button

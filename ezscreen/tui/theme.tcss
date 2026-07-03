@@ -294,10 +294,58 @@ Button:hover {
     margin-right: 1;
 }
 
+.hetero-presets {
+    height: auto;
+    margin-top: 1;
+}
+
+.hetero-presets > Button {
+    margin-right: 1;
+}
+
+#hetero-list {
+    height: 1fr;
+    min-height: 8;
+    overflow-y: auto;
+    scrollbar-size: 1 1;
+    margin-top: 1;
+}
+
+.hetero-category {
+    margin-top: 1;
+    padding: 1;
+    background: $surface;
+    border: tall $border;
+    height: auto;
+}
+
+.hetero-category-header {
+    color: $text;
+    text-style: bold;
+    height: 1;
+}
+
+.hetero-category-actions {
+    height: auto;
+    margin-top: 1;
+    margin-bottom: 1;
+}
+
+.hetero-category-actions > Button {
+    margin-right: 1;
+}
+
+.hetero-collapsed-note {
+    color: $muted;
+    height: 2;
+    content-align: left middle;
+}
+
 .form-status {
     color: $muted;
     margin-left: 1;
-    height: 3;
+    height: auto;
+    min-height: 3;
     content-align: left middle;
 }
 
