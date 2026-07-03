@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import io
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -413,6 +416,294 @@ def _run_obabel_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
 
 
 # ---------------------------------------------------------------------------
+# Receptor QC
+# ---------------------------------------------------------------------------
+
+_STANDARD_AA: frozenset[str] = frozenset({
+    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
+    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
+})
+
+_COVALENT_RADII: dict[str, float] = {
+    "C": 0.76,
+    "N": 0.71,
+    "O": 0.66,
+    "S": 1.05,
+    "P": 1.07,
+}
+
+_MAX_VALENCE: dict[str, int] = {
+    "C": 4,
+    "N": 4,
+    "O": 2,
+    "S": 6,
+    "P": 5,
+}
+
+
+def _pdb_float(line: str, start: int, end: int) -> float:
+    return float(line[start:end])
+
+
+def _atom_key(line: str) -> tuple[str, int, str, str]:
+    return (
+        line[21:22].strip(),
+        int(line[22:26]),
+        line[26:27].strip(),
+        line[17:20].strip(),
+    )
+
+
+def _iter_pdb_atoms(pdb_path: Path) -> list[dict[str, Any]]:
+    atoms: list[dict[str, Any]] = []
+    for line in pdb_path.read_text(errors="ignore").splitlines():
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        try:
+            element = line[76:78].strip() if len(line) >= 78 else ""
+            atoms.append({
+                "record": line[:6].strip(),
+                "name": line[12:16].strip(),
+                "resname": line[17:20].strip(),
+                "chain": line[21:22].strip(),
+                "resseq": int(line[22:26]),
+                "icode": line[26:27].strip(),
+                "element": (element or _infer_element(line[12:16])).upper(),
+                "xyz": (
+                    _pdb_float(line, 30, 38),
+                    _pdb_float(line, 38, 46),
+                    _pdb_float(line, 46, 54),
+                ),
+            })
+        except (IndexError, ValueError):
+            continue
+    return atoms
+
+
+def _sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _norm(a: tuple[float, float, float]) -> tuple[float, float, float]:
+    length = math.sqrt(_dot(a, a))
+    if length == 0:
+        raise ValueError("zero-length vector in dihedral calculation")
+    return (a[0] / length, a[1] / length, a[2] / length)
+
+
+def _project_out(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
+    scale = _dot(a, b)
+    return (a[0] - scale * b[0], a[1] - scale * b[1], a[2] - scale * b[2])
+
+
+def _dihedral_degrees(
+    p0: tuple[float, float, float],
+    p1: tuple[float, float, float],
+    p2: tuple[float, float, float],
+    p3: tuple[float, float, float],
+) -> float:
+    b0 = _sub(p0, p1)
+    b1 = _norm(_sub(p2, p1))
+    b2 = _sub(p3, p2)
+    v = _project_out(b0, b1)
+    w = _project_out(b2, b1)
+    x = _dot(v, w)
+    y = _dot(_cross(b1, v), w)
+    return math.degrees(math.atan2(y, x))
+
+
+def ramachandran_angles(pdb_path: Path) -> list[dict[str, Any]]:
+    """Compute phi/psi backbone dihedrals for residues with complete neighbours."""
+    residues: dict[tuple[str, int, str, str], dict[str, tuple[float, float, float]]] = {}
+    order: list[tuple[str, int, str, str]] = []
+    for line in pdb_path.read_text(errors="ignore").splitlines():
+        if not line.startswith("ATOM  "):
+            continue
+        atom_name = line[12:16].strip()
+        if atom_name not in {"N", "CA", "C"}:
+            continue
+        try:
+            key = _atom_key(line)
+            xyz = (_pdb_float(line, 30, 38), _pdb_float(line, 38, 46), _pdb_float(line, 46, 54))
+        except (IndexError, ValueError):
+            continue
+        if key not in residues:
+            residues[key] = {}
+            order.append(key)
+        residues[key][atom_name] = xyz
+
+    angles: list[dict[str, Any]] = []
+    for i, key in enumerate(order):
+        if i == 0 or i == len(order) - 1:
+            continue
+        prev_atoms = residues[order[i - 1]]
+        atoms = residues[key]
+        next_atoms = residues[order[i + 1]]
+        required = (
+            "C" in prev_atoms
+            and {"N", "CA", "C"}.issubset(atoms)
+            and "N" in next_atoms
+        )
+        if not required:
+            continue
+        try:
+            phi = _dihedral_degrees(prev_atoms["C"], atoms["N"], atoms["CA"], atoms["C"])
+            psi = _dihedral_degrees(atoms["N"], atoms["CA"], atoms["C"], next_atoms["N"])
+        except ValueError:
+            continue
+        chain, resseq, icode, resname = key
+        angles.append({
+            "chain": chain,
+            "resseq": resseq,
+            "icode": icode,
+            "resname": resname,
+            "phi": round(phi, 2),
+            "psi": round(psi, 2),
+        })
+    return angles
+
+
+def _render_ramachandran_plot(angles: list[dict[str, Any]]) -> str | None:
+    if not angles:
+        return None
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception:
+        return None
+
+    fig, ax = plt.subplots(figsize=(4.5, 4.5), dpi=120)
+    ax.scatter([a["phi"] for a in angles], [a["psi"] for a in angles], s=10, alpha=0.65)
+    ax.axhline(0, color="#d0d7de", linewidth=0.7)
+    ax.axvline(0, color="#d0d7de", linewidth=0.7)
+    ax.set_xlim(-180, 180)
+    ax.set_ylim(-180, 180)
+    ax.set_xlabel("phi (degrees)")
+    ax.set_ylabel("psi (degrees)")
+    ax.set_title("Ramachandran plot")
+    ax.grid(True, color="#eaeef2", linewidth=0.5)
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png")
+    plt.close(fig)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
+    atoms = _iter_pdb_atoms(pdb_path)
+    residues: dict[tuple[str, int, str, str], set[str]] = {}
+    for atom in atoms:
+        if atom["record"] != "ATOM" or atom["resname"] not in _STANDARD_AA:
+            continue
+        key = (atom["chain"], atom["resseq"], atom["icode"], atom["resname"])
+        residues.setdefault(key, set()).add(atom["name"])
+
+    missing_backbone = []
+    for chain, resseq, icode, resname in residues:
+        missing = sorted({"N", "CA", "C", "O"} - residues[(chain, resseq, icode, resname)])
+        if missing:
+            missing_backbone.append({
+                "chain": chain,
+                "resseq": resseq,
+                "icode": icode,
+                "resname": resname,
+                "missing": missing,
+            })
+
+    heavy = [a for a in atoms if a["element"] != "H"]
+    clashes = []
+    valence_counts = [0] * len(heavy)
+    for i, atom_i in enumerate(heavy):
+        for j in range(i + 1, len(heavy)):
+            atom_j = heavy[j]
+            same_residue = (
+                atom_i["chain"], atom_i["resseq"], atom_i["icode"]
+            ) == (atom_j["chain"], atom_j["resseq"], atom_j["icode"])
+            dist = _distance(atom_i["xyz"], atom_j["xyz"])
+            if not same_residue and dist < 1.0:
+                clashes.append({
+                    "a": f"{atom_i['chain']}:{atom_i['resname']}{atom_i['resseq']}:{atom_i['name']}",
+                    "b": f"{atom_j['chain']}:{atom_j['resname']}{atom_j['resseq']}:{atom_j['name']}",
+                    "distance": round(dist, 2),
+                })
+            radius_i = _COVALENT_RADII.get(atom_i["element"])
+            radius_j = _COVALENT_RADII.get(atom_j["element"])
+            if radius_i is None or radius_j is None:
+                continue
+            if dist <= radius_i + radius_j + 0.45:
+                valence_counts[i] += 1
+                valence_counts[j] += 1
+
+    odd_valences = []
+    for atom, valence in zip(heavy, valence_counts):
+        max_valence = _MAX_VALENCE.get(atom["element"])
+        if max_valence is not None and valence > max_valence:
+            odd_valences.append({
+                "atom": f"{atom['chain']}:{atom['resname']}{atom['resseq']}:{atom['name']}",
+                "element": atom["element"],
+                "inferred_valence": valence,
+                "max_expected": max_valence,
+            })
+
+    return {
+        "atom_count": len(atoms),
+        "residue_count_checked": len(residues),
+        "missing_backbone": missing_backbone,
+        "steric_clashes": clashes[:50],
+        "steric_clash_count": len(clashes),
+        "odd_valences": odd_valences[:50],
+        "odd_valence_count": len(odd_valences),
+    }
+
+
+def _qc_warnings(qc: dict[str, Any]) -> list[dict[str, Any]]:
+    warnings = []
+    if qc["missing_backbone"]:
+        warnings.append({
+            "severity": "medium",
+            "category": "missing_backbone_atoms",
+            "affected_count": len(qc["missing_backbone"]),
+            "message": f"{len(qc['missing_backbone'])} residue(s) are missing backbone atoms after prep",
+            "action": "inspect the prepared receptor before docking",
+        })
+    if qc["steric_clash_count"]:
+        warnings.append({
+            "severity": "high" if qc["steric_clash_count"] > 10 else "medium",
+            "category": "steric_clashes",
+            "affected_count": qc["steric_clash_count"],
+            "message": f"{qc['steric_clash_count']} close heavy-atom contact(s) found in the prepared receptor",
+            "action": "inspect clashes near the binding site before docking",
+        })
+    if qc["odd_valence_count"]:
+        warnings.append({
+            "severity": "medium",
+            "category": "possible_odd_valences",
+            "affected_count": qc["odd_valence_count"],
+            "message": f"{qc['odd_valence_count']} atom(s) have unusual inferred valence in the prepared receptor",
+            "action": "check residue chemistry and retained cofactors/metals",
+        })
+    return warnings
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -484,6 +775,11 @@ def prep_receptor(
         "action": "verify HIE/HID if histidines are in binding site",
     })
 
+    rama_angles = ramachandran_angles(fixed)
+    rama_plot = _render_ramachandran_plot(rama_angles)
+    sanity = receptor_sanity_checks(fixed)
+    warnings.extend(_qc_warnings(sanity))
+
     try:
         pdbqt, mv = _run_meeko_receptor(fixed, output_dir)
     except ReceptorPrepError:
@@ -503,6 +799,12 @@ def prep_receptor(
             "residue_count": fx["residue_count"],
             "missing_residues": fx["missing_residues"],
             "alternates_resolved": n_alt,
+            "ramachandran": {
+                "angle_count": len(rama_angles),
+                "angles": rama_angles,
+                "plot_png_base64": rama_plot,
+            },
+            "sanity_checks": sanity,
             "tools": {"pdbfixer": fx["pdbfixer_version"], "meeko": mv},
             "warnings": warnings,
         },

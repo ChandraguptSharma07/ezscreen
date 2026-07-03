@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from ezscreen.prep.receptor import (
     _apply_hetero_selection,
     heteroatom_inventory,
+    ramachandran_angles,
+    receptor_sanity_checks,
 )
 
 
@@ -55,3 +61,114 @@ def test_apply_hetero_selection_keeps_only_selected(tmp_path):
     assert "ATOM" in text                     # protein retained
     assert "LIG" in text                      # kept ligand retained
     assert "HOH" not in text and " ZN " not in text  # de-selected hetero gone
+
+
+def _pdb_atom(serial, name, resn, chain, resseq, xyz, elem="C"):
+    x, y, z = xyz
+    L = list(" " * 80)
+    L[0:6] = "ATOM  "
+    L[6:11] = f"{serial:>5}"
+    L[12:16] = f"{name:<4}"
+    L[17:20] = f"{resn:>3}"
+    L[21] = chain
+    L[22:26] = f"{resseq:>4}"
+    L[30:38] = f"{x:8.3f}"
+    L[38:46] = f"{y:8.3f}"
+    L[46:54] = f"{z:8.3f}"
+    L[76:78] = f"{elem:>2}"
+    return "".join(L)
+
+
+def _sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a, b):
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _norm(a):
+    length = math.sqrt(_dot(a, a))
+    return (a[0] / length, a[1] / length, a[2] / length)
+
+
+def _rotate(v, axis, degrees):
+    theta = math.radians(degrees)
+    cost = math.cos(theta)
+    sint = math.sin(theta)
+    cross = _cross(axis, v)
+    dot = _dot(axis, v)
+    return (
+        v[0] * cost + cross[0] * sint + axis[0] * dot * (1 - cost),
+        v[1] * cost + cross[1] * sint + axis[1] * dot * (1 - cost),
+        v[2] * cost + cross[2] * sint + axis[2] * dot * (1 - cost),
+    )
+
+
+def _fourth_point_for_dihedral(p0, p1, p2, degrees):
+    axis = _norm(_sub(p2, p1))
+    v = _sub(p0, p1)
+    v = _norm((
+        v[0] - _dot(v, axis) * axis[0],
+        v[1] - _dot(v, axis) * axis[1],
+        v[2] - _dot(v, axis) * axis[2],
+    ))
+    w = _rotate(v, axis, degrees)
+    return (p2[0] + w[0], p2[1] + w[1], p2[2] + w[2])
+
+
+def test_ramachandran_angles_for_known_geometry(tmp_path):
+    c1 = (0.0, 1.0, 0.0)
+    n2 = (0.0, 0.0, 0.0)
+    ca2 = (1.0, 0.0, 0.0)
+    c2 = (1.0, math.cos(math.radians(-60)), math.sin(math.radians(-60)))
+    n3 = _fourth_point_for_dihedral(n2, ca2, c2, 120)
+
+    pdb = tmp_path / "rama.pdb"
+    pdb.write_text("\n".join([
+        _pdb_atom(1, "N", "ALA", "A", 1, (-0.5, 1.0, 0.0), "N"),
+        _pdb_atom(2, "CA", "ALA", "A", 1, (-0.2, 1.2, 0.0), "C"),
+        _pdb_atom(3, "C", "ALA", "A", 1, c1, "C"),
+        _pdb_atom(4, "N", "GLY", "A", 2, n2, "N"),
+        _pdb_atom(5, "CA", "GLY", "A", 2, ca2, "C"),
+        _pdb_atom(6, "C", "GLY", "A", 2, c2, "C"),
+        _pdb_atom(7, "N", "SER", "A", 3, n3, "N"),
+        _pdb_atom(8, "CA", "SER", "A", 3, (n3[0] + 0.5, n3[1], n3[2]), "C"),
+        _pdb_atom(9, "C", "SER", "A", 3, (n3[0] + 1.0, n3[1], n3[2]), "C"),
+        "END",
+    ]) + "\n")
+
+    angles = ramachandran_angles(pdb)
+
+    assert len(angles) == 1
+    assert angles[0]["resname"] == "GLY"
+    assert angles[0]["phi"] == pytest.approx(-60.0, abs=0.2)
+    assert angles[0]["psi"] == pytest.approx(120.0, abs=0.2)
+
+
+def test_receptor_sanity_checks_flags_missing_backbone_and_clash(tmp_path):
+    pdb = tmp_path / "bad_receptor.pdb"
+    pdb.write_text("\n".join([
+        _pdb_atom(1, "N", "ALA", "A", 1, (0.0, 0.0, 0.0), "N"),
+        _pdb_atom(2, "CA", "ALA", "A", 1, (1.4, 0.0, 0.0), "C"),
+        _pdb_atom(3, "C", "ALA", "A", 1, (2.5, 0.0, 0.0), "C"),
+        _pdb_atom(4, "N", "GLY", "A", 2, (0.2, 0.0, 0.0), "N"),
+        _pdb_atom(5, "CA", "GLY", "A", 2, (3.9, 0.0, 0.0), "C"),
+        _pdb_atom(6, "C", "GLY", "A", 2, (5.0, 0.0, 0.0), "C"),
+        _pdb_atom(7, "O", "GLY", "A", 2, (6.0, 0.0, 0.0), "O"),
+        "END",
+    ]) + "\n")
+
+    qc = receptor_sanity_checks(pdb)
+
+    assert qc["missing_backbone"][0]["missing"] == ["O"]
+    assert qc["steric_clash_count"] == 1
+    assert qc["steric_clashes"][0]["distance"] == pytest.approx(0.2, abs=0.01)

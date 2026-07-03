@@ -4,9 +4,19 @@ import pytest
 from rdkit import Chem
 from rdkit.Geometry import Point3D
 
+from ezscreen.errors import LigandPrepError
+from ezscreen.prep import ligands as ligand_prep
 from ezscreen.prep.ligands import _conformer_qc, _embed_3d
 
 IBUPROFEN = "CC(C)Cc1ccc(cc1)C(C)C(=O)O"
+
+
+def _write_sdf(path, smiles: str, name: str = "ligand") -> None:
+    mol = Chem.MolFromSmiles(smiles)
+    mol.SetProp("_Name", name)
+    writer = Chem.SDWriter(str(path))
+    writer.write(mol)
+    writer.close()
 
 
 def _two_carbons(dist: float, bonded: bool) -> Chem.Mol:
@@ -85,17 +95,98 @@ def test_prep_ligands_expands_enumerated_variants(tmp_path, monkeypatch):
 
     # stub enumeration: one acid → two protomers, so prep should embed both
     monkeypatch.setattr(
-        enum, "enumerate_variants",
+        enum,
+        "enumerate_variants",
         lambda smi, *a, **k: ["CC(=O)O", "CC(=O)[O-]"],
     )
 
     src = tmp_path / "in.smi"
     src.write_text("CC(=O)O\tacid\n")
     out = tmp_path / "shards"
-    opts = {"enabled": True, "protonation": True, "tautomers": True,
-            "stereo": False, "ring": False, "max_variants": 4}
+    opts = {
+        "enabled": True,
+        "protonation": True,
+        "tautomers": True,
+        "stereo": False,
+        "ring": False,
+        "max_variants": 4,
+    }
     result = prep_ligands(input_path=src, output_dir=out, enumerate_opts=opts)
 
     assert result["report"]["enumeration_enabled"] is True
     assert result["report"]["variants_generated"] == 2
     assert result["report"]["prep_passed"] == 2
+
+
+def test_scan_input_accepts_openbabel_ligand_formats(tmp_path):
+    for name in ("ligand.sdf", "ligand.smi", "ligand.mol2", "ligand.mol", "ligand.pdb"):
+        (tmp_path / name).write_text("placeholder")
+
+    suffixes = {path.suffix for path in ligand_prep.scan_input(tmp_path)}
+
+    assert {".sdf", ".smi", ".mol2", ".mol", ".pdb"} <= suffixes
+
+
+def test_openbabel_formats_are_kept_for_kaggle_raw_sharding(tmp_path, monkeypatch):
+    src_dir = tmp_path / "inputs"
+    src_dir.mkdir()
+    ref_sdf = src_dir / "reference.sdf"
+    _write_sdf(ref_sdf, "CCO", "ethanol")
+    (src_dir / "from_mol2.mol2").write_text("@<TRIPOS>MOLECULE\nethanol\n")
+    (src_dir / "from_pdb.pdb").write_text("HEADER    ETHANOL\n")
+
+    def fail_if_local_convert(*_args, **_kwargs):
+        raise AssertionError("Kaggle raw sharding should not require local Open Babel")
+
+    monkeypatch.setattr(ligand_prep, "_convert_ligand_to_sdf", fail_if_local_convert)
+
+    result = ligand_prep.shard_raw(src_dir, tmp_path / "out", shard_size=10)
+    suffixes = sorted(path.suffix for path in result["shard_paths"])
+
+    assert suffixes == [".mol2", ".pdb", ".smi"]
+    assert result["report"]["input_files"] == 3
+    assert result["report"]["backend_input_files"] == 2
+    assert result["report"]["converted_input_files"] == 0
+    assert result["report"]["total_input"] == 3
+    assert (tmp_path / "out" / "raw_0000_from_mol2.mol2").exists()
+    assert (tmp_path / "out" / "raw_0001_from_pdb.pdb").exists()
+
+
+def test_openbabel_formats_are_converted_for_local_prep_loading(tmp_path, monkeypatch):
+    src_dir = tmp_path / "inputs"
+    src_dir.mkdir()
+    ref_sdf = src_dir / "reference.sdf"
+    _write_sdf(ref_sdf, "CCO", "ethanol")
+    (src_dir / "from_mol2.mol2").write_text("@<TRIPOS>MOLECULE\nethanol\n")
+    (src_dir / "from_pdb.pdb").write_text("HEADER    ETHANOL\n")
+
+    converted: list[str] = []
+
+    def fake_convert(src, output_dir, index):
+        output_dir.mkdir(parents=True, exist_ok=True)
+        dst = output_dir / f"{index:04d}_{src.stem}.sdf"
+        dst.write_text(ref_sdf.read_text())
+        converted.append(src.suffix)
+        return dst
+
+    monkeypatch.setattr(ligand_prep, "_convert_ligand_to_sdf", fake_convert)
+
+    normalised = ligand_prep._normalise_input_files(
+        ligand_prep.scan_input(src_dir), tmp_path / "out"
+    )
+    smiles = []
+    for path in normalised:
+        for mol in ligand_prep._load_supplier(path):
+            smiles.append(Chem.MolToSmiles(mol))
+
+    assert sorted(converted) == [".mol2", ".pdb"]
+    assert smiles == [Chem.MolToSmiles(Chem.MolFromSmiles("CCO"))] * 3
+
+
+def test_openbabel_formats_report_missing_obabel(tmp_path, monkeypatch):
+    monkeypatch.setattr(ligand_prep.shutil, "which", lambda _name: None)
+    src = tmp_path / "ligand.mol2"
+    src.write_text("@<TRIPOS>MOLECULE\n")
+
+    with pytest.raises(LigandPrepError, match="Open Babel"):
+        ligand_prep._convert_ligand_to_sdf(src, tmp_path / "out", 0)

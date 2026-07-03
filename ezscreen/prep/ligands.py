@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import math
 import os
+import shutil
+import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -14,20 +16,26 @@ from ezscreen.errors import LigandPrepError
 
 console = Console()
 _SHARD_SIZE = 5_000
+_RDKIT_INPUT_EXTS = (".sdf", ".smi", ".smiles", ".ism")
+_OPENBABEL_INPUT_EXTS = (".mol2", ".mol", ".pdb")
+_LIGAND_INPUT_EXTS = _RDKIT_INPUT_EXTS + _OPENBABEL_INPUT_EXTS
 
 
 # ---------------------------------------------------------------------------
 # Scrubber import — git+ install preferred, vendor fallback
 # ---------------------------------------------------------------------------
 
+
 def _get_scrubber():
     try:
         from scrubber import Scrubber
+
         return Scrubber
     except ImportError:
         pass
     try:
         from ezscreen.vendor.scrubber import SCRUBBER_AVAILABLE, Scrubber
+
         return Scrubber if SCRUBBER_AVAILABLE else None
     except ImportError:
         return None
@@ -37,16 +45,21 @@ def _get_scrubber():
 # Input scanning
 # ---------------------------------------------------------------------------
 
+
 def scan_input(path: Path) -> list[Path]:
     if path.is_file():
-        if path.suffix.lower() in (".sdf", ".smi", ".smiles", ".ism"):
+        if path.suffix.lower() in _LIGAND_INPUT_EXTS:
             return [path]
         raise LigandPrepError(f"Unsupported file type: {path.suffix}")
-    files: list[Path] = []
-    for ext in ("*.sdf", "*.smi", "*.smiles", "*.ism"):
-        files.extend(sorted(path.rglob(ext)))
+    files = sorted(
+        file_path
+        for file_path in path.rglob("*")
+        if file_path.is_file() and file_path.suffix.lower() in _LIGAND_INPUT_EXTS
+    )
     if not files:
-        raise LigandPrepError(f"No .sdf or .smi files found in {path}")
+        raise LigandPrepError(
+            f"No ligand files (.sdf, .smi, .smiles, .ism, .mol2, .mol, .pdb) found in {path}"
+        )
     return files
 
 
@@ -54,11 +67,61 @@ def scan_input(path: Path) -> list[Path]:
 # Per-molecule prep
 # ---------------------------------------------------------------------------
 
+
 def _load_supplier(file_path: Path):
     from rdkit.Chem import SDMolSupplier, SmilesMolSupplier
+
     if file_path.suffix.lower() == ".sdf":
         return SDMolSupplier(str(file_path), removeHs=False, sanitize=True)
     return SmilesMolSupplier(str(file_path), delimiter="\t ", titleLine=False)
+
+
+def _convert_ligand_to_sdf(src: Path, output_dir: Path, index: int) -> Path:
+    obabel = shutil.which("obabel")
+    if obabel is None:
+        raise LigandPrepError(
+            "Open Babel is required for .mol2/.mol/.pdb ligand input. "
+            "Install Open Babel or convert the ligand to SDF/SMILES first."
+        )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dst = output_dir / f"{index:04d}_{src.stem}.sdf"
+    try:
+        proc = subprocess.run(
+            [obabel, str(src), "-O", str(dst)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise LigandPrepError(f"Open Babel timed out converting {src}") from exc
+    except OSError as exc:
+        raise LigandPrepError(f"Open Babel failed to start: {exc}") from exc
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        msg = f"Open Babel failed to convert {src.name}"
+        if detail:
+            msg += f": {detail}"
+        raise LigandPrepError(msg)
+    if not dst.exists() or dst.stat().st_size == 0:
+        raise LigandPrepError(f"Open Babel produced no SDF output for {src.name}")
+    return dst
+
+
+def _normalise_input_files(files: list[Path], output_dir: Path) -> list[Path]:
+    converted_dir = output_dir / "converted_inputs"
+    normalised: list[Path] = []
+    for index, src in enumerate(files):
+        suffix = src.suffix.lower()
+        if suffix in _RDKIT_INPUT_EXTS:
+            normalised.append(src)
+        elif suffix in _OPENBABEL_INPUT_EXTS:
+            normalised.append(_convert_ligand_to_sdf(src, converted_dir, index))
+        else:
+            raise LigandPrepError(f"Unsupported file type: {src.suffix}")
+    return normalised
 
 
 def _scrub(mol, Scrubber, ph: float):
@@ -73,6 +136,7 @@ def _scrub(mol, Scrubber, ph: float):
 
 def _optimise(mol_h, force_field: str, max_iters: int) -> None:
     from rdkit.Chem import AllChem
+
     ff = (force_field or "MMFF94").upper()
     if ff == "UFF":
         AllChem.UFFOptimizeMolecule(mol_h, maxIters=max_iters)
@@ -83,6 +147,7 @@ def _optimise(mol_h, force_field: str, max_iters: int) -> None:
 
 def _embed_3d(mol, mmff_max_iters: int = 0, force_field: str = "MMFF94"):
     from rdkit.Chem import AddHs, AllChem
+
     mol_h = AddHs(mol)
     params = AllChem.ETKDGv3()
     params.randomSeed = 42
@@ -96,6 +161,7 @@ def _to_pdbqt(mol) -> str | None:
     # Import outside the try so a broken/missing meeko install raises loudly
     # instead of being charged to every ligand as an "unsupported atoms" failure.
     from meeko import MoleculePreparation, PDBQTWriterLegacy
+
     try:
         setups = MoleculePreparation().prepare(mol)
         pdbqt, ok, _ = PDBQTWriterLegacy.write_string(setups[0])
@@ -151,28 +217,38 @@ def _conformer_qc(mol_h) -> str | None:
 
 # Atomic numbers AutoDock4 / UniDock can handle.
 # Elements outside this set produce atom-type parse errors at docking time.
-_AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset({
-    1,   # H
-    6,   # C
-    7,   # N
-    8,   # O
-    9,   # F
-    12,  # Mg
-    15,  # P
-    16,  # S
-    17,  # Cl
-    20,  # Ca
-    25,  # Mn
-    26,  # Fe
-    30,  # Zn
-    35,  # Br
-    53,  # I
-})
+_AUTODOCK_SUPPORTED_ATOMIC_NUMS = frozenset(
+    {
+        1,  # H
+        6,  # C
+        7,  # N
+        8,  # O
+        9,  # F
+        12,  # Mg
+        15,  # P
+        16,  # S
+        17,  # Cl
+        20,  # Ca
+        25,  # Mn
+        26,  # Fe
+        30,  # Zn
+        35,  # Br
+        53,  # I
+    }
+)
 
 
-def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max_iters: int = 0, force_field: str = "MMFF94") -> tuple[str | None, str | None, str | None]:
+def _prep_one(
+    mol,
+    Scrubber,
+    ph: float,
+    gpu_filter: dict | None = None,
+    mmff_max_iters: int = 0,
+    force_field: str = "MMFF94",
+) -> tuple[str | None, str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
+
         SanitizeMol(mol)
     except Exception:
         return None, "sanitization", None
@@ -184,6 +260,7 @@ def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max
     if gpu_filter:
         from rdkit.Chem.Descriptors import MolWt
         from rdkit.Chem.rdMolDescriptors import CalcNumHeavyAtoms, CalcNumRotatableBonds
+
         if CalcNumHeavyAtoms(mol) > gpu_filter["max_heavy_atoms"]:
             return None, "too_large_for_gpu", None
         if MolWt(mol) > gpu_filter["max_mw"]:
@@ -219,38 +296,52 @@ def _prep_one(mol, Scrubber, ph: float, gpu_filter: dict | None = None, mmff_max
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def shard_raw(
     input_path: Path,
     output_dir: Path,
     shard_size: int = _SHARD_SIZE,
     n_shards: int | None = None,
 ) -> dict[str, Any]:
-    """Split input into raw SMILES shards without 3D prep — prep runs on Kaggle."""
+    """Create raw ligand shards for Kaggle-side prep.
+
+    SMILES/SDF inputs are converted to SMILES shards locally. Mol2/Mol/PDB
+    inputs are copied through unchanged so Kaggle can do the Open Babel
+    conversion in the notebook environment.
+    """
     from rdkit.Chem import MolToSmiles
 
     output_dir.mkdir(parents=True, exist_ok=True)
     files = scan_input(input_path)
+    rdkit_files = [fp for fp in files if fp.suffix.lower() in _RDKIT_INPUT_EXTS]
+    backend_files = [fp for fp in files if fp.suffix.lower() in _OPENBABEL_INPUT_EXTS]
 
     all_entries: list[tuple[str, str]] = []
-    for fp in files:
+    for fp in rdkit_files:
         for mol in _load_supplier(fp):
             if mol is None:
                 continue
             smiles = MolToSmiles(mol)
             mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
             if not mol_name:
-                for _prop in ("Catalog_ID", "ID", "Name", "IDNUMBER", "PUBCHEM_COMPOUND_CID"):
+                for _prop in (
+                    "Catalog_ID",
+                    "ID",
+                    "Name",
+                    "IDNUMBER",
+                    "PUBCHEM_COMPOUND_CID",
+                ):
                     if mol.HasProp(_prop):
                         mol_name = mol.GetProp(_prop).strip()
                         break
             all_entries.append((smiles, mol_name))
 
-    total = len(all_entries)
-    if n_shards is not None and n_shards > 0 and total > 0:
-        shard_size = max(1, math.ceil(total / n_shards))
+    counted_input = len(all_entries) + len(backend_files)
+    if n_shards is not None and n_shards > 0 and all_entries:
+        shard_size = max(1, math.ceil(len(all_entries) / n_shards))
 
     shard_paths: list[Path] = []
-    for i in range(0, max(total, 1), shard_size):
+    for i in range(0, max(len(all_entries), 1), shard_size):
         chunk = all_entries[i : i + shard_size]
         if not chunk:
             break
@@ -258,14 +349,21 @@ def shard_raw(
         p.write_text("\n".join(f"{smi}\t{name}" for smi, name in chunk))
         shard_paths.append(p)
 
+    for idx, src in enumerate(backend_files):
+        dst = output_dir / f"raw_{idx:04d}_{src.name}"
+        shutil.copy2(src, dst)
+        shard_paths.append(dst)
+
     return {
         "shard_paths": shard_paths,
         "filtered_gpu_size_csv": None,
         "report": {
             "input_source": str(input_path),
             "input_files": len(files),
-            "total_input": total,
-            "prep_passed": total,
+            "converted_input_files": 0,
+            "backend_input_files": len(backend_files),
+            "total_input": counted_input,
+            "prep_passed": counted_input,
             "prep_failed": 0,
         },
     }
@@ -285,18 +383,27 @@ def prep_ligands(
     output_dir.mkdir(parents=True, exist_ok=True)
     Scrubber = _get_scrubber()
     files = scan_input(input_path)
+    converted_input_files = sum(
+        1 for fp in files if fp.suffix.lower() in _OPENBABEL_INPUT_EXTS
+    )
+    load_files = _normalise_input_files(files, output_dir)
 
     failed_path = output_dir / "failed_prep.sdf"
     failed_writer = SDWriter(str(failed_path))
 
     try:
         from ezscreen import config as _cfg
+
         _pc = _cfg.load().get("prep", {})
-        gpu_filter: dict | None = {
-            "max_heavy_atoms":     int(_pc.get("max_heavy_atoms",     70)),
-            "max_mw":             float(_pc.get("max_mw",           700.0)),
-            "max_rotatable_bonds": int(_pc.get("max_rotatable_bonds", 20)),
-        } if _pc.get("enable_gpu_size_filter", True) else None
+        gpu_filter: dict | None = (
+            {
+                "max_heavy_atoms": int(_pc.get("max_heavy_atoms", 70)),
+                "max_mw": float(_pc.get("max_mw", 700.0)),
+                "max_rotatable_bonds": int(_pc.get("max_rotatable_bonds", 20)),
+            }
+            if _pc.get("enable_gpu_size_filter", True)
+            else None
+        )
         mmff_max_iters: int = int(_pc.get("mmff_max_iters", 0))
         _cfg_force_field = str(_pc.get("force_field", "MMFF94"))
     except Exception:
@@ -309,21 +416,30 @@ def prep_ligands(
     force_field = force_field or _cfg_force_field
 
     # enumeration: per-run override (enumerate_opts) wins over the config defaults
-    _eo = enumerate_opts if enumerate_opts is not None else {
-        "enabled":      bool(_pc.get("enumerate_enabled", False)),
-        "protonation":  bool(_pc.get("enumerate_protonation", True)),
-        "tautomers":    bool(_pc.get("enumerate_tautomers", True)),
-        "stereo":       bool(_pc.get("enumerate_stereo", False)),
-        "ring":         bool(_pc.get("enumerate_ring", False)),
-        "max_variants": int(_pc.get("max_variants_per_ligand", 4)),
-    }
+    _eo = (
+        enumerate_opts
+        if enumerate_opts is not None
+        else {
+            "enabled": bool(_pc.get("enumerate_enabled", False)),
+            "protonation": bool(_pc.get("enumerate_protonation", True)),
+            "tautomers": bool(_pc.get("enumerate_tautomers", True)),
+            "stereo": bool(_pc.get("enumerate_stereo", False)),
+            "ring": bool(_pc.get("enumerate_ring", False)),
+            "max_variants": int(_pc.get("max_variants_per_ligand", 4)),
+        }
+    )
     _enum_on = bool(_eo.get("enabled"))
 
-    failures = {"sanitization": 0, "conformer_generation": 0, "unsupported_atoms": 0, "too_large_for_gpu": 0}
+    failures = {
+        "sanitization": 0,
+        "conformer_generation": 0,
+        "unsupported_atoms": 0,
+        "too_large_for_gpu": 0,
+    }
     filtered_too_large: list[dict] = []
     shard_buf: list[str] = []
     shard_paths: list[Path] = []
-    index_rows: list[dict] = []   # ligand id → name + smiles
+    index_rows: list[dict] = []  # ligand id → name + smiles
     shard_idx = total = prep_passed = prep_failed = 0
 
     def _flush() -> None:
@@ -339,19 +455,25 @@ def prep_ligands(
     from rdkit.Chem import MolToSmiles
 
     # Phase 1: load all molecules (sequential — suppliers are not thread-safe)
-    all_mols:  list = []
-    all_meta:  list[tuple[str, str]] = []   # (smiles, mol_name)
-    bad_mols:  list = []                     # None-supplier failures to count
-    for fp in files:
+    all_mols: list = []
+    all_meta: list[tuple[str, str]] = []  # (smiles, mol_name)
+    bad_mols: list = []  # None-supplier failures to count
+    for fp in load_files:
         for mol in _load_supplier(fp):
             if mol is None:
                 bad_mols.append(None)
                 continue
             total += 1
-            smiles   = MolToSmiles(mol)
+            smiles = MolToSmiles(mol)
             mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
             if not mol_name:
-                for _prop in ("Catalog_ID", "ID", "Name", "IDNUMBER", "PUBCHEM_COMPOUND_CID"):
+                for _prop in (
+                    "Catalog_ID",
+                    "ID",
+                    "Name",
+                    "IDNUMBER",
+                    "PUBCHEM_COMPOUND_CID",
+                ):
                     if mol.HasProp(_prop):
                         mol_name = mol.GetProp(_prop).strip()
                         break
@@ -370,11 +492,14 @@ def prep_ligands(
         from rdkit.Chem import MolFromSmiles
 
         from ezscreen.prep.enumerate import enumerate_variants
+
         exp_mols: list = []
         exp_meta: list[tuple[str, str]] = []
         for (smiles, mol_name), mol in zip(all_meta, all_mols):
             variants = enumerate_variants(
-                smiles, ph, int(_eo.get("max_variants", 4)),
+                smiles,
+                ph,
+                int(_eo.get("max_variants", 4)),
                 protonation=bool(_eo.get("protonation", True)),
                 tautomers=bool(_eo.get("tautomers", True)),
                 stereo=bool(_eo.get("stereo", False)),
@@ -397,16 +522,31 @@ def prep_ligands(
     # RDKit's ETKDGv3 and MMFF are C++ extensions that release the GIL,
     # so ThreadPoolExecutor gives near-linear speedup without pickling.
     n_workers = min(max(os.cpu_count() or 1, 1), 16)
-    console.print(f"  [dim]Prepping {total} ligand(s) with {n_workers} worker(s)...[/dim]")
+    console.print(
+        f"  [dim]Prepping {total} ligand(s) with {n_workers} worker(s)...[/dim]"
+    )
 
     results: list[tuple | None] = [None] * len(all_mols)
 
-    with Progress(SpinnerColumn(), "[progress.description]{task.description}",
-                  BarColumn(), TaskProgressColumn(), console=console) as prog:
+    with Progress(
+        SpinnerColumn(),
+        "[progress.description]{task.description}",
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as prog:
         task = prog.add_task("Prepping ligands...", total=len(all_mols))
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             future_to_idx = {
-                pool.submit(_prep_one, mol, Scrubber, ph, gpu_filter, mmff_max_iters, force_field): i
+                pool.submit(
+                    _prep_one,
+                    mol,
+                    Scrubber,
+                    ph,
+                    gpu_filter,
+                    mmff_max_iters,
+                    force_field,
+                ): i
                 for i, mol in enumerate(all_mols)
             }
             for fut in as_completed(future_to_idx):
@@ -427,7 +567,14 @@ def prep_ligands(
         pdbqt, reason, qc = result  # type: ignore[misc]
         if pdbqt:
             lig_id = f"lig_{prep_passed:05d}"
-            index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": smiles, "conformer_qc": qc or ""})
+            index_rows.append(
+                {
+                    "ligand": lig_id,
+                    "name": mol_name,
+                    "smiles": smiles,
+                    "conformer_qc": qc or "",
+                }
+            )
             shard_buf.append(f"REMARK lig_id {lig_id}\n" + pdbqt)
             if qc:
                 qc_flagged.append({"ligand": lig_id, "name": mol_name, "reason": qc})
@@ -460,24 +607,33 @@ def prep_ligands(
 
     warnings: list[dict] = []
     if Scrubber is None:
-        warnings.append({
-            "severity": "medium", "category": "scrubber_unavailable",
-            "affected_count": total,
-            "message": "scrub.py not available — protonation/cleanup skipped",
-            "action": "pip install 'ezscreen[scrubber]'",
-        })
+        warnings.append(
+            {
+                "severity": "medium",
+                "category": "scrubber_unavailable",
+                "affected_count": total,
+                "message": "scrub.py not available — protonation/cleanup skipped",
+                "action": "pip install 'ezscreen[scrubber]'",
+            }
+        )
 
     try:
         import rdkit
+
         rv = rdkit.__version__
     except Exception:
         rv = "unknown"
     try:
         import meeko
+
         mv = meeko.__version__
     except Exception:
         mv = "unknown"
-    sv = "vendor" if (Scrubber and "vendor" in getattr(Scrubber, "__module__", "")) else "git+"
+    sv = (
+        "vendor"
+        if (Scrubber and "vendor" in getattr(Scrubber, "__module__", ""))
+        else "git+"
+    )
 
     return {
         "shard_paths": shard_paths,
@@ -485,6 +641,7 @@ def prep_ligands(
         "report": {
             "input_source": str(input_path),
             "input_files": len(files),
+            "converted_input_files": converted_input_files,
             "total_input": total,
             "prep_passed": prep_passed,
             "prep_failed": prep_failed,

@@ -70,9 +70,31 @@ def test_scoring_flag_threaded_into_docking_command():
 
     for eng in ("unidock", "gnina"):
         src = runner.render_vina_notebook(
-            run_id="ezs-x", shard_filenames=["s0.smi"],
-            box_center=[1, 2, 3], box_size=[20, 20, 20],
-            engine=eng, scoring="vinardo",
+            run_id="ezs-x",
+            shard_filenames=["s0.smi"],
+            box_center=[1, 2, 3],
+            box_size=[20, 20, 20],
+            engine=eng,
+            scoring="vinardo",
         )
         joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
         assert "'--scoring', 'vinardo'" in joined, eng
+
+
+def test_kaggle_prep_notebook_loads_openbabel_ligand_formats():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    src = runner.render_vina_notebook(
+        run_id="ezs-x",
+        shard_filenames=["raw_0000_ligand.mol2", "raw_0001_ligand.pdb"],
+        box_center=[1, 2, 3],
+        box_size=[20, 20, 20],
+        prep_on_kaggle=True,
+    )
+    joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+
+    assert "def _convert_with_obabel" in joined
+    assert "if _suffix in ('.mol2', '.mol', '.pdb')" in joined
+    assert "subprocess.run(['obabel', str(_path), '-O', str(_out)]" in joined

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
@@ -49,6 +49,8 @@ def write_report(
             "is_alphafold":         receptor_data.get("is_alphafold", False),
             "alphafold_version":    receptor_data.get("af_version"),
             "tools":                receptor_data.get("tools", {}),
+            "ramachandran":        receptor_data.get("ramachandran", {}),
+            "sanity_checks":       receptor_data.get("sanity_checks", {}),
         },
         "binding_site": {
             "method":               binding_site_data.get("method", "unknown"),
@@ -146,6 +148,10 @@ def _render_txt(r: dict[str, Any]) -> str:
         f"Waters removed    : {rec['waters_removed']}",
         f"AlphaFold         : {rec['is_alphafold']} ({rec.get('alphafold_version') or 'N/A'})",
         f"Tools             : {rec['tools']}",
+        f"Ramachandran pts  : {rec.get('ramachandran', {}).get('angle_count', 0)}",
+        f"Missing backbone  : {len(rec.get('sanity_checks', {}).get('missing_backbone', []))}",
+        f"Steric clashes    : {rec.get('sanity_checks', {}).get('steric_clash_count', 0)}",
+        f"Odd valences      : {rec.get('sanity_checks', {}).get('odd_valence_count', 0)}",
         "",
         "BINDING SITE",
         "------------",
