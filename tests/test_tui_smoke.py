@@ -1,5 +1,8 @@
 """Smoke tests for the TUI application."""
+
 from __future__ import annotations
+
+from textual.widgets import RadioButton, Switch
 
 from ezscreen.tui.app import EzscreenApp
 from ezscreen.tui.screens._placeholder import PlaceholderScreen
@@ -47,10 +50,38 @@ async def test_run_wizard_hetero_presets_and_category_actions() -> None:
         await pilot.pause()
 
         screen._hetero = [
-            {"resname": "HOH", "chain": "A", "resseq": 10, "n_atoms": 1, "category": "water", "keep_default": False},
-            {"resname": "LIG", "chain": "A", "resseq": 20, "n_atoms": 8, "category": "ligand", "keep_default": False},
-            {"resname": "HEM", "chain": "A", "resseq": 30, "n_atoms": 43, "category": "cofactor", "keep_default": True},
-            {"resname": "ZN", "chain": "A", "resseq": 40, "n_atoms": 1, "category": "metal", "keep_default": False},
+            {
+                "resname": "HOH",
+                "chain": "A",
+                "resseq": 10,
+                "n_atoms": 1,
+                "category": "water",
+                "keep_default": False,
+            },
+            {
+                "resname": "LIG",
+                "chain": "A",
+                "resseq": 20,
+                "n_atoms": 8,
+                "category": "ligand",
+                "keep_default": False,
+            },
+            {
+                "resname": "HEM",
+                "chain": "A",
+                "resseq": 30,
+                "n_atoms": 43,
+                "category": "cofactor",
+                "keep_default": True,
+            },
+            {
+                "resname": "ZN",
+                "chain": "A",
+                "resseq": 40,
+                "n_atoms": 1,
+                "category": "metal",
+                "keep_default": False,
+            },
         ]
         screen._populate_hetero()
         await pilot.pause()
@@ -68,4 +99,28 @@ async def test_run_wizard_hetero_presets_and_category_actions() -> None:
         screen._set_hetero_category("water", False)
         screen._step = 1
         assert screen._validate_step() is None
-        assert [h["resname"] for h in screen._ctx["keep_hetero"]] == ["LIG", "HEM", "ZN"]
+        assert [h["resname"] for h in screen._ctx["keep_hetero"]] == [
+            "LIG",
+            "HEM",
+            "ZN",
+        ]
+
+
+async def test_run_wizard_records_receptor_isomer_choice() -> None:
+    app = EzscreenApp()
+    screen = RunWizardScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen._step = 1
+        assert screen._validate_step() is None
+        assert screen._ctx["receptor_isomers"] == "off"
+
+        screen.query_one("#opt-receptor-isomers", Switch).value = True
+        screen.query_one("#rb-rec-isomer-variants", RadioButton).value = True
+        await pilot.pause()
+
+        assert screen._validate_step() is None
+        assert screen._ctx["receptor_isomers"] == "variants"

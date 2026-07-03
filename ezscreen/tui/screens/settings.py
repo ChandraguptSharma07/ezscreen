@@ -9,15 +9,21 @@ from textual.widgets import Button, Footer, Header, Input, Label, Select, Switch
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
 _DEPTH_OPTIONS: list[tuple[str, str]] = [
-    ("Fast — triage only",           "Fast"),
-    ("Balanced — standard VS ★",     "Balanced"),
-    ("Thorough — flexible ligands",  "Thorough"),
+    ("Fast — triage only", "Fast"),
+    ("Balanced — standard VS ★", "Balanced"),
+    ("Thorough — flexible ligands", "Thorough"),
 ]
 
 _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
-    ("MMFF94 — general purpose ★",      "MMFF94"),
+    ("MMFF94 — general purpose ★", "MMFF94"),
     ("MMFF94s — planar amides/aromatics", "MMFF94s"),
-    ("UFF — broad element coverage",    "UFF"),
+    ("UFF — broad element coverage", "UFF"),
+]
+
+_RECEPTOR_ISOMER_OPTIONS: list[tuple[str, str]] = [
+    ("Off", "off"),
+    ("Single corrected state", "single"),
+    ("Multiple binding-site variants", "variants"),
 ]
 
 
@@ -45,8 +51,15 @@ class SettingsScreen(Screen):
             yield Label("Docking Defaults", classes="form-section")
             yield Label("Box padding (Å)", classes="form-label")
             yield Input(id="cfg-padding", placeholder="5.0")
-            yield Label("Validate box by redocking co-crystal ligand (local Vina)", classes="form-label")
+            yield Label(
+                "Validate box by redocking co-crystal ligand (local Vina)",
+                classes="form-label",
+            )
             yield Switch(id="cfg-redock-validation")
+            yield Label("Receptor isomer default", classes="form-label")
+            yield Select(
+                _RECEPTOR_ISOMER_OPTIONS, id="cfg-receptor-isomers", allow_blank=False
+            )
 
             yield Label("Notifications", classes="form-section")
             yield Label("Desktop notifications", classes="form-label")
@@ -69,11 +82,17 @@ class SettingsScreen(Screen):
             yield Input(id="cfg-max-mw", placeholder="700.0")
             yield Label("Max rotatable bonds", classes="form-label")
             yield Input(id="cfg-max-rb", placeholder="20")
-            yield Label("Run 3D prep on Kaggle GPU (disable to prep locally before upload)", classes="form-label")
+            yield Label(
+                "Run 3D prep on Kaggle GPU (disable to prep locally before upload)",
+                classes="form-label",
+            )
             yield Switch(id="cfg-prep-on-kaggle")
             yield Label("Conformer force field", classes="form-label")
             yield Select(_FORCE_FIELD_OPTIONS, id="cfg-force-field", allow_blank=False)
-            yield Label("Enumerate ligand variants (Gypsum-DL, runs on Kaggle)", classes="form-label")
+            yield Label(
+                "Enumerate ligand variants (Gypsum-DL, runs on Kaggle)",
+                classes="form-label",
+            )
             yield Switch(id="cfg-enum-enabled")
             yield Label("  · protonation states", classes="form-label")
             yield Switch(id="cfg-enum-protonation")
@@ -86,8 +105,13 @@ class SettingsScreen(Screen):
             yield Label("Max variants per ligand", classes="form-label")
             yield Input(id="cfg-max-variants", placeholder="4")
             yield Label("MMFF minimisation", classes="form-label")
-            yield Switch(id="cfg-mmff-converge", name="Run to convergence (maxIters=0, faster)")
-            yield Label("Fixed MMFF iterations (ignored when convergence mode on)", classes="form-label")
+            yield Switch(
+                id="cfg-mmff-converge", name="Run to convergence (maxIters=0, faster)"
+            )
+            yield Label(
+                "Fixed MMFF iterations (ignored when convergence mode on)",
+                classes="form-label",
+            )
             yield Input(id="cfg-mmff-iters", placeholder="200")
 
             yield Label("Results", classes="form-section")
@@ -109,9 +133,9 @@ class SettingsScreen(Screen):
             yield Input(id="cfg-cpu-cores", placeholder="0")
 
             with Horizontal(classes="form-row form-actions"):
-                yield Button("Save",              id="btn-save",  variant="primary")
+                yield Button("Save", id="btn-save", variant="primary")
                 yield Button("Reset to defaults", id="btn-reset")
-                yield Button("Cancel",            id="btn-cancel")
+                yield Button("Cancel", id="btn-cancel")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -119,6 +143,7 @@ class SettingsScreen(Screen):
 
     def _populate(self) -> None:
         from ezscreen import config
+
         try:
             cfg = config.load()
         except Exception:
@@ -127,50 +152,94 @@ class SettingsScreen(Screen):
         r = cfg.get("run", {})
         d = cfg.get("defaults", {})
 
-        self.query_one("#cfg-ph",       Input).value  = str(r.get("default_ph",          7.4))
-        self.query_one("#cfg-admet",    Switch).value = bool(r.get("admet_pre_filter",    True))
-        self.query_one("#cfg-retries",  Input).value  = str(r.get("shard_retry_limit",    3))
-        self.query_one("#cfg-resume",   Input).value  = str(r.get("auto_resume_threshold", 10))
-        self.query_one("#cfg-padding",  Input).value  = str(d.get("box_padding",          5.0))
+        self.query_one("#cfg-ph", Input).value = str(r.get("default_ph", 7.4))
+        self.query_one("#cfg-admet", Switch).value = bool(
+            r.get("admet_pre_filter", True)
+        )
+        self.query_one("#cfg-retries", Input).value = str(r.get("shard_retry_limit", 3))
+        self.query_one("#cfg-resume", Input).value = str(
+            r.get("auto_resume_threshold", 10)
+        )
+        self.query_one("#cfg-padding", Input).value = str(d.get("box_padding", 5.0))
 
         n = cfg.get("notify", {})
-        self.query_one("#cfg-desktop-notify", Switch).value = bool(n.get("desktop_enabled", False))
+        self.query_one("#cfg-desktop-notify", Switch).value = bool(
+            n.get("desktop_enabled", False)
+        )
         self.query_one("#cfg-smtp-host", Input).value = str(n.get("smtp_host", ""))
         self.query_one("#cfg-smtp-port", Input).value = str(n.get("smtp_port", "587"))
         self.query_one("#cfg-smtp-from", Input).value = str(n.get("from_address", ""))
-        self.query_one("#cfg-smtp-to",   Input).value = str(n.get("to_address", ""))
+        self.query_one("#cfg-smtp-to", Input).value = str(n.get("to_address", ""))
 
         pc = cfg.get("prep", {})
-        self.query_one("#cfg-gpu-filter-enable", Switch).value = bool(pc.get("enable_gpu_size_filter", True))
-        self.query_one("#cfg-max-ha", Input).value = str(pc.get("max_heavy_atoms",     70))
-        self.query_one("#cfg-max-mw", Input).value = str(pc.get("max_mw",           700.0))
-        self.query_one("#cfg-max-rb", Input).value = str(pc.get("max_rotatable_bonds", 20))
-        self.query_one("#cfg-prep-on-kaggle", Switch).value = bool(pc.get("prep_on_kaggle", True))
-        self.query_one("#cfg-redock-validation", Switch).value = bool(pc.get("redock_validation", False))
+        self.query_one("#cfg-gpu-filter-enable", Switch).value = bool(
+            pc.get("enable_gpu_size_filter", True)
+        )
+        self.query_one("#cfg-max-ha", Input).value = str(pc.get("max_heavy_atoms", 70))
+        self.query_one("#cfg-max-mw", Input).value = str(pc.get("max_mw", 700.0))
+        self.query_one("#cfg-max-rb", Input).value = str(
+            pc.get("max_rotatable_bonds", 20)
+        )
+        self.query_one("#cfg-prep-on-kaggle", Switch).value = bool(
+            pc.get("prep_on_kaggle", True)
+        )
+        self.query_one("#cfg-redock-validation", Switch).value = bool(
+            pc.get("redock_validation", False)
+        )
+        rec_iso = str(pc.get("receptor_isomers", "off"))
+        rec_iso_sel = self.query_one("#cfg-receptor-isomers", Select)
+        if rec_iso in {v for _, v in _RECEPTOR_ISOMER_OPTIONS}:
+            rec_iso_sel.value = rec_iso
+        else:
+            rec_iso_sel.value = "off"
         mmff = int(pc.get("mmff_max_iters", 0))
-        self.query_one("#cfg-mmff-converge", Switch).value = (mmff == 0)
+        self.query_one("#cfg-mmff-converge", Switch).value = mmff == 0
         self.query_one("#cfg-mmff-iters", Input).value = str(mmff if mmff > 0 else 200)
         ff = str(pc.get("force_field", "MMFF94"))
         ff_sel = self.query_one("#cfg-force-field", Select)
         if ff in {v for _, v in _FORCE_FIELD_OPTIONS}:
             ff_sel.value = ff
-        self.query_one("#cfg-enum-enabled", Switch).value = bool(pc.get("enumerate_enabled", False))
-        self.query_one("#cfg-enum-protonation", Switch).value = bool(pc.get("enumerate_protonation", True))
-        self.query_one("#cfg-enum-tautomers", Switch).value = bool(pc.get("enumerate_tautomers", True))
-        self.query_one("#cfg-enum-stereo", Switch).value = bool(pc.get("enumerate_stereo", False))
-        self.query_one("#cfg-enum-ring", Switch).value = bool(pc.get("enumerate_ring", False))
-        self.query_one("#cfg-max-variants", Input).value = str(pc.get("max_variants_per_ligand", 4))
+        self.query_one("#cfg-enum-enabled", Switch).value = bool(
+            pc.get("enumerate_enabled", False)
+        )
+        self.query_one("#cfg-enum-protonation", Switch).value = bool(
+            pc.get("enumerate_protonation", True)
+        )
+        self.query_one("#cfg-enum-tautomers", Switch).value = bool(
+            pc.get("enumerate_tautomers", True)
+        )
+        self.query_one("#cfg-enum-stereo", Switch).value = bool(
+            pc.get("enumerate_stereo", False)
+        )
+        self.query_one("#cfg-enum-ring", Switch).value = bool(
+            pc.get("enumerate_ring", False)
+        )
+        self.query_one("#cfg-max-variants", Input).value = str(
+            pc.get("max_variants_per_ligand", 4)
+        )
 
         rc = cfg.get("results", {})
-        self.query_one("#cfg-interaction-top-n", Input).value = str(rc.get("interaction_top_n", 20))
-        self.query_one("#cfg-poses-returned", Input).value = str(rc.get("poses_returned", 25))
+        self.query_one("#cfg-interaction-top-n", Input).value = str(
+            rc.get("interaction_top_n", 20)
+        )
+        self.query_one("#cfg-poses-returned", Input).value = str(
+            rc.get("poses_returned", 25)
+        )
 
         lc = cfg.get("local", {})
-        self.query_one("#cfg-score-floor-enable", Switch).value = bool(lc.get("enable_score_floor", True))
-        self.query_one("#cfg-score-floor",   Input).value = str(lc.get("score_floor",   -15.0))
-        self.query_one("#cfg-score-ceiling", Input).value = str(lc.get("score_ceiling",   0.0))
-        self.query_one("#cfg-exhaustiveness", Input).value = str(lc.get("exhaustiveness",  4))
-        self.query_one("#cfg-cpu-cores",      Input).value = str(lc.get("cpu_cores",        0))
+        self.query_one("#cfg-score-floor-enable", Switch).value = bool(
+            lc.get("enable_score_floor", True)
+        )
+        self.query_one("#cfg-score-floor", Input).value = str(
+            lc.get("score_floor", -15.0)
+        )
+        self.query_one("#cfg-score-ceiling", Input).value = str(
+            lc.get("score_ceiling", 0.0)
+        )
+        self.query_one("#cfg-exhaustiveness", Input).value = str(
+            lc.get("exhaustiveness", 4)
+        )
+        self.query_one("#cfg-cpu-cores", Input).value = str(lc.get("cpu_cores", 0))
 
         depth = r.get("default_search_depth", "Balanced")
         sel = self.query_one("#cfg-depth", Select)
@@ -205,48 +274,63 @@ class SettingsScreen(Screen):
 
         cfg = {
             "run": {
-                "default_ph":            _f("#cfg-ph",      7.4),
-                "admet_pre_filter":      self.query_one("#cfg-admet",    Switch).value,
-                "default_search_depth":  depth,
-                "shard_retry_limit":     _i("#cfg-retries", 3),
-                "auto_resume_threshold": _i("#cfg-resume",  10),
+                "default_ph": _f("#cfg-ph", 7.4),
+                "admet_pre_filter": self.query_one("#cfg-admet", Switch).value,
+                "default_search_depth": depth,
+                "shard_retry_limit": _i("#cfg-retries", 3),
+                "auto_resume_threshold": _i("#cfg-resume", 10),
             },
             "defaults": {
-                "box_padding":          _f("#cfg-padding",   5.0),
+                "box_padding": _f("#cfg-padding", 5.0),
             },
             "notify": {
                 "desktop_enabled": self.query_one("#cfg-desktop-notify", Switch).value,
-                "smtp_host":       self.query_one("#cfg-smtp-host", Input).value.strip(),
-                "smtp_port":       _i("#cfg-smtp-port", 587),
-                "from_address":    self.query_one("#cfg-smtp-from", Input).value.strip(),
-                "to_address":      self.query_one("#cfg-smtp-to",   Input).value.strip(),
+                "smtp_host": self.query_one("#cfg-smtp-host", Input).value.strip(),
+                "smtp_port": _i("#cfg-smtp-port", 587),
+                "from_address": self.query_one("#cfg-smtp-from", Input).value.strip(),
+                "to_address": self.query_one("#cfg-smtp-to", Input).value.strip(),
             },
             "prep": {
-                "enable_gpu_size_filter": self.query_one("#cfg-gpu-filter-enable", Switch).value,
-                "max_heavy_atoms":        _i("#cfg-max-ha", 70),
-                "max_mw":                 _f("#cfg-max-mw", 700.0),
-                "max_rotatable_bonds":    _i("#cfg-max-rb", 20),
-                "prep_on_kaggle":         self.query_one("#cfg-prep-on-kaggle", Switch).value,
-                "redock_validation":      self.query_one("#cfg-redock-validation", Switch).value,
-                "mmff_max_iters":         0 if self.query_one("#cfg-mmff-converge", Switch).value else _i("#cfg-mmff-iters", 200),
-                "force_field":            str(self.query_one("#cfg-force-field", Select).value),
-                "enumerate_enabled":      self.query_one("#cfg-enum-enabled", Switch).value,
-                "enumerate_protonation":  self.query_one("#cfg-enum-protonation", Switch).value,
-                "enumerate_tautomers":    self.query_one("#cfg-enum-tautomers", Switch).value,
-                "enumerate_stereo":       self.query_one("#cfg-enum-stereo", Switch).value,
-                "enumerate_ring":         self.query_one("#cfg-enum-ring", Switch).value,
+                "enable_gpu_size_filter": self.query_one(
+                    "#cfg-gpu-filter-enable", Switch
+                ).value,
+                "max_heavy_atoms": _i("#cfg-max-ha", 70),
+                "max_mw": _f("#cfg-max-mw", 700.0),
+                "max_rotatable_bonds": _i("#cfg-max-rb", 20),
+                "prep_on_kaggle": self.query_one("#cfg-prep-on-kaggle", Switch).value,
+                "redock_validation": self.query_one(
+                    "#cfg-redock-validation", Switch
+                ).value,
+                "receptor_isomers": str(
+                    self.query_one("#cfg-receptor-isomers", Select).value
+                ),
+                "mmff_max_iters": 0
+                if self.query_one("#cfg-mmff-converge", Switch).value
+                else _i("#cfg-mmff-iters", 200),
+                "force_field": str(self.query_one("#cfg-force-field", Select).value),
+                "enumerate_enabled": self.query_one("#cfg-enum-enabled", Switch).value,
+                "enumerate_protonation": self.query_one(
+                    "#cfg-enum-protonation", Switch
+                ).value,
+                "enumerate_tautomers": self.query_one(
+                    "#cfg-enum-tautomers", Switch
+                ).value,
+                "enumerate_stereo": self.query_one("#cfg-enum-stereo", Switch).value,
+                "enumerate_ring": self.query_one("#cfg-enum-ring", Switch).value,
                 "max_variants_per_ligand": _i("#cfg-max-variants", 4),
             },
             "results": {
                 "interaction_top_n": _i("#cfg-interaction-top-n", 20),
-                "poses_returned":    _i("#cfg-poses-returned", 25),
+                "poses_returned": _i("#cfg-poses-returned", 25),
             },
             "local": {
-                "enable_score_floor": self.query_one("#cfg-score-floor-enable", Switch).value,
-                "score_floor":        _f("#cfg-score-floor",   -15.0),
-                "score_ceiling":      _f("#cfg-score-ceiling",   0.0),
-                "exhaustiveness":     _i("#cfg-exhaustiveness",  4),
-                "cpu_cores":          _i("#cfg-cpu-cores",        0),
+                "enable_score_floor": self.query_one(
+                    "#cfg-score-floor-enable", Switch
+                ).value,
+                "score_floor": _f("#cfg-score-floor", -15.0),
+                "score_ceiling": _f("#cfg-score-ceiling", 0.0),
+                "exhaustiveness": _i("#cfg-exhaustiveness", 4),
+                "cpu_cores": _i("#cfg-cpu-cores", 0),
             },
         }
         config.save(cfg)
@@ -255,6 +339,7 @@ class SettingsScreen(Screen):
 
     def _reset(self) -> None:
         from ezscreen import config
+
         config.save(config.DEFAULTS)
         self.app.notify("Reset to defaults.", timeout=3)
         self._populate()

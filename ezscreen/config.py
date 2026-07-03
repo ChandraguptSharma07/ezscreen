@@ -45,6 +45,7 @@ DEFAULTS: dict[str, Any] = {
         "enumerate_ring": False,
         "max_variants_per_ligand": 4,
         "redock_validation": False,
+        "receptor_isomers": "off",
     },
     "results": {
         "interaction_top_n": 20,

@@ -32,6 +32,7 @@ _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
     ("MMFF94s — planar amides/aromatics", "MMFF94s"),
     ("UFF — broad element coverage", "UFF"),
 ]
+_RECEPTOR_ISOMER_MODES = {"off", "single", "variants"}
 
 _HETERO_CATEGORY_ORDER = ("cofactor", "metal", "ligand", "water", "additive", "other")
 _HETERO_CATEGORY_LABELS = {
@@ -96,7 +97,6 @@ class RunWizardScreen(Screen):
         with Vertical(id="wizard-body"):
             yield Static("", id="step-indicator")
             with ContentSwitcher(initial="step-receptor", id="wizard-switcher"):
-
                 # ── Step 1: Receptor & Chains ─────────────────────────
                 with VerticalScroll(id="step-receptor", classes="wizard-step"):
                     yield Label(
@@ -118,7 +118,10 @@ class RunWizardScreen(Screen):
 
                 # ── Step 2: Receptor Prep ─────────────────────────────
                 with Vertical(id="step-recprep", classes="wizard-step"):
-                    yield Label("Heteroatoms (waters, ions, cofactors, ligands)", classes="form-section")
+                    yield Label(
+                        "Heteroatoms (waters, ions, cofactors, ligands)",
+                        classes="form-section",
+                    )
                     yield Static(
                         "[#6e7681]Choose the receptor cleanup policy, then adjust any group "
                         "that needs special handling. Validate the receptor first to populate "
@@ -130,15 +133,33 @@ class RunWizardScreen(Screen):
                         yield Button("Crystal complex", id="hetero-preset-crystal")
                     yield VerticalScroll(id="hetero-list")
                     yield Static("", id="hetero-status", classes="form-status")
-
+                    yield Label("Receptor protonation variants", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Use one corrected receptor state by default, or dock against "
+                        "multiple binding-site protonation variants when needed.[/#6e7681]"
+                    )
+                    yield Switch(id="opt-receptor-isomers", value=False)
+                    with Vertical(id="receptor-isomer-mode-box"):
+                        with RadioSet(id="opt-receptor-isomer-mode"):
+                            yield RadioButton(
+                                "A - corrected single protonation state",
+                                id="rb-rec-isomer-single",
+                                value=True,
+                            )
+                            yield RadioButton(
+                                "B - multiple binding-site variants",
+                                id="rb-rec-isomer-variants",
+                            )
                 # ── Step 3: Binding Site ──────────────────────────────
                 with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
                     with RadioSet(id="site-method"):
-                        yield RadioButton("Co-crystal ligand",         id="rb-cocrystal")
-                        yield RadioButton("Active site residues",       id="rb-residues")
-                        yield RadioButton("P2Rank pocket prediction",   id="rb-p2rank",  value=True)
-                        yield RadioButton("Blind docking  \u26a0",      id="rb-blind")
+                        yield RadioButton("Co-crystal ligand", id="rb-cocrystal")
+                        yield RadioButton("Active site residues", id="rb-residues")
+                        yield RadioButton(
+                            "P2Rank pocket prediction", id="rb-p2rank", value=True
+                        )
+                        yield RadioButton("Blind docking  \u26a0", id="rb-blind")
                         yield RadioButton("Enter coordinates manually", id="rb-manual")
                     with Vertical(id="sub-cocrystal", classes="site-sub"):
                         yield Static("", id="cocrystal-info")
@@ -192,7 +213,9 @@ class RunWizardScreen(Screen):
                     yield Static(
                         "[#6e7681]Defaults to your settings choice; change it for this run only.[/#6e7681]"
                     )
-                    yield Select(_FORCE_FIELD_OPTIONS, id="opt-force-field", allow_blank=False)
+                    yield Select(
+                        _FORCE_FIELD_OPTIONS, id="opt-force-field", allow_blank=False
+                    )
                     yield Label("Enumerate ligand variants", classes="form-section")
                     yield Static(
                         "[#6e7681]Protonation/tautomer/stereo/ring variants via Gypsum-DL on Kaggle."
@@ -204,15 +227,21 @@ class RunWizardScreen(Screen):
                 with VerticalScroll(id="step-engine", classes="wizard-step"):
                     # Scoring-function selector + CNN-rescore toggle land here next
                     # (Phase 30 Features D/E). The engine selector is below.
-                    yield Label("Docking engine", classes="form-section", id="lbl-engine")
+                    yield Label(
+                        "Docking engine", classes="form-section", id="lbl-engine"
+                    )
                     with RadioSet(id="opt-engine"):
                         for _i, _eng in enumerate(engines.dockable_engines()):
                             yield RadioButton(
                                 _eng.label, id=f"engine-{_eng.key}", value=(_i == 0)
                             )
                     yield Static("", id="engine-note", classes="form-status")
-                    yield Label("Scoring function", classes="form-section", id="lbl-scoring")
-                    yield Select([("Vina", "vina")], id="opt-scoring", allow_blank=False)
+                    yield Label(
+                        "Scoring function", classes="form-section", id="lbl-scoring"
+                    )
+                    yield Select(
+                        [("Vina", "vina")], id="opt-scoring", allow_blank=False
+                    )
                     yield Label("Search depth", classes="form-section", id="lbl-depth")
                     with RadioSet(id="opt-depth"):
                         yield RadioButton(
@@ -237,8 +266,14 @@ class RunWizardScreen(Screen):
                         " Slower than GPU for large libraries.[/#6e7681]"
                     )
                     yield Switch(id="opt-local", value=False)
-                    yield Label("Exhaustiveness (Vina)", id="lbl-exhaustiveness", classes="form-label")
-                    yield Input(id="opt-exhaustiveness", placeholder="4 (from settings)")
+                    yield Label(
+                        "Exhaustiveness (Vina)",
+                        id="lbl-exhaustiveness",
+                        classes="form-label",
+                    )
+                    yield Input(
+                        id="opt-exhaustiveness", placeholder="4 (from settings)"
+                    )
                     yield Label("Kaggle GPU", id="lbl-gpu", classes="form-section")
                     with RadioSet(id="opt-gpu-type"):
                         yield RadioButton(
@@ -261,7 +296,7 @@ class RunWizardScreen(Screen):
 
             with Horizontal(id="wizard-nav"):
                 yield Button("\u2190 Back", id="btn-back")
-                yield Button("Next \u2192",  id="btn-next", variant="primary")
+                yield Button("Next \u2192", id="btn-next", variant="primary")
 
         yield Footer()
 
@@ -272,10 +307,17 @@ class RunWizardScreen(Screen):
     def on_mount(self) -> None:
         self._update_ui()
         self.query_one("#af-warning-box").display = False
-        self.query_one("#chain-section").display  = False
-        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
+        self.query_one("#chain-section").display = False
+        for sid in (
+            "sub-cocrystal",
+            "sub-residues",
+            "sub-p2rank",
+            "sub-blind",
+            "sub-manual",
+        ):
             self.query_one(f"#{sid}").display = False
         self.query_one("#lbl-exhaustiveness").display = False
+        self.query_one("#receptor-isomer-mode-box").display = False
         self.query_one("#opt-exhaustiveness").display = False
         self.query_one("#lbl-gpu").display = True
         self.query_one("#opt-gpu-type").display = True
@@ -287,45 +329,71 @@ class RunWizardScreen(Screen):
     def _load_defaults(self) -> None:
         try:
             from ezscreen import config
-            cfg   = config.load()
+
+            cfg = config.load()
             admet = cfg.get("run", {}).get("admet_pre_filter", True)
+            prep_cfg = cfg.get("prep", {})
             self.query_one("#opt-admet", Switch).value = bool(admet)
-            ff = str(cfg.get("prep", {}).get("force_field", "MMFF94"))
+            ff = str(prep_cfg.get("force_field", "MMFF94"))
             if ff in {v for _, v in _FORCE_FIELD_OPTIONS}:
                 self.query_one("#opt-force-field", Select).value = ff
             self.query_one("#opt-enumerate", Switch).value = bool(
-                cfg.get("prep", {}).get("enumerate_enabled", False)
+                prep_cfg.get("enumerate_enabled", False)
             )
+            receptor_isomers = str(prep_cfg.get("receptor_isomers", "off"))
+            if receptor_isomers not in _RECEPTOR_ISOMER_MODES:
+                receptor_isomers = "off"
+            self.query_one("#opt-receptor-isomers", Switch).value = (
+                receptor_isomers != "off"
+            )
+            self.query_one("#receptor-isomer-mode-box").display = (
+                receptor_isomers != "off"
+            )
+            if receptor_isomers == "variants":
+                self.query_one("#rb-rec-isomer-variants", RadioButton).value = True
+            else:
+                self.query_one("#rb-rec-isomer-single", RadioButton).value = True
         except Exception:
             pass
 
     def _populate_account_assignment(self) -> None:
         from ezscreen import auth
+
         accounts = auth.get_all_kaggle_accounts()
-        section  = self.query_one("#acct-assignment-section", VerticalScroll)
+        section = self.query_one("#acct-assignment-section", VerticalScroll)
         section.remove_children()
         if len(accounts) <= 1:
             section.display = False
             return
 
         section.display = True
-        section.mount(Label("Account notebook assignment (Kaggle)", classes="form-section"))
-        section.mount(Static(
-            "[#6e7681]Notebooks per account (leave blank for 1 per account).[/#6e7681]"
-        ))
+        section.mount(
+            Label("Account notebook assignment (Kaggle)", classes="form-section")
+        )
+        section.mount(
+            Static(
+                "[#6e7681]Notebooks per account (leave blank for 1 per account).[/#6e7681]"
+            )
+        )
         for acct in accounts:
             name = acct["name"]
             safe = name.replace(" ", "-").lower()
             section.mount(
                 Horizontal(
                     Label(f"  {name}", classes="acct-row-label"),
-                    Input(id=f"acct-shards-{safe}", placeholder="1", classes="acct-row-input"),
+                    Input(
+                        id=f"acct-shards-{safe}",
+                        placeholder="1",
+                        classes="acct-row-input",
+                    ),
                     classes="acct-row",
                 )
             )
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
-        if event.switch.id == "opt-local":
+        if event.switch.id == "opt-receptor-isomers":
+            self.query_one("#receptor-isomer-mode-box").display = event.value
+        elif event.switch.id == "opt-local":
             local_on = event.value
             self.query_one("#lbl-exhaustiveness").display = local_on
             self.query_one("#opt-exhaustiveness").display = local_on
@@ -350,9 +418,13 @@ class RunWizardScreen(Screen):
         )
         self.query_one("#wizard-switcher", ContentSwitcher).current = _STEPS[self._step]
         is_last = self._step == len(_STEPS) - 1
-        self.query_one("#btn-next",  Button).label    = "Submit" if is_last else "Next \u2192"
-        self.query_one("#btn-back",  Button).disabled = self._step == 0 or self._submitted
-        self.query_one("#btn-next",  Button).disabled = self._submitted
+        self.query_one("#btn-next", Button).label = (
+            "Submit" if is_last else "Next \u2192"
+        )
+        self.query_one("#btn-back", Button).disabled = (
+            self._step == 0 or self._submitted
+        )
+        self.query_one("#btn-next", Button).disabled = self._submitted
 
     # ------------------------------------------------------------------
     # Button / RadioSet events
@@ -361,9 +433,9 @@ class RunWizardScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         dispatch = {
             "btn-rec-validate": self._start_rec_validate,
-            "btn-lib-browser":  self._open_lib_browser,
-            "btn-back":         self._go_back,
-            "btn-next":         self._go_next,
+            "btn-lib-browser": self._open_lib_browser,
+            "btn-back": self._go_back,
+            "btn-next": self._go_next,
         }
         if fn := dispatch.get(event.button.id):
             fn()
@@ -412,6 +484,14 @@ class RunWizardScreen(Screen):
             self._update_engine_note()
             self._update_scoring_options()
 
+    def _selected_receptor_isomer_mode(self) -> str:
+        if not self.query_one("#opt-receptor-isomers", Switch).value:
+            return "off"
+        btn = self.query_one("#opt-receptor-isomer-mode", RadioSet).pressed_button
+        if btn and btn.id == "rb-rec-isomer-variants":
+            return "variants"
+        return "single"
+
     def _selected_engine(self) -> str:
         btn = self.query_one("#opt-engine", RadioSet).pressed_button
         return btn.id.removeprefix("engine-") if btn and btn.id else "unidock"
@@ -426,10 +506,18 @@ class RunWizardScreen(Screen):
         sel = self.query_one("#opt-scoring", Select)
         current = sel.value if sel.value != Select.BLANK else None
         sel.set_options([(f.capitalize(), f) for f in fns])
-        sel.value = current if current in fns else (engines.default_scoring(key) or fns[0])
+        sel.value = (
+            current if current in fns else (engines.default_scoring(key) or fns[0])
+        )
 
     def _show_site_sub(self, label: str) -> None:
-        for sid in ("sub-cocrystal", "sub-residues", "sub-p2rank", "sub-blind", "sub-manual"):
+        for sid in (
+            "sub-cocrystal",
+            "sub-residues",
+            "sub-p2rank",
+            "sub-blind",
+            "sub-manual",
+        ):
             self.query_one(f"#{sid}").display = False
         if "Co-crystal" in label:
             self.query_one("#sub-cocrystal").display = True
@@ -455,10 +543,10 @@ class RunWizardScreen(Screen):
                 "[#f85149]Enter a PDB ID or file path.[/#f85149]"
             )
             return
-        self.query_one("#rec-status",    Static).update("[#e3b341]Validating...[/#e3b341]")
+        self.query_one("#rec-status", Static).update("[#e3b341]Validating...[/#e3b341]")
         self.query_one("#btn-rec-validate").disabled = True
-        self.query_one("#chain-section").display     = False
-        self.query_one("#af-warning-box").display    = False
+        self.query_one("#chain-section").display = False
+        self.query_one("#af-warning-box").display = False
         self._chains = []
         self._cocrystal_ligands = []
         self._pockets = []
@@ -473,34 +561,36 @@ class RunWizardScreen(Screen):
 
             if raw.upper().startswith("AF:"):
                 from ezscreen.prep.alphafold import download_alphafold_structure
+
                 uid = raw[3:].strip().upper()
                 out = work_dir / f"AF-{uid}-model.pdb"
                 pdb_path, _ = download_alphafold_structure(uid, out)
                 self._ctx["pdb_source"] = "alphafold"
-                self._ctx["pdb_id"]     = uid
+                self._ctx["pdb_id"] = uid
             elif len(raw) == 4 and raw.isalnum():
                 pdb_path = rec_prep.fetch_pdb(raw.upper(), work_dir / "receptor_raw")
                 self._ctx["pdb_source"] = "rcsb"
-                self._ctx["pdb_id"]     = raw.upper()
+                self._ctx["pdb_id"] = raw.upper()
             else:
                 pdb_path = Path(raw).expanduser()
                 if not pdb_path.exists():
                     raise FileNotFoundError(f"File not found: {pdb_path}")
                 self._ctx["pdb_source"] = "local"
-                self._ctx["pdb_id"]     = None
+                self._ctx["pdb_id"] = None
 
-            self._ctx["pdb_path"]     = pdb_path
+            self._ctx["pdb_path"] = pdb_path
             self._ctx["receptor_raw"] = raw
 
-            chains        = rec_prep.get_chains(pdb_path)
+            chains = rec_prep.get_chains(pdb_path)
             is_af, af_ver = rec_prep.detect_alphafold(pdb_path)
-            self._ctx["chains"]       = chains
+            self._ctx["chains"] = chains
             self._ctx["is_alphafold"] = is_af
-            self._ctx["af_version"]   = af_ver
+            self._ctx["af_version"] = af_ver
 
             from ezscreen.pocket import detect as pocket
+
             cocrystal = [] if is_af else pocket.find_cocrystal_ligands(pdb_path)
-            self._cocrystal_ligands        = cocrystal
+            self._cocrystal_ligands = cocrystal
             self._ctx["cocrystal_ligands"] = cocrystal
 
             try:
@@ -696,7 +786,9 @@ class RunWizardScreen(Screen):
         if kept_counts.get("ligand", 0):
             warnings.append("Keeping ligands can block the docking pocket.")
         if removed_counts.get("metal", 0) or removed_counts.get("cofactor", 0):
-            warnings.append("Removing metals/cofactors can change active-site chemistry.")
+            warnings.append(
+                "Removing metals/cofactors can change active-site chemistry."
+            )
         warning_txt = ""
         if warnings:
             warning_txt = f"\n[#e3b341]{' '.join(warnings)}[/#e3b341]"
@@ -729,14 +821,14 @@ class RunWizardScreen(Screen):
 
         try:
             pdb_path = self._ctx["pdb_path"]
-            is_af    = self._ctx.get("is_alphafold", False)
+            is_af = self._ctx.get("is_alphafold", False)
             work_dir = Path.home() / ".ezscreen" / "tmp" / "wizard" / "p2rank"
             if pocket._p2rank_exe() is None:
                 self.app.call_from_thread(
                     self.query_one("#p2rank-status", Static).update,
                     "[#e3b341]Downloading P2Rank (~50 MB, first run only)...[/#e3b341]",
                 )
-            pockets  = pocket.run_p2rank(pdb_path, work_dir, alphafold=is_af)
+            pockets = pocket.run_p2rank(pdb_path, work_dir, alphafold=is_af)
             self._pockets = pockets
             self.app.call_from_thread(self._show_p2rank_results, pockets)
         except Exception as exc:
@@ -801,8 +893,11 @@ class RunWizardScreen(Screen):
             if not self._ctx.get("pdb_path"):
                 return "Validate the receptor first."
             selected = [
-                ch for ch in self._chains
-                if self.query_one(f"#chain-{ch if ch.strip() else '_blank'}", Checkbox).value
+                ch
+                for ch in self._chains
+                if self.query_one(
+                    f"#chain-{ch if ch.strip() else '_blank'}", Checkbox
+                ).value
             ]
             if not selected:
                 return "Select at least one chain."
@@ -812,6 +907,7 @@ class RunWizardScreen(Screen):
             self._ctx["keep_hetero"] = [
                 h for i, h in enumerate(self._hetero) if i in self._hetero_keep
             ]
+            self._ctx["receptor_isomers"] = self._selected_receptor_isomer_mode()
 
         elif step == "step-site":
             btn = self.query_one("#site-method", RadioSet).pressed_button
@@ -826,7 +922,7 @@ class RunWizardScreen(Screen):
                 err = self._validate_manual_coords()
                 if err:
                     return err
-            self._ctx["site_method"]  = label
+            self._ctx["site_method"] = label
             self._ctx["site_details"] = self._collect_site_details(label)
 
         elif step == "step-ligands":
@@ -840,24 +936,28 @@ class RunWizardScreen(Screen):
 
         elif step == "step-prep":
             self._ctx["admet_pre_filter"] = self.query_one("#opt-admet", Switch).value
-            self._ctx["force_field"] = str(self.query_one("#opt-force-field", Select).value)
-            self._ctx["enumerate_enabled"] = self.query_one("#opt-enumerate", Switch).value
+            self._ctx["force_field"] = str(
+                self.query_one("#opt-force-field", Select).value
+            )
+            self._ctx["enumerate_enabled"] = self.query_one(
+                "#opt-enumerate", Switch
+            ).value
 
         elif step == "step-engine":
             self._ctx["engine"] = self._selected_engine()
             _scoring = self.query_one("#opt-scoring", Select).value
             self._ctx["scoring"] = str(_scoring) if _scoring != Select.BLANK else "vina"
             depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
-            label     = str(depth_btn.label) if depth_btn else ""
+            label = str(depth_btn.label) if depth_btn else ""
             if "Fast" in label:
                 self._ctx["search_params"] = {"search_mode": "fast"}
-                self._ctx["search_label"]  = "Fast"
+                self._ctx["search_label"] = "Fast"
             elif "Thorough" in label:
                 self._ctx["search_params"] = {"search_mode": "detail"}
-                self._ctx["search_label"]  = "Thorough"
+                self._ctx["search_label"] = "Thorough"
             else:
                 self._ctx["search_params"] = {"search_mode": "balance"}
-                self._ctx["search_label"]  = "Balanced"
+                self._ctx["search_label"] = "Balanced"
 
         elif step == "step-compute":
             self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
@@ -875,14 +975,19 @@ class RunWizardScreen(Screen):
             # Collect account shard assignments when Kaggle backend is selected
             if not self._ctx["run_locally"]:
                 from ezscreen import auth
+
                 accounts = auth.get_all_kaggle_accounts()
                 if len(accounts) > 1:
                     assignments = []
                     for acct in accounts:
                         safe = acct["name"].replace(" ", "-").lower()
                         try:
-                            raw   = self.query_one(f"#acct-shards-{safe}", Input).value.strip()
-                            count = int(raw) if raw else None  # None = auto, 0 = exclude, N = explicit
+                            raw = self.query_one(
+                                f"#acct-shards-{safe}", Input
+                            ).value.strip()
+                            count = (
+                                int(raw) if raw else None
+                            )  # None = auto, 0 = exclude, N = explicit
                         except Exception:
                             count = None
                         assignments.append({"account": acct, "shard_count": count})
@@ -895,7 +1000,14 @@ class RunWizardScreen(Screen):
         return None
 
     def _validate_manual_coords(self) -> str | None:
-        fields = ["manual-cx", "manual-cy", "manual-cz", "manual-sx", "manual-sy", "manual-sz"]
+        fields = [
+            "manual-cx",
+            "manual-cy",
+            "manual-cz",
+            "manual-sx",
+            "manual-sy",
+            "manual-sz",
+        ]
         for fid in fields:
             val = self.query_one(f"#{fid}", Input).value.strip()
             if not val:
@@ -910,16 +1022,19 @@ class RunWizardScreen(Screen):
         if "Co-crystal" in label:
             return {"type": "cocrystal", "ligands": self._cocrystal_ligands}
         if "residues" in label:
-            raw     = self.query_one("#residues-input", Input).value.strip()
+            raw = self.query_one("#residues-input", Input).value.strip()
             res_ids = [int(r.strip()) for r in raw.split(",") if r.strip().isdigit()]
             return {"type": "residues", "residues": res_ids}
         if "P2Rank" in label:
             try:
-                rs  = self.query_one("#p2rank-radioset", RadioSet)
+                rs = self.query_one("#p2rank-radioset", RadioSet)
                 idx = rs.pressed_index if rs.pressed_index is not None else 0
                 return {"type": "p2rank", "pocket": self._pockets[idx]}
             except Exception:
-                return {"type": "p2rank", "pocket": self._pockets[0] if self._pockets else {}}
+                return {
+                    "type": "p2rank",
+                    "pocket": self._pockets[0] if self._pockets else {},
+                }
         if "manually" in label:
             cx = float(self.query_one("#manual-cx", Input).value)
             cy = float(self.query_one("#manual-cy", Input).value)
@@ -930,7 +1045,7 @@ class RunWizardScreen(Screen):
             return {
                 "type": "manual",
                 "center": [cx, cy, cz],
-                "size":   [sx, sy, sz],
+                "size": [sx, sy, sz],
             }
         return {"type": "blind"}
 
@@ -939,14 +1054,21 @@ class RunWizardScreen(Screen):
     # ------------------------------------------------------------------
 
     def _populate_confirm(self) -> None:
-        ctx   = self._ctx
-        pdb   = ctx.get("pdb_id") or (ctx["pdb_path"].name if ctx.get("pdb_path") else "—")
+        ctx = self._ctx
+        pdb = ctx.get("pdb_id") or (
+            ctx["pdb_path"].name if ctx.get("pdb_path") else "—"
+        )
         chains = ", ".join(ctx.get("selected_chains", []))
-        site  = ctx.get("site_method", "—")
-        lig   = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
-        admet   = "yes" if ctx.get("admet_pre_filter") else "no"
-        depth   = ctx.get("search_label", "Balanced")
+        site = ctx.get("site_method", "—")
+        lig = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
+        admet = "yes" if ctx.get("admet_pre_filter") else "no"
+        depth = ctx.get("search_label", "Balanced")
         force_field = ctx.get("force_field", "MMFF94")
+        receptor_isomers = {
+            "off": "off",
+            "single": "single corrected state",
+            "variants": "multiple variants",
+        }.get(ctx.get("receptor_isomers", "off"), "off")
         engine_label = (
             "AutoDock Vina (local)"
             if ctx.get("run_locally")
@@ -961,20 +1083,26 @@ class RunWizardScreen(Screen):
             backend = f"Kaggle GPU ({gpu_label})"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
-            if ctx.get("is_alphafold") else ""
+            if ctx.get("is_alphafold")
+            else ""
         )
-        self.query_one("#confirm-summary", Static).update("\n".join([
-            f"[bold #6e7681]Receptor     [/bold #6e7681][#f0f6fc]{pdb}[/#f0f6fc]  chains {chains}",
-            f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
-            f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
-            f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
-            f"[bold #6e7681]Engine       [/bold #6e7681][#f0f6fc]{engine_label}[/#f0f6fc]",
-            f"[bold #6e7681]Scoring      [/bold #6e7681][#f0f6fc]{scoring_label}[/#f0f6fc]",
-            f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
-            f"[bold #6e7681]Force field  [/bold #6e7681][#f0f6fc]{force_field}[/#f0f6fc]",
-            f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
-            af_note,
-        ]))
+        self.query_one("#confirm-summary", Static).update(
+            "\n".join(
+                [
+                    f"[bold #6e7681]Receptor     [/bold #6e7681][#f0f6fc]{pdb}[/#f0f6fc]  chains {chains}",
+                    f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
+                    f"[bold #6e7681]Rec isomers  [/bold #6e7681][#f0f6fc]{receptor_isomers}[/#f0f6fc]",
+                    f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
+                    f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
+                    f"[bold #6e7681]Engine       [/bold #6e7681][#f0f6fc]{engine_label}[/#f0f6fc]",
+                    f"[bold #6e7681]Scoring      [/bold #6e7681][#f0f6fc]{scoring_label}[/#f0f6fc]",
+                    f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
+                    f"[bold #6e7681]Force field  [/bold #6e7681][#f0f6fc]{force_field}[/#f0f6fc]",
+                    f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
+                    af_note,
+                ]
+            )
+        )
 
     # ------------------------------------------------------------------
     # Submit
@@ -995,25 +1123,29 @@ class RunWizardScreen(Screen):
         from ezscreen.prep import ligands as ligand_prep
         from ezscreen.prep import receptor as rec_prep
 
-        _log_file = (Path.home() / ".ezscreen" / "runs" / "last_run.log").open("w", buffering=1, encoding="utf-8")
+        _log_file = (Path.home() / ".ezscreen" / "runs" / "last_run.log").open(
+            "w", buffering=1, encoding="utf-8"
+        )
 
         def log(msg: str) -> None:
             self.app.call_from_thread(self.query_one("#run-log", RichLog).write, msg)
             import re
+
             _log_file.write(re.sub(r"\[/?[^\[\]]*\]", "", msg) + "\n")
 
         try:
-            run_id   = "ezs-" + secrets.token_hex(3)
+            run_id = "ezs-" + secrets.token_hex(3)
             work_dir = Path.home() / ".ezscreen" / "runs" / run_id
             work_dir.mkdir(parents=True, exist_ok=True)
-            ctx      = self._ctx
-            cfg      = config.load()
+            ctx = self._ctx
+            cfg = config.load()
 
             log(f"[#6e7681]Run ID: {run_id}[/#6e7681]")
 
             # Kaggle username
             try:
                 import json
+
                 creds = auth.load_credentials()
                 with open(creds.get("kaggle_json_path", "")) as f:
                     kaggle_username = json.load(f).get("username", "user")
@@ -1051,24 +1183,39 @@ class RunWizardScreen(Screen):
 
             # Optional box confidence: redock the co-crystal ligand and measure how
             # well the docked pose reproduces the crystal pose. Fail-soft, opt-in.
-            if site["type"] == "cocrystal" and bool(cfg.get("prep", {}).get("redock_validation", False)):
+            if site["type"] == "cocrystal" and bool(
+                cfg.get("prep", {}).get("redock_validation", False)
+            ):
                 try:
                     from ezscreen.benchmark.redock import (
                         RMSD_WARN_THRESHOLD,
                         redock_cocrystal,
                     )
-                    log("[#79c0ff]Validating box (redocking co-crystal ligand)...[/#79c0ff]")
+
+                    log(
+                        "[#79c0ff]Validating box (redocking co-crystal ligand)...[/#79c0ff]"
+                    )
                     _rd = redock_cocrystal(
-                        receptor_pdbqt, ctx["pdb_path"], site["ligands"][0], box, work_dir,
+                        receptor_pdbqt,
+                        ctx["pdb_path"],
+                        site["ligands"][0],
+                        box,
+                        work_dir,
                     )
                     if _rd and _rd.get("rmsd") is not None:
                         ctx["redock_rmsd"] = _rd["rmsd"]
                         if _rd["reliable"]:
-                            log(f"[#3fb950]Redock RMSD: {_rd['rmsd']:.2f} Å — box reproduces the crystal pose[/#3fb950]")
+                            log(
+                                f"[#3fb950]Redock RMSD: {_rd['rmsd']:.2f} Å — box reproduces the crystal pose[/#3fb950]"
+                            )
                         else:
-                            log(f"[#e3b341]⚠ Redock RMSD: {_rd['rmsd']:.2f} Å (> {RMSD_WARN_THRESHOLD:.0f} Å) — box may be unreliable[/#e3b341]")
+                            log(
+                                f"[#e3b341]⚠ Redock RMSD: {_rd['rmsd']:.2f} Å (> {RMSD_WARN_THRESHOLD:.0f} Å) — box may be unreliable[/#e3b341]"
+                            )
                     else:
-                        log("[#6e7681]Redock validation skipped (could not extract/dock the ligand).[/#6e7681]")
+                        log(
+                            "[#6e7681]Redock validation skipped (could not extract/dock the ligand).[/#6e7681]"
+                        )
                 except Exception:
                     pass
 
@@ -1076,23 +1223,27 @@ class RunWizardScreen(Screen):
             ligand_input = ctx["ligand_path"]
             if ctx.get("admet_pre_filter"):
                 log("[#79c0ff]Running ADMET pre-filter...[/#79c0ff]")
-                admet_out     = work_dir / "admet_filtered.sdf"
+                admet_out = work_dir / "admet_filtered.sdf"
                 admet_summary = filter_library(str(ligand_input), str(admet_out))
-                total   = admet_summary.get("total_input", 0)
+                total = admet_summary.get("total_input", 0)
                 removed = admet_summary.get("admet_removed", 0)
                 log(f"[#6e7681]ADMET: {total - removed:,}/{total:,} passed[/#6e7681]")
-                ligand_input  = admet_out
+                ligand_input = admet_out
 
             # Ligand prep
             _prep_cfg = cfg.get("prep", {})
-            _force_field = ctx.get("force_field") or str(_prep_cfg.get("force_field", "MMFF94"))
-            _enum_enabled = bool(ctx.get("enumerate_enabled", _prep_cfg.get("enumerate_enabled", False)))
+            _force_field = ctx.get("force_field") or str(
+                _prep_cfg.get("force_field", "MMFF94")
+            )
+            _enum_enabled = bool(
+                ctx.get("enumerate_enabled", _prep_cfg.get("enumerate_enabled", False))
+            )
             _enum_opts = {
-                "enabled":      _enum_enabled,
-                "protonation":  bool(_prep_cfg.get("enumerate_protonation", True)),
-                "tautomers":    bool(_prep_cfg.get("enumerate_tautomers", True)),
-                "stereo":       bool(_prep_cfg.get("enumerate_stereo", False)),
-                "ring":         bool(_prep_cfg.get("enumerate_ring", False)),
+                "enabled": _enum_enabled,
+                "protonation": bool(_prep_cfg.get("enumerate_protonation", True)),
+                "tautomers": bool(_prep_cfg.get("enumerate_tautomers", True)),
+                "stereo": bool(_prep_cfg.get("enumerate_stereo", False)),
+                "ring": bool(_prep_cfg.get("enumerate_ring", False)),
                 "max_variants": int(_prep_cfg.get("max_variants_per_ligand", 4)),
             }
             account_assignments = ctx.get("account_assignments")
@@ -1112,7 +1263,9 @@ class RunWizardScreen(Screen):
                     force_field=_force_field,
                     enumerate_opts=_enum_opts,
                 )
-                log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['prep_passed']:,} ligands prepped)[/#6e7681]")
+                log(
+                    f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['prep_passed']:,} ligands prepped)[/#6e7681]"
+                )
             else:
                 _prep_on_kaggle = bool(_prep_cfg.get("prep_on_kaggle", True))
                 if _prep_on_kaggle:
@@ -1127,10 +1280,14 @@ class RunWizardScreen(Screen):
                 if not _prep_on_kaggle:
                     _prep_kwargs["force_field"] = _force_field
                     _prep_kwargs["enumerate_opts"] = _enum_opts
-                lig_result = (ligand_prep.shard_raw if _prep_on_kaggle else ligand_prep.prep_ligands)(
-                    **_prep_kwargs
+                lig_result = (
+                    ligand_prep.shard_raw
+                    if _prep_on_kaggle
+                    else ligand_prep.prep_ligands
+                )(**_prep_kwargs)
+                log(
+                    f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['total_input']:,} ligands)[/#6e7681]"
                 )
-                log(f"[#6e7681]{len(lig_result['shard_paths'])} shard(s) ready ({lig_result['report']['total_input']:,} ligands)[/#6e7681]")
 
             shard_paths = lig_result["shard_paths"]
             if not shard_paths:
@@ -1159,13 +1316,17 @@ class RunWizardScreen(Screen):
                 )
             else:
                 account_assignments = ctx.get("account_assignments")
-                _active_assignments = [a for a in (account_assignments or []) if a["shard_count"] != 0]
+                _active_assignments = [
+                    a for a in (account_assignments or []) if a["shard_count"] != 0
+                ]
                 if _active_assignments and len(_active_assignments) > 1:
                     # Multi-account Kaggle path
                     log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
                     for a in _active_assignments:
                         n = a["shard_count"] or 1
-                        log(f"[#6e7681]  {a['account']['name']}: {n} notebook(s)[/#6e7681]")
+                        log(
+                            f"[#6e7681]  {a['account']['name']}: {n} notebook(s)[/#6e7681]"
+                        )
                     account_assignments = _active_assignments
                     result = kaggle_runner.run_multi_account_screening(
                         run_id=run_id,
@@ -1222,15 +1383,20 @@ class RunWizardScreen(Screen):
             if result["status"] in ("complete", "partial"):
                 if result["status"] == "complete":
                     checkpoint.mark_run_complete(run_id)
-                    log(f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]")
+                    log(
+                        f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]"
+                    )
                 else:
                     checkpoint.mark_run_complete(run_id)
-                    log(f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]")
+                    log(
+                        f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
+                    )
                 try:
                     from ezscreen.results.methods import (
                         run_meta_from_checkpoint,
                         write_methods,
                     )
+
                     _rm = run_meta_from_checkpoint(run_id)
                     if _rm and result.get("output_dir"):
                         write_methods(_rm, Path(result["output_dir"]))
@@ -1239,13 +1405,14 @@ class RunWizardScreen(Screen):
                 self.app.call_from_thread(self._on_complete, run_id)
             else:
                 checkpoint.mark_run_failed(run_id)
-                err = result.get('error_type') or result.get('status', 'unknown')
+                err = result.get("error_type") or result.get("status", "unknown")
                 log(f"[#f85149]\u2717 Run failed: {err}[/#f85149]")
                 log(f"[#6e7681]Resume with: ezscreen resume {run_id}[/#6e7681]")
                 self.app.call_from_thread(self._on_done)
 
         except Exception as exc:
             import traceback
+
             tb = traceback.format_exc()
             _log_file.write(f"Error: {exc}\n{tb}\n")
             _log_file.close()
@@ -1259,6 +1426,7 @@ class RunWizardScreen(Screen):
 
     def _on_complete(self, run_id: str) -> None:
         from ezscreen.tui.screens.results_viewer import ResultsScreen
+
         self.app.switch_screen(ResultsScreen(run_id))
 
     def _on_done(self) -> None:
