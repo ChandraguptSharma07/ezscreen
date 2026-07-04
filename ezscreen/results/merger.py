@@ -355,9 +355,16 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
                 valid.append(r)
         all_rows = valid
 
+    receptor_variant_mode = any(row.get("receptor_variant") for row in all_rows)
+    if receptor_variant_mode and "receptor_variant" not in fieldnames:
+        fieldnames.append("receptor_variant")
+
     best: dict[str, dict] = {}
     for row in all_rows:
-        key = row.get(id_col, "") if id_col else str(id(row))
+        if receptor_variant_mode:
+            key = row.get("smiles") or row.get("name") or row.get(id_col, "")
+        else:
+            key = row.get(id_col, "") if id_col else str(id(row))
         if key not in best or _score(row) < _score(best[key]):
             best[key] = row
 

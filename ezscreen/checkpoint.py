@@ -113,7 +113,24 @@ def list_runs() -> list[dict[str, Any]]:
 def mark_run_complete(run_id: str) -> None:
     with _connection() as conn:
         conn.execute(
-            "UPDATE runs SET status = 'complete' WHERE run_id = ?", (run_id,)
+            """
+            UPDATE runs
+            SET status = 'complete',
+                completed_compounds = CASE
+                    WHEN total_compounds > completed_compounds THEN total_compounds
+                    ELSE completed_compounds
+                END
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        )
+        conn.execute(
+            """
+            UPDATE shards
+            SET status = 'done', error_message = NULL, updated_at = ?
+            WHERE run_id = ? AND status != 'failed'
+            """,
+            (_now(), run_id),
         )
 
 

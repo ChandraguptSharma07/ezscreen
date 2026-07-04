@@ -23,6 +23,7 @@ RCSB_URL = "https://files.rcsb.org/download/{pdb_id}.pdb"
 # AlphaFold detection (4-tier)
 # ---------------------------------------------------------------------------
 
+
 def detect_alphafold(pdb_path: Path) -> tuple[bool, str | None]:
     """Returns (is_alphafold, version_hint). version_hint is 'af2', 'af3', or None."""
     if pdb_path.suffix.lower() == ".cif":
@@ -38,7 +39,8 @@ def detect_alphafold(pdb_path: Path) -> tuple[bool, str | None]:
 
     if "ALPHAFOLD" in text:
         remarks = " ".join(
-            ln for ln in text.splitlines()
+            ln
+            for ln in text.splitlines()
             if ln.startswith("REMARK") and "ALPHAFOLD" in ln
         )
         if "ALPHAFOLD3" in remarks or ("V3" in remarks and "ALPHAFOLD" in remarks):
@@ -64,6 +66,7 @@ def detect_alphafold(pdb_path: Path) -> tuple[bool, str | None]:
 # ---------------------------------------------------------------------------
 # Chain utilities
 # ---------------------------------------------------------------------------
+
 
 def get_chains(pdb_path: Path) -> list[str]:
     chains: list[str] = []
@@ -98,7 +101,16 @@ def _strip_alt_conformations(src: Path, dst: Path) -> int:
 
 def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
     chain_set = set(chains)
-    keep_records = {"TER", "MODEL", "ENDMDL", "END", "CRYST1", "REMARK", "HEADER", "TITLE"}  # noqa: E501
+    keep_records = {
+        "TER",
+        "MODEL",
+        "ENDMDL",
+        "END",
+        "CRYST1",
+        "REMARK",
+        "HEADER",
+        "TITLE",
+    }  # noqa: E501
     lines = []
     for line in src.read_text(errors="ignore").splitlines():
         record = line[:6].rstrip()
@@ -116,6 +128,7 @@ def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
 # ---------------------------------------------------------------------------
 # RCSB download
 # ---------------------------------------------------------------------------
+
 
 def fetch_pdb(pdb_id: str, output_dir: Path) -> Path:
     pdb_id = pdb_id.strip().upper()
@@ -142,6 +155,7 @@ def fetch_pdb(pdb_id: str, output_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 # Chain selection prompt
 # ---------------------------------------------------------------------------
+
 
 def prompt_chain_selection(chains: list[str]) -> list[str] | object:
     """Returns selected chain list, or BACK sentinel."""
@@ -171,28 +185,119 @@ def prompt_chain_selection(chains: list[str]) -> list[str] | object:
 
 _WATERS: frozenset[str] = frozenset({"HOH", "WAT", "DOD", "D2O"})
 
-_METALS: frozenset[str] = frozenset({
-    "ZN", "MG", "MN", "FE", "FE2", "CA", "NA", "K", "CU", "CU1", "CO", "NI",
-    "CD", "HG", "MO", "W",
-})
+_METALS: frozenset[str] = frozenset(
+    {
+        "ZN",
+        "MG",
+        "MN",
+        "FE",
+        "FE2",
+        "CA",
+        "NA",
+        "K",
+        "CU",
+        "CU1",
+        "CO",
+        "NI",
+        "CD",
+        "HG",
+        "MO",
+        "W",
+    }
+)
 
 # Organic prosthetic groups / cofactors worth keeping in the receptor by default.
-_COFACTORS: frozenset[str] = frozenset({
-    "HEM", "HEC", "HEA", "HEB", "SRM", "VER",
-    "NAD", "NAP", "NAI", "NDP", "NAJ",
-    "FAD", "FMN", "FDA", "FADH",
-    "ATP", "ADP", "AMP", "ANP", "AGS", "GTP", "GDP", "GNP", "GSP",
-    "SAM", "SAH", "PLP", "PMP", "TPP", "TDP", "COA", "ACO", "BTN",
-    "CLA", "BCL", "B12", "COB", "PQQ", "MGD", "F43", "H4B", "BH4",
-})
+_COFACTORS: frozenset[str] = frozenset(
+    {
+        "HEM",
+        "HEC",
+        "HEA",
+        "HEB",
+        "SRM",
+        "VER",
+        "NAD",
+        "NAP",
+        "NAI",
+        "NDP",
+        "NAJ",
+        "FAD",
+        "FMN",
+        "FDA",
+        "FADH",
+        "ATP",
+        "ADP",
+        "AMP",
+        "ANP",
+        "AGS",
+        "GTP",
+        "GDP",
+        "GNP",
+        "GSP",
+        "SAM",
+        "SAH",
+        "PLP",
+        "PMP",
+        "TPP",
+        "TDP",
+        "COA",
+        "ACO",
+        "BTN",
+        "CLA",
+        "BCL",
+        "B12",
+        "COB",
+        "PQQ",
+        "MGD",
+        "F43",
+        "H4B",
+        "BH4",
+    }
+)
 
 # Crystallographic additives that are never biologically relevant.
-_ADDITIVE_HET: frozenset[str] = frozenset({
-    "GOL", "EDO", "MPD", "PGO", "PG4", "1PE", "PE8", "PE3", "PE4", "PE5", "PE6",
-    "SO4", "PO4", "NO3", "CL", "BR", "IOD", "ACT", "ACY", "ACE", "DMS", "DMF",
-    "EOH", "IPA", "TRS", "HEP", "MES", "MOH", "TAR", "CIT", "FMT", "IMD", "DIO",
-    "TLA", "BOG", "OES", "FLC", "BME", "PEG",
-})
+_ADDITIVE_HET: frozenset[str] = frozenset(
+    {
+        "GOL",
+        "EDO",
+        "MPD",
+        "PGO",
+        "PG4",
+        "1PE",
+        "PE8",
+        "PE3",
+        "PE4",
+        "PE5",
+        "PE6",
+        "SO4",
+        "PO4",
+        "NO3",
+        "CL",
+        "BR",
+        "IOD",
+        "ACT",
+        "ACY",
+        "ACE",
+        "DMS",
+        "DMF",
+        "EOH",
+        "IPA",
+        "TRS",
+        "HEP",
+        "MES",
+        "MOH",
+        "TAR",
+        "CIT",
+        "FMT",
+        "IMD",
+        "DIO",
+        "TLA",
+        "BOG",
+        "OES",
+        "FLC",
+        "BME",
+        "PEG",
+    }
+)
 
 
 def _classify_hetero(resname: str, n_atoms: int) -> tuple[str, bool]:
@@ -206,7 +311,7 @@ def _classify_hetero(resname: str, n_atoms: int) -> tuple[str, bool]:
     if resname in _ADDITIVE_HET:
         return "additive", False
     if n_atoms >= 5:
-        return "ligand", False   # a co-crystal ligand — usually the thing you displace
+        return "ligand", False  # a co-crystal ligand — usually the thing you displace
     return "other", False
 
 
@@ -227,13 +332,19 @@ def heteroatom_inventory(pdb_path: Path) -> list[dict[str, Any]]:
         groups[key] += 1
 
     inventory = []
-    for (resname, chain, resseq) in order:
+    for resname, chain, resseq in order:
         n = groups[(resname, chain, resseq)]
         category, keep = _classify_hetero(resname, n)
-        inventory.append({
-            "resname": resname, "chain": chain, "resseq": resseq,
-            "n_atoms": n, "category": category, "keep_default": keep,
-        })
+        inventory.append(
+            {
+                "resname": resname,
+                "chain": chain,
+                "resseq": resseq,
+                "n_atoms": n,
+                "category": category,
+                "keep_default": keep,
+            }
+        )
     return inventory
 
 
@@ -258,6 +369,7 @@ def _apply_hetero_selection(src: Path, dst: Path, keep_keys: set[tuple]) -> int:
 # ---------------------------------------------------------------------------
 # pdbfixer + Meeko
 # ---------------------------------------------------------------------------
+
 
 def _run_pdbfixer(
     src: Path, dst: Path, keep_waters: bool, remove_heterogens: bool = True
@@ -292,20 +404,24 @@ def _run_pdbfixer(
         from pdbfixer import __version__ as v
     except ImportError:
         v = "unknown"
-    return {"missing_residues": n_missing, "residue_count": residue_count, "pdbfixer_version": v}
+    return {
+        "missing_residues": n_missing,
+        "residue_count": residue_count,
+        "pdbfixer_version": v,
+    }
 
 
-def _infer_element(atom_name: str) -> str:
-    """Guess element symbol from PDB atom name (e.g. 'CA' → 'C', 'FE' → 'FE')."""
+def _infer_element(atom_name: str, resname: str = "") -> str:
+    """Guess element symbol from PDB atom name."""
     name = atom_name.strip().lstrip("0123456789")
     if not name:
         return ""
-    # Two-letter elements common in proteins
+    if name.upper() == "CA" and resname.strip().upper() != "CA":
+        return "C"
     two = name[:2].upper()
     if two in {"FE", "ZN", "MG", "MN", "CA", "NA", "CL", "BR", "CU", "CO", "NI"}:
         return two
     return name[0].upper()
-
 
 def _ensure_element_column(lines: list[str]) -> list[str]:
     """Pad ATOM/HETATM lines to 80 chars and fill blank element column (76-78)."""
@@ -314,7 +430,7 @@ def _ensure_element_column(lines: list[str]) -> list[str]:
         if line.startswith(("ATOM  ", "HETATM")):
             line = line.rstrip("\n").ljust(80)
             if not line[76:78].strip():
-                elem = _infer_element(line[12:16])
+                elem = _infer_element(line[12:16], line[17:20])
                 line = line[:76] + elem.rjust(2) + line[78:]
         out.append(line)
     return out
@@ -334,7 +450,7 @@ def _strip_conect(src: Path, dst: Path) -> None:
         if line[:6] in skip_records:
             continue
         if line.startswith(("ATOM  ", "HETATM")):
-            element   = line[76:78].strip() if len(line) >= 78 else ""
+            element = line[76:78].strip() if len(line) >= 78 else ""
             atom_name = line[12:16].strip()
             if element == "H" or (not element and atom_name.startswith("H")):
                 continue
@@ -361,13 +477,16 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     # exhaust memory on Windows if thread count is not capped. Limit to 1 thread
     # via env vars before launching the subprocess.
     import os
+
     env = os.environ.copy()
-    env.update({
-        "OMP_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1",
-        "NUMEXPR_NUM_THREADS": "1",
-    })
+    env.update(
+        {
+            "OMP_NUM_THREADS": "1",
+            "OPENBLAS_NUM_THREADS": "1",
+            "MKL_NUM_THREADS": "1",
+            "NUMEXPR_NUM_THREADS": "1",
+        }
+    )
 
     console.print("  [dim]meeko: converting receptor to PDBQT...[/dim]")
     try:
@@ -382,15 +501,22 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
         raise ReceptorPrepError("mk_prepare_receptor timed out after 180 s") from exc
 
     if result.returncode != 0:
-        stderr = result.stderr.decode("utf-8", errors="replace").strip() if isinstance(result.stderr, bytes) else result.stderr.strip()
+        stderr = (
+            result.stderr.decode("utf-8", errors="replace").strip()
+            if isinstance(result.stderr, bytes)
+            else result.stderr.strip()
+        )
         meeko_err = stderr
         console.print("  [yellow]meeko failed — trying obabel fallback...[/yellow]")
         try:
             return _run_obabel_receptor(clean, output_dir)
         except ReceptorPrepError as ob_exc:
-            raise ReceptorPrepError(f"mk_prepare_receptor failed:\n{meeko_err}") from ob_exc
+            raise ReceptorPrepError(
+                f"mk_prepare_receptor failed:\n{meeko_err}"
+            ) from ob_exc
     try:
         import meeko
+
         mv = meeko.__version__
     except (ImportError, AttributeError):
         mv = "unknown"
@@ -400,7 +526,9 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
 def _run_obabel_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     exe = shutil.which("obabel")
     if exe is None:
-        raise ReceptorPrepError("obabel not found — install Open Babel: https://openbabel.org")
+        raise ReceptorPrepError(
+            "obabel not found — install Open Babel: https://openbabel.org"
+        )
     pdbqt = output_dir / (src.stem + ".pdbqt")
     console.print("  [dim]obabel: converting receptor to PDBQT...[/dim]")
     result = subprocess.run(
@@ -415,14 +543,286 @@ def _run_obabel_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     return pdbqt, "obabel"
 
 
+_TITRATABLE_RESIDUES: frozenset[str] = frozenset(
+    {
+        "HIS",
+        "HID",
+        "HIE",
+        "HIP",
+        "ASP",
+        "ASH",
+        "GLU",
+        "GLH",
+        "LYS",
+        "LYN",
+        "CYS",
+        "CYM",
+        "TYR",
+        "TYM",
+    }
+)
+
+
+def _pdb2pqr_command() -> str | None:
+    for name in ("pdb2pqr", "pdb2pqr30"):
+        exe = shutil.which(name)
+        if exe:
+            return exe
+    return None
+
+
+def _pqr_atom_to_pdb_line(line: str, serial: int) -> str | None:
+    parts = line.split()
+    if len(parts) < 10 or parts[0] not in {"ATOM", "HETATM"}:
+        return None
+    record = parts[0]
+    atom = parts[2]
+    resname = parts[3]
+    chain = ""
+    idx = 4
+    if len(parts[idx]) == 1 and not parts[idx].lstrip("-").isdigit():
+        chain = parts[idx]
+        idx += 1
+    try:
+        resseq = int(float(parts[idx]))
+        x = float(parts[idx + 1])
+        y = float(parts[idx + 2])
+        z = float(parts[idx + 3])
+    except (IndexError, ValueError):
+        return None
+    element = _infer_element(atom, resname)
+    return (
+        f"{record:<6}{serial:>5} {atom:<4} {resname:>3} {chain:1}{resseq:>4}    "
+        f"{x:>8.3f}{y:>8.3f}{z:>8.3f}{1.00:>6.2f}{0.00:>6.2f}          {element:>2}"
+    )
+
+
+def _pqr_to_pdb(pqr_path: Path, pdb_path: Path) -> dict[str, Any]:
+    lines: list[str] = []
+    assignments: dict[tuple[str, int, str], str] = {}
+    serial = 1
+    for line in pqr_path.read_text(errors="ignore").splitlines():
+        if line.startswith(("ATOM", "HETATM")):
+            pdb_line = _pqr_atom_to_pdb_line(line, serial)
+            if pdb_line is None:
+                continue
+            serial += 1
+            lines.append(pdb_line)
+            resname = pdb_line[17:20].strip()
+            if resname in _TITRATABLE_RESIDUES:
+                key = (
+                    pdb_line[21:22].strip(),
+                    int(pdb_line[22:26]),
+                    pdb_line[26:27].strip(),
+                )
+                assignments.setdefault(key, resname)
+        elif line.startswith(("TER", "END")):
+            lines.append(line)
+    if not any(ln.startswith("ATOM") for ln in lines):
+        raise ReceptorPrepError("PDB2PQR produced no protein atoms")
+    if not lines or not lines[-1].startswith("END"):
+        lines.append("END")
+    pdb_path.write_text("\n".join(lines) + "\n")
+    return {
+        "assignment_count": len(assignments),
+        "assignments": [
+            {"chain": chain, "resseq": resseq, "icode": icode, "state": state}
+            for (chain, resseq, icode), state in sorted(assignments.items())
+        ],
+    }
+
+
+def _pqr_residue_assignments(pqr_path: Path) -> dict[str, Any]:
+    assignments: dict[tuple[str, int, str], str] = {}
+    fallback_by_resseq: dict[int, str] = {}
+    for line in pqr_path.read_text(errors="ignore").splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            continue
+        pdb_line = _pqr_atom_to_pdb_line(line, 1)
+        if pdb_line is None:
+            continue
+        resname = pdb_line[17:20].strip()
+        if resname not in _TITRATABLE_RESIDUES:
+            continue
+        try:
+            resseq = int(pdb_line[22:26])
+        except ValueError:
+            continue
+        chain = pdb_line[21:22].strip()
+        icode = pdb_line[26:27].strip()
+        assignments.setdefault((chain, resseq, icode), resname)
+        fallback_by_resseq.setdefault(resseq, resname)
+    return {"assignments": assignments, "fallback_by_resseq": fallback_by_resseq}
+
+
+def _apply_pqr_residue_names_to_pdb(src: Path, pqr_path: Path, dst: Path) -> dict[str, Any]:
+    parsed = _pqr_residue_assignments(pqr_path)
+    assignments: dict[tuple[str, int, str], str] = parsed["assignments"]
+    fallback_by_resseq: dict[int, str] = parsed["fallback_by_resseq"]
+    lines: list[str] = []
+    applied: dict[tuple[str, int, str], str] = {}
+    for line in src.read_text(errors="ignore").splitlines():
+        if line.startswith(("ATOM  ", "HETATM")):
+            try:
+                chain = line[21:22].strip()
+                resseq = int(line[22:26])
+                icode = line[26:27].strip()
+            except (IndexError, ValueError):
+                lines.append(line)
+                continue
+            new_resname = assignments.get((chain, resseq, icode))
+            if new_resname is None and not any(k[0] for k in assignments):
+                new_resname = fallback_by_resseq.get(resseq)
+            if new_resname:
+                line = line[:17] + f"{new_resname:>3}" + line[20:]
+                applied[(chain, resseq, icode)] = new_resname
+        lines.append(line)
+    if not any(ln.startswith("ATOM") for ln in lines):
+        return _pqr_to_pdb(pqr_path, dst)
+    lines = _ensure_element_column(lines)
+    dst.write_text("\n".join(lines) + "\n")
+    return {
+        "assignment_count": len(applied),
+        "assignments": [
+            {"chain": chain, "resseq": resseq, "icode": icode, "state": state}
+            for (chain, resseq, icode), state in sorted(applied.items())
+        ],
+    }
+
+
+def _run_pdb2pqr_protonation(src: Path, dst: Path, ph: float) -> dict[str, Any]:
+    exe = _pdb2pqr_command()
+    if exe is None:
+        return {
+            "applied": False,
+            "tool": None,
+            "assignment_count": 0,
+            "assignments": [],
+            "error": "pdb2pqr executable not found",
+        }
+
+    pqr = dst.with_suffix(".pqr")
+    log_path = pqr.with_suffix(".log")
+    for stale in (dst, pqr, log_path):
+        try:
+            stale.unlink()
+        except FileNotFoundError:
+            pass
+    cmd = [
+        exe,
+        "--ff=AMBER",
+        f"--with-ph={ph}",
+        "--titration-state-method=propka",
+        "--keep-chain",
+        str(src),
+        str(pqr),
+    ]
+    console.print(
+        f"  [dim]pdb2pqr/propka: assigning receptor protonation at pH {ph}...[/dim]"
+    )
+    def _trim_error_text(text: str, limit: int = 4000) -> str:
+        text = text.strip()
+        if not text:
+            return ""
+        marker = "Traceback (most recent call last):"
+        if marker in text:
+            text = text[text.rfind(marker):]
+        if len(text) <= limit:
+            return text
+        text = text[-limit:]
+        if "\n" in text:
+            text = text.split("\n", 1)[1]
+        return text.strip()
+
+    def _error_detail(prefix: str = "") -> str:
+        parts = [_trim_error_text(prefix)] if prefix.strip() else []
+        if log_path.exists():
+            log_tail = _trim_error_text(log_path.read_text(errors="replace"), limit=2000)
+            if log_tail:
+                parts.append(log_tail)
+        return "\n".join(p for p in parts if p).strip()
+
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "applied": False,
+            "tool": "pdb2pqr",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": _error_detail(f"pdb2pqr timed out after {exc.timeout} s"),
+        }
+    except OSError as exc:
+        return {
+            "applied": False,
+            "tool": "pdb2pqr",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": str(exc),
+        }
+
+    if result.returncode != 0 or not pqr.exists() or pqr.stat().st_size == 0:
+        detail = _trim_error_text(result.stderr or result.stdout or "")
+        if not detail and result.returncode == 0:
+            detail = "pdb2pqr exited successfully but produced no PQR output"
+        else:
+            detail = detail or f"pdb2pqr exited with code {result.returncode}"
+        return {
+            "applied": False,
+            "tool": "pdb2pqr",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": _error_detail(detail),
+        }
+
+    try:
+        converted = _apply_pqr_residue_names_to_pdb(src, pqr, dst)
+    except ReceptorPrepError as exc:
+        return {
+            "applied": False,
+            "tool": "pdb2pqr",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": str(exc),
+        }
+    converted.update({"applied": True, "tool": "pdb2pqr", "error": None})
+    return converted
+
+
 # ---------------------------------------------------------------------------
 # Receptor QC
 # ---------------------------------------------------------------------------
 
-_STANDARD_AA: frozenset[str] = frozenset({
-    "ALA", "ARG", "ASN", "ASP", "CYS", "GLN", "GLU", "GLY", "HIS", "ILE",
-    "LEU", "LYS", "MET", "PHE", "PRO", "SER", "THR", "TRP", "TYR", "VAL",
-})
+_STANDARD_AA: frozenset[str] = frozenset(
+    {
+        "ALA",
+        "ARG",
+        "ASN",
+        "ASP",
+        "CYS",
+        "GLN",
+        "GLU",
+        "GLY",
+        "HIS",
+        "ILE",
+        "LEU",
+        "LYS",
+        "MET",
+        "PHE",
+        "PRO",
+        "SER",
+        "THR",
+        "TRP",
+        "TYR",
+        "VAL",
+    }
+)
 
 _COVALENT_RADII: dict[str, float] = {
     "C": 0.76,
@@ -461,26 +861,30 @@ def _iter_pdb_atoms(pdb_path: Path) -> list[dict[str, Any]]:
             continue
         try:
             element = line[76:78].strip() if len(line) >= 78 else ""
-            atoms.append({
-                "record": line[:6].strip(),
-                "name": line[12:16].strip(),
-                "resname": line[17:20].strip(),
-                "chain": line[21:22].strip(),
-                "resseq": int(line[22:26]),
-                "icode": line[26:27].strip(),
-                "element": (element or _infer_element(line[12:16])).upper(),
-                "xyz": (
-                    _pdb_float(line, 30, 38),
-                    _pdb_float(line, 38, 46),
-                    _pdb_float(line, 46, 54),
-                ),
-            })
+            atoms.append(
+                {
+                    "record": line[:6].strip(),
+                    "name": line[12:16].strip(),
+                    "resname": line[17:20].strip(),
+                    "chain": line[21:22].strip(),
+                    "resseq": int(line[22:26]),
+                    "icode": line[26:27].strip(),
+                    "element": (element or _infer_element(line[12:16])).upper(),
+                    "xyz": (
+                        _pdb_float(line, 30, 38),
+                        _pdb_float(line, 38, 46),
+                        _pdb_float(line, 46, 54),
+                    ),
+                }
+            )
         except (IndexError, ValueError):
             continue
     return atoms
 
 
-def _sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+def _sub(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 
@@ -488,7 +892,9 @@ def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-def _cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+def _cross(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -528,7 +934,9 @@ def _dihedral_degrees(
 
 def ramachandran_angles(pdb_path: Path) -> list[dict[str, Any]]:
     """Compute phi/psi backbone dihedrals for residues with complete neighbours."""
-    residues: dict[tuple[str, int, str, str], dict[str, tuple[float, float, float]]] = {}
+    residues: dict[
+        tuple[str, int, str, str], dict[str, tuple[float, float, float]]
+    ] = {}
     order: list[tuple[str, int, str, str]] = []
     for line in pdb_path.read_text(errors="ignore").splitlines():
         if not line.startswith("ATOM  "):
@@ -538,7 +946,11 @@ def ramachandran_angles(pdb_path: Path) -> list[dict[str, Any]]:
             continue
         try:
             key = _atom_key(line)
-            xyz = (_pdb_float(line, 30, 38), _pdb_float(line, 38, 46), _pdb_float(line, 46, 54))
+            xyz = (
+                _pdb_float(line, 30, 38),
+                _pdb_float(line, 38, 46),
+                _pdb_float(line, 46, 54),
+            )
         except (IndexError, ValueError):
             continue
         if key not in residues:
@@ -554,26 +966,30 @@ def ramachandran_angles(pdb_path: Path) -> list[dict[str, Any]]:
         atoms = residues[key]
         next_atoms = residues[order[i + 1]]
         required = (
-            "C" in prev_atoms
-            and {"N", "CA", "C"}.issubset(atoms)
-            and "N" in next_atoms
+            "C" in prev_atoms and {"N", "CA", "C"}.issubset(atoms) and "N" in next_atoms
         )
         if not required:
             continue
         try:
-            phi = _dihedral_degrees(prev_atoms["C"], atoms["N"], atoms["CA"], atoms["C"])
-            psi = _dihedral_degrees(atoms["N"], atoms["CA"], atoms["C"], next_atoms["N"])
+            phi = _dihedral_degrees(
+                prev_atoms["C"], atoms["N"], atoms["CA"], atoms["C"]
+            )
+            psi = _dihedral_degrees(
+                atoms["N"], atoms["CA"], atoms["C"], next_atoms["N"]
+            )
         except ValueError:
             continue
         chain, resseq, icode, resname = key
-        angles.append({
-            "chain": chain,
-            "resseq": resseq,
-            "icode": icode,
-            "resname": resname,
-            "phi": round(phi, 2),
-            "psi": round(psi, 2),
-        })
+        angles.append(
+            {
+                "chain": chain,
+                "resseq": resseq,
+                "icode": icode,
+                "resname": resname,
+                "phi": round(phi, 2),
+                "psi": round(psi, 2),
+            }
+        )
     return angles
 
 
@@ -582,6 +998,7 @@ def _render_ramachandran_plot(angles: list[dict[str, Any]]) -> str | None:
         return None
     try:
         import matplotlib
+
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except Exception:
@@ -619,15 +1036,19 @@ def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
 
     missing_backbone = []
     for chain, resseq, icode, resname in residues:
-        missing = sorted({"N", "CA", "C", "O"} - residues[(chain, resseq, icode, resname)])
+        missing = sorted(
+            {"N", "CA", "C", "O"} - residues[(chain, resseq, icode, resname)]
+        )
         if missing:
-            missing_backbone.append({
-                "chain": chain,
-                "resseq": resseq,
-                "icode": icode,
-                "resname": resname,
-                "missing": missing,
-            })
+            missing_backbone.append(
+                {
+                    "chain": chain,
+                    "resseq": resseq,
+                    "icode": icode,
+                    "resname": resname,
+                    "missing": missing,
+                }
+            )
 
     heavy = [a for a in atoms if a["element"] != "H"]
     clashes = []
@@ -635,16 +1056,20 @@ def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
     for i, atom_i in enumerate(heavy):
         for j in range(i + 1, len(heavy)):
             atom_j = heavy[j]
-            same_residue = (
-                atom_i["chain"], atom_i["resseq"], atom_i["icode"]
-            ) == (atom_j["chain"], atom_j["resseq"], atom_j["icode"])
+            same_residue = (atom_i["chain"], atom_i["resseq"], atom_i["icode"]) == (
+                atom_j["chain"],
+                atom_j["resseq"],
+                atom_j["icode"],
+            )
             dist = _distance(atom_i["xyz"], atom_j["xyz"])
             if not same_residue and dist < 1.0:
-                clashes.append({
-                    "a": f"{atom_i['chain']}:{atom_i['resname']}{atom_i['resseq']}:{atom_i['name']}",
-                    "b": f"{atom_j['chain']}:{atom_j['resname']}{atom_j['resseq']}:{atom_j['name']}",
-                    "distance": round(dist, 2),
-                })
+                clashes.append(
+                    {
+                        "a": f"{atom_i['chain']}:{atom_i['resname']}{atom_i['resseq']}:{atom_i['name']}",
+                        "b": f"{atom_j['chain']}:{atom_j['resname']}{atom_j['resseq']}:{atom_j['name']}",
+                        "distance": round(dist, 2),
+                    }
+                )
             radius_i = _COVALENT_RADII.get(atom_i["element"])
             radius_j = _COVALENT_RADII.get(atom_j["element"])
             if radius_i is None or radius_j is None:
@@ -657,12 +1082,14 @@ def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
     for atom, valence in zip(heavy, valence_counts):
         max_valence = _MAX_VALENCE.get(atom["element"])
         if max_valence is not None and valence > max_valence:
-            odd_valences.append({
-                "atom": f"{atom['chain']}:{atom['resname']}{atom['resseq']}:{atom['name']}",
-                "element": atom["element"],
-                "inferred_valence": valence,
-                "max_expected": max_valence,
-            })
+            odd_valences.append(
+                {
+                    "atom": f"{atom['chain']}:{atom['resname']}{atom['resseq']}:{atom['name']}",
+                    "element": atom["element"],
+                    "inferred_valence": valence,
+                    "max_expected": max_valence,
+                }
+            )
 
     return {
         "atom_count": len(atoms),
@@ -678,34 +1105,42 @@ def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
 def _qc_warnings(qc: dict[str, Any]) -> list[dict[str, Any]]:
     warnings = []
     if qc["missing_backbone"]:
-        warnings.append({
-            "severity": "medium",
-            "category": "missing_backbone_atoms",
-            "affected_count": len(qc["missing_backbone"]),
-            "message": f"{len(qc['missing_backbone'])} residue(s) are missing backbone atoms after prep",
-            "action": "inspect the prepared receptor before docking",
-        })
+        warnings.append(
+            {
+                "severity": "medium",
+                "category": "missing_backbone_atoms",
+                "affected_count": len(qc["missing_backbone"]),
+                "message": f"{len(qc['missing_backbone'])} residue(s) are missing backbone atoms after prep",
+                "action": "inspect the prepared receptor before docking",
+            }
+        )
     if qc["steric_clash_count"]:
-        warnings.append({
-            "severity": "high" if qc["steric_clash_count"] > 10 else "medium",
-            "category": "steric_clashes",
-            "affected_count": qc["steric_clash_count"],
-            "message": f"{qc['steric_clash_count']} close heavy-atom contact(s) found in the prepared receptor",
-            "action": "inspect clashes near the binding site before docking",
-        })
+        warnings.append(
+            {
+                "severity": "high" if qc["steric_clash_count"] > 10 else "medium",
+                "category": "steric_clashes",
+                "affected_count": qc["steric_clash_count"],
+                "message": f"{qc['steric_clash_count']} close heavy-atom contact(s) found in the prepared receptor",
+                "action": "inspect clashes near the binding site before docking",
+            }
+        )
     if qc["odd_valence_count"]:
-        warnings.append({
-            "severity": "medium",
-            "category": "possible_odd_valences",
-            "affected_count": qc["odd_valence_count"],
-            "message": f"{qc['odd_valence_count']} atom(s) have unusual inferred valence in the prepared receptor",
-            "action": "check residue chemistry and retained cofactors/metals",
-        })
+        warnings.append(
+            {
+                "severity": "medium",
+                "category": "possible_odd_valences",
+                "affected_count": qc["odd_valence_count"],
+                "message": f"{qc['odd_valence_count']} atom(s) have unusual inferred valence in the prepared receptor",
+                "action": "check residue chemistry and retained cofactors/metals",
+            }
+        )
     return warnings
+
 
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def prep_receptor(
     pdb_path: Path,
@@ -714,6 +1149,7 @@ def prep_receptor(
     ph: float = 7.4,
     keep_waters: bool = False,
     keep_hetero: list[dict[str, Any]] | None = None,
+    receptor_isomers: str = "off",
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[dict] = []
@@ -721,12 +1157,15 @@ def prep_receptor(
     noalt = output_dir / "receptor_noalt.pdb"
     n_alt = _strip_alt_conformations(pdb_path, noalt)
     if n_alt:
-        warnings.append({
-            "severity": "low", "category": "alternates_resolved",
-            "affected_count": n_alt,
-            "message": f"{n_alt} alternate conformation atoms removed (kept A)",
-            "action": "none required",
-        })
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "alternates_resolved",
+                "affected_count": n_alt,
+                "message": f"{n_alt} alternate conformation atoms removed (kept A)",
+                "action": "none required",
+            }
+        )
 
     chain_filtered = output_dir / "receptor_chains.pdb"
     _filter_chains(noalt, chains, chain_filtered)
@@ -741,20 +1180,27 @@ def prep_receptor(
             (d["resname"], d.get("chain", ""), int(d["resseq"])) for d in keep_hetero
         }
         hetero_filtered = output_dir / "receptor_hetero.pdb"
-        n_hetero_removed = _apply_hetero_selection(chain_filtered, hetero_filtered, keep_keys)
+        n_hetero_removed = _apply_hetero_selection(
+            chain_filtered, hetero_filtered, keep_keys
+        )
         prefixer_src = hetero_filtered
         remove_heterogens = False
-        warnings.append({
-            "severity": "low", "category": "heteroatoms_selected",
-            "affected_count": len(keep_keys),
-            "message": f"{len(keep_keys)} heteroatom group(s) kept, {n_hetero_removed} record(s) removed per user selection",
-            "action": "confirm kept cofactors/metals are correct",
-        })
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "heteroatoms_selected",
+                "affected_count": len(keep_keys),
+                "message": f"{len(keep_keys)} heteroatom group(s) kept, {n_hetero_removed} record(s) removed per user selection",
+                "action": "confirm kept cofactors/metals are correct",
+            }
+        )
 
-    fixed = output_dir / "receptor_fixed.pdb"
+    base_fixed = output_dir / "receptor_fixed.pdb"
     try:
         fx = _run_pdbfixer(
-            prefixer_src, fixed, keep_waters=keep_waters,
+            prefixer_src,
+            base_fixed,
+            keep_waters=keep_waters,
             remove_heterogens=remove_heterogens,
         )
     except ReceptorPrepError:
@@ -763,37 +1209,150 @@ def prep_receptor(
         raise ReceptorPrepError(f"pdbfixer error: {exc}") from exc
 
     if fx["missing_residues"]:
-        warnings.append({
-            "severity": "medium", "category": "missing_residues_modelled",
-            "affected_count": fx["missing_residues"],
-            "message": f"{fx['missing_residues']} missing residues modelled by pdbfixer",
-            "action": "verify modelled regions are not in/near binding site",
-        })
-    warnings.append({
-        "severity": "low", "category": "histidine_protonation", "affected_count": 0,
-        "message": f"Histidine states assigned at pH {ph} — guesses only",
-        "action": "verify HIE/HID if histidines are in binding site",
-    })
+        warnings.append(
+            {
+                "severity": "medium",
+                "category": "missing_residues_modelled",
+                "affected_count": fx["missing_residues"],
+                "message": f"{fx['missing_residues']} missing residues modelled by pdbfixer",
+                "action": "verify modelled regions are not in/near binding site",
+            }
+        )
 
-    rama_angles = ramachandran_angles(fixed)
+    protonation = {
+        "applied": False,
+        "tool": None,
+        "assignment_count": 0,
+        "assignments": [],
+        "error": None,
+    }
+    protonated: Path | None = None
+    receptor_variant_modes = ["default"]
+    if receptor_isomers == "single":
+        protonated_candidate = output_dir / "receptor_protonated.pdb"
+        protonation = _run_pdb2pqr_protonation(base_fixed, protonated_candidate, ph)
+        if protonation["applied"]:
+            protonated = protonated_candidate
+            warnings.append(
+                {
+                    "severity": "low",
+                    "category": "receptor_protonation",
+                    "affected_count": protonation["assignment_count"],
+                    "message": f"PDB2PQR/PROPKA assigned receptor protonation at pH {ph}",
+                    "action": "inspect titratable residues near the binding site",
+                }
+            )
+        else:
+            warnings.append(
+                {
+                    "severity": "medium",
+                    "category": "receptor_protonation_unavailable",
+                    "affected_count": 0,
+                    "message": f"PDB2PQR/PROPKA unavailable; receptor protonation fell back to pdbfixer/Meeko guesses ({protonation['error']})",
+                    "action": "install pdb2pqr/propka for pKa-based receptor protonation",
+                }
+            )
+    elif receptor_isomers == "variants":
+        receptor_variant_modes = ["default", "propka_ph"]
+        protonation = {
+            "applied": False,
+            "tool": "pdb2pqr_on_kaggle",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": "deferred_to_kaggle",
+        }
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "receptor_protonation_deferred",
+                "affected_count": 0,
+                "message": "PDB2PQR/PROPKA receptor variant prep will run inside Kaggle notebooks",
+                "action": "inspect Kaggle notebook output if variant prep fails",
+            }
+        )
+    else:
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "histidine_protonation",
+                "affected_count": 0,
+                "message": f"Histidine states assigned at pH {ph} - guesses only",
+                "action": "verify HIE/HID if histidines are in binding site",
+            }
+        )
+
+    if receptor_isomers == "single" and protonated is not None:
+        primary_fixed = protonated
+    else:
+        primary_fixed = base_fixed
+
+    rama_angles = ramachandran_angles(primary_fixed)
     rama_plot = _render_ramachandran_plot(rama_angles)
-    sanity = receptor_sanity_checks(fixed)
+    sanity = receptor_sanity_checks(primary_fixed)
     warnings.extend(_qc_warnings(sanity))
 
     try:
-        pdbqt, mv = _run_meeko_receptor(fixed, output_dir)
+        primary_pdbqt, mv = _run_meeko_receptor(primary_fixed, output_dir)
     except ReceptorPrepError:
         raise
     except Exception as exc:
         raise ReceptorPrepError(f"Meeko error: {exc}") from exc
 
+    variant_entries: list[dict[str, Any]] = [
+        {"name": "default", "pdb_path": primary_fixed, "pdbqt_path": primary_pdbqt}
+    ]
+    if receptor_isomers == "single" and protonated is not None and protonated != primary_fixed:
+        try:
+            protonated_pdbqt, _ = _run_meeko_receptor(protonated, output_dir)
+            variant_entries.append(
+                {
+                    "name": "propka_ph",
+                    "pdb_path": protonated,
+                    "pdbqt_path": protonated_pdbqt,
+                }
+            )
+        except ReceptorPrepError as exc:
+            warnings.append(
+                {
+                    "severity": "medium",
+                    "category": "receptor_variant_unavailable",
+                    "affected_count": 0,
+                    "message": f"Could not prepare PROPKA receptor variant ({exc})",
+                    "action": "run with a single receptor or inspect receptor prep logs",
+                }
+            )
+
+    import hashlib
+
+    unique_variants: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    for entry in variant_entries:
+        pdbqt_path = Path(entry["pdbqt_path"])
+        digest = hashlib.sha256(pdbqt_path.read_bytes()).hexdigest()
+        if digest in seen_hashes:
+            continue
+        seen_hashes.add(digest)
+        unique_variants.append(entry)
+    if receptor_isomers == "variants" and len(unique_variants) < len(variant_entries):
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "receptor_variants_deduped",
+                "affected_count": len(variant_entries) - len(unique_variants),
+                "message": "Duplicate receptor variant PDBQT files were removed before docking",
+                "action": "none required",
+            }
+        )
+
     receptor_pdb = output_dir / "receptor_prep.pdb"
-    shutil.copy2(fixed, receptor_pdb)
+    shutil.copy2(primary_fixed, receptor_pdb)
 
     return {
-        "pdbqt_path": pdbqt,
+        "pdbqt_path": primary_pdbqt,
+        "variant_pdbqt_paths": [Path(v["pdbqt_path"]) for v in unique_variants],
+        "receptor_variant_modes": receptor_variant_modes,
         "receptor_pdb_path": receptor_pdb,
-        "fixed_pdb_path": fixed,
+        "fixed_pdb_path": primary_fixed,
         "report": {
             "chains_selected": chains,
             "residue_count": fx["residue_count"],
@@ -805,7 +1364,21 @@ def prep_receptor(
                 "plot_png_base64": rama_plot,
             },
             "sanity_checks": sanity,
-            "tools": {"pdbfixer": fx["pdbfixer_version"], "meeko": mv},
+            "receptor_protonation": protonation,
+            "receptor_variants": [
+                {
+                    "name": v["name"],
+                    "pdb_path": str(v["pdb_path"]),
+                    "pdbqt_path": str(v["pdbqt_path"]),
+                }
+                for v in unique_variants
+            ],
+            "receptor_variant_modes": receptor_variant_modes,
+            "tools": {
+                "pdbfixer": fx["pdbfixer_version"],
+                "meeko": mv,
+                "protonation": protonation.get("tool"),
+            },
             "warnings": warnings,
         },
     }

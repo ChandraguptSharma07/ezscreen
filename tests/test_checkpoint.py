@@ -155,3 +155,14 @@ def test_annotations_isolated_per_run():
     cp.create_run("run-a5", {}, 10)
     cp.set_annotation("run-a4", "lig1", flag="yellow")
     assert cp.get_annotations("run-a5") == {}
+
+
+
+def test_mark_run_complete_marks_non_failed_shards_done():
+    cp.create_run("run-variants", {}, 100)
+    cp.add_shard("run-variants", 0, 50)
+    cp.add_shard("run-variants", 1, 50)
+    cp.mark_run_complete("run-variants")
+
+    assert cp.get_run("run-variants")["completed_compounds"] == 100
+    assert cp.get_incomplete_shards("run-variants") == []

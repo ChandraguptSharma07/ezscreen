@@ -183,6 +183,30 @@ def _enrich_scores_with_identity(output_dir: Path) -> None:
     console.print(f"  [dim]Enriched scores.csv with identity + LE/BEI ({enriched} rows)[/dim]")
 
 
+
+def _tag_scores_with_receptor_variant(output_dir: Path, receptor_variant: str | None) -> None:
+    """Ensure scores/failed rows identify the receptor variant that produced them."""
+    if not receptor_variant:
+        return
+    import csv
+    for filename in ("scores.csv", "failed_docking.csv"):
+        path = output_dir / filename
+        if not path.exists():
+            continue
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            fieldnames = list(reader.fieldnames or [])
+        if not fieldnames or "receptor_variant" in fieldnames:
+            continue
+        fieldnames.append("receptor_variant")
+        for row in rows:
+            row["receptor_variant"] = receptor_variant
+        with path.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows)
+
 def _fetch_output_urls(kernel_ref: str) -> list:
     """Return list of (filename, url) tuples for a kernel's output files.
     Caller must hold _KAGGLE_API_LOCK and have already set credentials.
@@ -210,6 +234,7 @@ def _download_output(
     kj_path: str | None = None,
     index_csv: Path | None = None,
     filtered_csv: Path | None = None,
+    receptor_variant: str | None = None,
     retries: int = 5,
 ) -> Path:
     out = work_dir / "output"
@@ -289,6 +314,7 @@ def _download_output(
 
     _recover_scores(out)
     _enrich_scores_with_identity(out)
+    _tag_scores_with_receptor_variant(out, receptor_variant)
     return out
 
 
@@ -545,6 +571,10 @@ def render_vina_notebook(
     results_cfg: dict | None = None,
     engine: str = "unidock",
     scoring: str = "vina",
+    receptor_filename: str = "receptor.pdbqt",
+    receptor_variant: str = "default",
+    receptor_variants: list[dict[str, Any]] | None = None,
+    receptor_pdb_filename: str = "receptor_fixed.pdb",
 ) -> str:
     """Render the docking notebook to source text for a single kernel.
 
@@ -574,6 +604,19 @@ def render_vina_notebook(
 
     _eo = enumerate_opts or {}
     _enum_enabled = bool(_eo.get("enabled", prep_cfg.get("enumerate_enabled", False)))
+    _variant_specs = receptor_variants or [{
+        "name": receptor_variant,
+        "filename": receptor_filename,
+        "prepare_on_kaggle": receptor_variant != "default",
+    }]
+    _variant_specs = [
+        {
+            "name": str(v.get("name", "default")),
+            "filename": str(v.get("filename", "receptor.pdbqt")),
+            "prepare_on_kaggle": bool(v.get("prepare_on_kaggle", False)),
+        }
+        for v in _variant_specs
+    ]
 
     template_path = Path(__file__).parent / "templates" / template_name
     j2_env = jinja2.Environment(
@@ -607,9 +650,59 @@ def render_vina_notebook(
         enumerate_ring=bool(_eo.get("ring", prep_cfg.get("enumerate_ring", False))),
         max_variants_per_ligand=int(_eo.get("max_variants", prep_cfg.get("max_variants_per_ligand", 4))),
         poses_returned=int(results_cfg.get("poses_returned", 25)),
+        receptor_filename=receptor_filename,
+        receptor_variant=receptor_variant,
+        receptor_variant_specs_py=repr(_variant_specs),
+        receptor_prepare_on_kaggle=any(v.get("prepare_on_kaggle") for v in _variant_specs),
+        receptor_pdb_filename=receptor_pdb_filename,
         gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
     )
 
+
+
+def _receptor_variant_specs(
+    receptor_pdbqt: Path,
+    receptor_pdbqts: list[Path] | None = None,
+    receptor_variant_modes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return receptor variant specs with stable dataset filenames."""
+    if receptor_variant_modes:
+        specs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for mode in receptor_variant_modes:
+            if mode in seen:
+                continue
+            seen.add(mode)
+            specs.append({
+                "name": mode,
+                "filename": "receptor.pdbqt",
+                "path": receptor_pdbqt,
+                "prepare_on_kaggle": mode != "default",
+            })
+        return specs
+
+    import hashlib
+
+    paths = [Path(p) for p in (receptor_pdbqts or [receptor_pdbqt])]
+    if not paths:
+        paths = [receptor_pdbqt]
+    specs = []
+    seen_hashes: set[str] = set()
+    for path in paths:
+        h = hashlib.sha256(path.read_bytes()).hexdigest()
+        if h in seen_hashes:
+            continue
+        seen_hashes.add(h)
+        idx = len(specs)
+        filename = "receptor.pdbqt" if idx == 0 else f"receptor_variant_{idx:03d}.pdbqt"
+        name = "default" if idx == 0 else path.stem.replace("receptor_", "") or f"variant_{idx:03d}"
+        specs.append({
+            "name": name,
+            "filename": filename,
+            "path": path,
+            "prepare_on_kaggle": False,
+        })
+    return specs
 
 def run_multi_account_screening(
     run_id: str,
@@ -617,6 +710,9 @@ def run_multi_account_screening(
     shard_paths: list[Path],
     account_assignments: list[dict],
     work_dir: Path,
+    receptor_pdbqts: list[Path] | None = None,
+    receptor_variant_modes: list[str] | None = None,
+    receptor_pdb: Path | None = None,
     box_center: list[float] | None = None,
     box_size: list[float] | None = None,
     search_mode: str = "balance",
@@ -644,23 +740,40 @@ def run_multi_account_screening(
         return {"status": "failed", "error": "No active accounts — all accounts were set to 0 (excluded)"}
 
     notebook_counts = [a["shard_count"] or 1 for a in account_assignments]
-    total_notebooks = sum(notebook_counts)
+    base_notebooks = sum(notebook_counts)
+    receptor_variants = _receptor_variant_specs(
+        receptor_pdbqt,
+        receptor_pdbqts,
+        receptor_variant_modes,
+    )
+    if any(v.get("prepare_on_kaggle") for v in receptor_variants):
+        if receptor_pdb is None or not Path(receptor_pdb).exists():
+            return {
+                "status": "failed",
+                "output_dir": None,
+                "error_type": "receptor_pdb_required_for_kaggle_variant_prep",
+            }
+    total_notebooks = base_notebooks
+    total_variant_jobs = base_notebooks * len(receptor_variants)
 
     console.print(
-        f"  [dim]{n_shards} shard(s) → {total_notebooks} notebook(s) "
-        f"across {len(account_assignments)} active account(s)[/dim]"
+        f"  [dim]{n_shards} shard(s) -> {total_notebooks} notebook(s) across "
+        f"{len(account_assignments)} active account(s); "
+        f"{len(receptor_variants)} receptor variant(s) packed per notebook "
+        f"({total_variant_jobs} docking job(s))[/dim]"
     )
 
-    # Distribute shards in contiguous blocks across all notebooks
-    base  = n_shards // total_notebooks
-    extra = n_shards % total_notebooks
+    # Distribute shards in contiguous blocks across the user-requested notebook
+    # groups. Each notebook loops over all receptor variants internally so the
+    # user-selected Kaggle kernel count remains literal.
+    base  = n_shards // base_notebooks
+    extra = n_shards % base_notebooks
     nb_shard_groups: list[list[Path]] = []
     cursor = 0
-    for i in range(total_notebooks):
+    for i in range(base_notebooks):
         count = base + (1 if i < extra else 0)
         nb_shard_groups.append(shard_paths[cursor:cursor + count])
         cursor += count
-
     # Build per-account spec: collect the shards needed and notebook metadata
     account_specs: list[dict] = []
     nb_offset = 0
@@ -671,8 +784,14 @@ def run_multi_account_screening(
         seen: set = set()
         for nb_j in range(nb_count):
             nb_idx = nb_offset + nb_j
-            group  = nb_shard_groups[nb_idx]
-            notebooks.append({"notebook_index": nb_idx, "shard_filenames": [p.name for p in group]})
+            group = nb_shard_groups[nb_idx]
+            notebooks.append({
+                "notebook_index": nb_idx,
+                "shard_filenames": [p.name for p in group],
+                "receptor_filename": receptor_variants[0]["filename"],
+                "receptor_variant": receptor_variants[0]["name"],
+                "receptor_variants": receptor_variants,
+            })
             for p in group:
                 if p not in seen:
                     acct_shard_paths.append(p)
@@ -711,6 +830,12 @@ def run_multi_account_screening(
                 shard_paths=spec["shard_paths"],
                 username=username,
                 work_dir=sub_work,
+                receptor_files={
+                    v["filename"]: v["path"]
+                    for v in receptor_variants
+                    if not v.get("prepare_on_kaggle")
+                },
+                receptor_pdb=receptor_pdb,
             )
             _wait_for_dataset(dataset_ref)
         spec["dataset_ref"] = dataset_ref
@@ -740,6 +865,8 @@ def run_multi_account_screening(
         for nb_spec in spec["notebooks"]:
             nb_idx      = nb_spec["notebook_index"]
             filenames   = nb_spec["shard_filenames"]
+            receptor_filename = nb_spec.get("receptor_filename", "receptor.pdbqt")
+            receptor_variant = nb_spec.get("receptor_variant", "default")
             nb_run_id   = f"{spec['sub_run_id']}-nb{nb_idx}"
             nb_dir      = sub_work / f"nb_{nb_idx}"
             nb_dir.mkdir(parents=True, exist_ok=True)
@@ -761,6 +888,10 @@ def run_multi_account_screening(
                 results_cfg=_results_cfg,
                 engine=engine,
                 scoring=scoring,
+                receptor_filename=receptor_filename,
+                receptor_variant=receptor_variant,
+                receptor_variants=nb_spec.get("receptor_variants"),
+                receptor_pdb_filename="receptor_fixed.pdb",
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)
@@ -789,6 +920,7 @@ def run_multi_account_screening(
                 "kernel_ref": kernel_ref,
                 "nb_work":    nb_dir,
                 "nb_run_id":  nb_run_id,
+                "receptor_variant": receptor_variant,
             })
 
     # Poll all kernels concurrently
@@ -834,6 +966,7 @@ def run_multi_account_screening(
                 kj_path=sub["kj_path"],
                 index_csv=_index_csv,
                 filtered_csv=_filtered_csv,
+                receptor_variant=sub.get("receptor_variant"),
             )
         except Exception as exc:
             console.print(f"  [yellow]Download failed for {sub['kernel_ref']}: {exc}[/yellow]")

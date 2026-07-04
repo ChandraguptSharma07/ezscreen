@@ -97,6 +97,8 @@ def upload_run_dataset(
     shard_paths: list[Path],
     username: str,
     work_dir: Path,
+    receptor_files: dict[str, Path] | None = None,
+    receptor_pdb: Path | None = None,
 ) -> str:
     """
     Upload receptor (skipped if SHA-256 matches) and ligand shards.
@@ -114,7 +116,14 @@ def upload_run_dataset(
     cache_key = str(receptor_pdbqt.resolve())
     manifest[cache_key] = receptor_hash
     shutil.copy2(receptor_pdbqt, dataset_dir / "receptor.pdbqt")
-
+    for name, path in (receptor_files or {}).items():
+        if name == "receptor.pdbqt":
+            continue
+        manifest[str(path.resolve())] = sha256(path)
+        shutil.copy2(path, dataset_dir / name)
+    if receptor_pdb is not None:
+        manifest[str(receptor_pdb.resolve())] = sha256(receptor_pdb)
+        shutil.copy2(receptor_pdb, dataset_dir / "receptor_fixed.pdb")
     # Shards — always fresh
     for sp in shard_paths:
         shutil.copy2(sp, dataset_dir / sp.name)

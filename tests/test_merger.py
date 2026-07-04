@@ -137,3 +137,30 @@ def test_merge_without_cnn_scores_has_no_cnn_cols(tmp_path):
 
     rows = list(csv.DictReader((out / "scores.csv").open()))
     assert "CNNscore" not in rows[0]
+
+
+
+def test_merge_receptor_variants_keeps_best_per_ligand_identity(tmp_path):
+    sd0 = tmp_path / "rv0"
+    sd1 = tmp_path / "rv1"
+    sd0.mkdir()
+    sd1.mkdir()
+    _write(sd0 / "scores.csv", ["ligand", "score", "name", "smiles", "receptor_variant"], [
+        {"ligand": "nb0_lig_00000", "score": "-7.0", "name": "A", "smiles": "CCO", "receptor_variant": "default"},
+        {"ligand": "nb0_lig_00001", "score": "-8.0", "name": "B", "smiles": "CCN", "receptor_variant": "default"},
+    ])
+    _write(sd1 / "scores.csv", ["ligand", "score", "name", "smiles", "receptor_variant"], [
+        {"ligand": "nb1_lig_00000", "score": "-9.0", "name": "A", "smiles": "CCO", "receptor_variant": "propka_ph"},
+        {"ligand": "nb1_lig_00001", "score": "-6.5", "name": "B", "smiles": "CCN", "receptor_variant": "propka_ph"},
+    ])
+
+    out = tmp_path / "output"
+    merge_shard_results([sd0, sd1], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    by_smiles = {r["smiles"]: r for r in rows}
+    assert len(rows) == 2
+    assert by_smiles["CCO"]["score"] == "-9.0"
+    assert by_smiles["CCO"]["receptor_variant"] == "propka_ph"
+    assert by_smiles["CCN"]["score"] == "-8.0"
+    assert by_smiles["CCN"]["receptor_variant"] == "default"

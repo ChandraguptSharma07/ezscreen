@@ -1160,8 +1160,17 @@ class RunWizardScreen(Screen):
                 output_dir=work_dir / "receptor",
                 ph=cfg["run"].get("default_ph", 7.4),
                 keep_hetero=ctx.get("keep_hetero"),
+                receptor_isomers=ctx.get("receptor_isomers", "off"),
             )
             receptor_pdbqt = rec_result["pdbqt_path"]
+            receptor_pdbqt_paths = rec_result.get("variant_pdbqt_paths") or [receptor_pdbqt]
+            receptor_variant_modes = rec_result.get("receptor_variant_modes") or ["default"]
+            receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get("receptor_pdb_path")
+            if len(receptor_variant_modes) > 1:
+                log(
+                    f"[#6e7681]{len(receptor_variant_modes)} receptor variant mode(s) queued; "
+                    "PROPKA/PDB2PQR prep will run on Kaggle[/#6e7681]"
+                )
 
             # Binding box
             log("[#79c0ff]Computing binding box...[/#79c0ff]")
@@ -1319,18 +1328,36 @@ class RunWizardScreen(Screen):
                 _active_assignments = [
                     a for a in (account_assignments or []) if a["shard_count"] != 0
                 ]
-                if _active_assignments and len(_active_assignments) > 1:
-                    # Multi-account Kaggle path
-                    log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
+                if len(receptor_variant_modes) > 1 and not _active_assignments:
+                    _creds = auth.load_credentials()
+                    _active_assignments = [
+                        {
+                            "account": {
+                                "name": kaggle_username,
+                                "username": kaggle_username,
+                                "kaggle_json_path": _creds.get("kaggle_json_path", ""),
+                            },
+                            "shard_count": 1,
+                        }
+                    ]
+                if _active_assignments and (len(_active_assignments) > 1 or len(receptor_variant_modes) > 1):
+                    # Multi-account/variant Kaggle path
+                    if len(_active_assignments) > 1:
+                        log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
+                    else:
+                        log("[#79c0ff]Submitting receptor-variant Kaggle run...[/#79c0ff]")
                     for a in _active_assignments:
                         n = a["shard_count"] or 1
                         log(
-                            f"[#6e7681]  {a['account']['name']}: {n} notebook(s)[/#6e7681]"
+                            f"[#6e7681]  {a['account']['name']}: {n} notebook group(s)[/#6e7681]"
                         )
                     account_assignments = _active_assignments
                     result = kaggle_runner.run_multi_account_screening(
                         run_id=run_id,
                         receptor_pdbqt=receptor_pdbqt,
+                        receptor_pdbqts=receptor_pdbqt_paths,
+                        receptor_variant_modes=receptor_variant_modes,
+                        receptor_pdb=Path(receptor_pdb) if receptor_pdb else None,
                         shard_paths=shard_paths,
                         account_assignments=account_assignments,
                         work_dir=work_dir,

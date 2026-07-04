@@ -34,48 +34,49 @@ def write_report(
     )
 
     report: dict[str, Any] = {
-        "run_id":            run_id,
-        "timestamp":         datetime.now(timezone.utc).isoformat(),
-        "ezscreen_version":  __version__,
+        "run_id": run_id,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "ezscreen_version": __version__,
         "receptor": {
-            "source":               receptor_data.get("source", "unknown"),
-            "pdb_id":               receptor_data.get("pdb_id"),
-            "chain":                receptor_data.get("chains_selected", []),
-            "chain_selection":      receptor_data.get("chain_selection_method", "user"),
-            "residues":             receptor_data.get("residue_count", 0),
-            "missing_residues":     receptor_data.get("missing_residues", 0),
-            "alternates_resolved":  receptor_data.get("alternates_resolved", 0),
-            "waters_removed":       receptor_data.get("waters_removed", 0),
-            "is_alphafold":         receptor_data.get("is_alphafold", False),
-            "alphafold_version":    receptor_data.get("af_version"),
-            "tools":                receptor_data.get("tools", {}),
-            "ramachandran":        receptor_data.get("ramachandran", {}),
-            "sanity_checks":       receptor_data.get("sanity_checks", {}),
+            "source": receptor_data.get("source", "unknown"),
+            "pdb_id": receptor_data.get("pdb_id"),
+            "chain": receptor_data.get("chains_selected", []),
+            "chain_selection": receptor_data.get("chain_selection_method", "user"),
+            "residues": receptor_data.get("residue_count", 0),
+            "missing_residues": receptor_data.get("missing_residues", 0),
+            "alternates_resolved": receptor_data.get("alternates_resolved", 0),
+            "waters_removed": receptor_data.get("waters_removed", 0),
+            "is_alphafold": receptor_data.get("is_alphafold", False),
+            "alphafold_version": receptor_data.get("af_version"),
+            "tools": receptor_data.get("tools", {}),
+            "ramachandran": receptor_data.get("ramachandran", {}),
+            "sanity_checks": receptor_data.get("sanity_checks", {}),
+            "receptor_protonation": receptor_data.get("receptor_protonation", {}),
         },
         "binding_site": {
-            "method":               binding_site_data.get("method", "unknown"),
-            "reference_ligand":     binding_site_data.get("reference_ligand"),
-            "reference_chain":      binding_site_data.get("reference_chain"),
-            "box_center":           binding_site_data.get("center"),
-            "box_size":             binding_site_data.get("size"),
+            "method": binding_site_data.get("method", "unknown"),
+            "reference_ligand": binding_site_data.get("reference_ligand"),
+            "reference_chain": binding_site_data.get("reference_chain"),
+            "box_center": binding_site_data.get("center"),
+            "box_size": binding_site_data.get("size"),
             "box_volume_angstrom3": binding_site_data.get("volume_angstrom3"),
         },
         "ligands": {
-            "input_source":           ligand_data.get("input_source"),
-            "input_files":            ligand_data.get("input_files", 0),
-            "total_input":            ligand_data.get("total_input", 0),
-            "admet_removed":          ligand_data.get("admet_removed", 0),
-            "admet_breakdown":        ligand_data.get("admet_breakdown", {}),
-            "prep_passed":            ligand_data.get("prep_passed", 0),
-            "prep_failed":            ligand_data.get("prep_failed", 0),
-            "prep_failures":          ligand_data.get("prep_failures", {}),
-            "failed_prep_file":       ligand_data.get("failed_prep_file"),
-            "enumeration_enabled":    ligand_data.get("enumeration_enabled", False),
-            "variants_generated":     ligand_data.get("variants_generated", 0),
-            "conformer_qc_flagged":   ligand_data.get("conformer_qc_flagged", 0),
-            "conformer_qc_list":      ligand_data.get("conformer_qc_list", []),
-            "protonation_ph":         ligand_data.get("protonation_ph", 7.4),
-            "tools":                  ligand_data.get("tools", {}),
+            "input_source": ligand_data.get("input_source"),
+            "input_files": ligand_data.get("input_files", 0),
+            "total_input": ligand_data.get("total_input", 0),
+            "admet_removed": ligand_data.get("admet_removed", 0),
+            "admet_breakdown": ligand_data.get("admet_breakdown", {}),
+            "prep_passed": ligand_data.get("prep_passed", 0),
+            "prep_failed": ligand_data.get("prep_failed", 0),
+            "prep_failures": ligand_data.get("prep_failures", {}),
+            "failed_prep_file": ligand_data.get("failed_prep_file"),
+            "enumeration_enabled": ligand_data.get("enumeration_enabled", False),
+            "variants_generated": ligand_data.get("variants_generated", 0),
+            "conformer_qc_flagged": ligand_data.get("conformer_qc_flagged", 0),
+            "conformer_qc_list": ligand_data.get("conformer_qc_list", []),
+            "protonation_ph": ligand_data.get("protonation_ph", 7.4),
+            "tools": ligand_data.get("tools", {}),
         },
         "warnings": all_warnings,
     }
@@ -92,7 +93,7 @@ def write_report(
 def print_summary(paths: dict[str, Path], report: dict[str, Any]) -> None:
     """Print a condensed prep report panel to the terminal."""
     rec = report.get("receptor", {})
-    bs  = report.get("binding_site", {})
+    bs = report.get("binding_site", {})
     lig = report.get("ligands", {})
 
     text = Text()
@@ -109,7 +110,9 @@ def print_summary(paths: dict[str, Path], report: dict[str, Any]) -> None:
         f"volume {bs.get('box_volume_angstrom3')} Å³\n"
     )
     text.append("Ligands      ", style="bold dim")
-    text.append(f"{lig.get('total_input', 0):,} input ? {lig.get('prep_passed', 0):,} prepared")
+    text.append(
+        f"{lig.get('total_input', 0):,} input ? {lig.get('prep_passed', 0):,} prepared"
+    )
     if lig.get("admet_removed"):
         text.append(f"  ({lig['admet_removed']:,} ADMET removed)", style="dim")
     if lig.get("prep_failed"):
@@ -117,7 +120,7 @@ def print_summary(paths: dict[str, Path], report: dict[str, Any]) -> None:
     text.append("\n")
 
     for w in report.get("warnings", []):
-        sev   = w.get("severity", "medium")
+        sev = w.get("severity", "medium")
         style = "bold red" if sev == "high" else "yellow"
         text.append(f"?  {w.get('message', '')}\n", style=style)
 
@@ -127,7 +130,7 @@ def print_summary(paths: dict[str, Path], report: dict[str, Any]) -> None:
 
 def _render_txt(r: dict[str, Any]) -> str:
     rec = r["receptor"]
-    bs  = r["binding_site"]
+    bs = r["binding_site"]
     lig = r["ligands"]
 
     lines = [
@@ -152,6 +155,8 @@ def _render_txt(r: dict[str, Any]) -> str:
         f"Missing backbone  : {len(rec.get('sanity_checks', {}).get('missing_backbone', []))}",
         f"Steric clashes    : {rec.get('sanity_checks', {}).get('steric_clash_count', 0)}",
         f"Odd valences      : {rec.get('sanity_checks', {}).get('odd_valence_count', 0)}",
+        f"Protonation       : {'PDB2PQR/PROPKA' if rec.get('receptor_protonation', {}).get('applied') else 'default guesses'} "
+        f"({rec.get('receptor_protonation', {}).get('assignment_count', 0)} assignments)",
         "",
         "BINDING SITE",
         "------------",
@@ -180,7 +185,9 @@ def _render_txt(r: dict[str, Any]) -> str:
     warnings = r.get("warnings", [])
     if warnings:
         for w in warnings:
-            lines.append(f"[{w.get('severity','med').upper()}] {w.get('category','')}: {w.get('message','')}")
+            lines.append(
+                f"[{w.get('severity', 'med').upper()}] {w.get('category', '')}: {w.get('message', '')}"
+            )
             if w.get("action"):
                 lines.append(f"         Action: {w['action']}")
     else:
@@ -190,7 +197,9 @@ def _render_txt(r: dict[str, Any]) -> str:
     if qc_list:
         lines += ["", "CONFORMER QC — FLAGGED", "----------------------"]
         for q in qc_list[:25]:
-            lines.append(f"{q.get('ligand','')}  {q.get('name','')}  ({q.get('reason','')})")
+            lines.append(
+                f"{q.get('ligand', '')}  {q.get('name', '')}  ({q.get('reason', '')})"
+            )
         if len(qc_list) > 25:
             lines.append(f"... and {len(qc_list) - 25:,} more")
 
