@@ -158,8 +158,31 @@ DataTable > .datatable--header-cursor {
 }
 
 /* ── Results Viewer ──────────────────────────────────────────────────── */
-#results-main {
+
+#md-main {
     height: 1fr;
+}
+
+#md-browser {
+    width: 1fr;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#md-form {
+    width: 46;
+    padding: 1 1;
+    overflow-y: auto;
+    scrollbar-size: 1 1;
+}
+
+#md-progress {
+    height: 1;
+}
+
+#md-log {
+    height: 1fr;
+    min-height: 8;
 }
 
 #hits-panel {
@@ -501,3 +524,7 @@ HelpScreen {
     height: 1fr;
     color: $muted;
 }
+
+
+
+
