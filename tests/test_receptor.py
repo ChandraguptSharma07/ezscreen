@@ -229,6 +229,41 @@ def test_apply_pqr_residue_names_preserves_source_pdb_geometry(tmp_path):
     assert lines[1][76:78].strip() == "C"
 
 
+def test_apply_pqr_residue_names_infers_histidine_tautomer_from_hydrogens(tmp_path):
+    src = tmp_path / "fixed.pdb"
+    src.write_text(
+        "\n".join(
+            [
+                _pdb_atom(1, "N", "HIS", "A", 69, (0.0, 0.0, 0.0), "N"),
+                _pdb_atom(2, "CA", "HIS", "A", 69, (1.0, 0.0, 0.0), "C"),
+                _pdb_atom(3, "ND1", "HIS", "A", 69, (2.0, 0.0, 0.0), "N"),
+                "END",
+            ]
+        )
+        + "\n"
+    )
+    pqr = tmp_path / "propka.pqr"
+    pqr.write_text(
+        "\n".join(
+            [
+                "ATOM      1  N   HIS A  69      0.000   0.000   0.000 -0.4000 1.5000",
+                "ATOM      2  CA  HIS A  69      1.000   0.000   0.000  0.0000 2.0000",
+                "ATOM      3  ND1 HIS A  69      2.000   0.000   0.000 -0.4000 1.5000",
+                "ATOM      4  HD1 HIS A  69      2.200   0.000   0.000  0.4000 1.0000",
+                "END",
+            ]
+        )
+        + "\n"
+    )
+    dst = tmp_path / "mapped.pdb"
+
+    result = _apply_pqr_residue_names_to_pdb(src, pqr, dst)
+
+    assert result["assignment_count"] == 1
+    assert result["assignments"][0]["state"] == "HID"
+    assert " HID A  69" in dst.read_text()
+
+
 def test_receptor_sanity_checks_flags_missing_backbone_and_clash(tmp_path):
     pdb = tmp_path / "bad_receptor.pdb"
     pdb.write_text(
@@ -339,6 +374,52 @@ def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
     assert result["receptor_variant_modes"] == ["default", "propka_ph"]
     assert result["report"]["receptor_variant_modes"] == ["default", "propka_ph"]
     assert result["report"]["receptor_protonation"]["error"] == "deferred_to_kaggle"
+    assert any(
+        w["category"] == "receptor_protonation_deferred"
+        for w in result["report"]["warnings"]
+    )
+
+
+def test_prep_receptor_defers_single_state_when_local_propka_fails(tmp_path, monkeypatch):
+    from ezscreen.prep import receptor as rec
+
+    src = tmp_path / "input.pdb"
+    src.write_text(_pdb_atom(1, "CA", "ALA", "A", 1, (0.0, 0.0, 0.0), "C") + "\nEND\n")
+
+    def fake_pdbfixer(_src, dst, keep_waters, remove_heterogens=True):
+        dst.write_text(src.read_text())
+        return {"missing_residues": 0, "residue_count": 1, "pdbfixer_version": "test"}
+
+    def fake_protonation(_src, _dst, _ph):
+        return {
+            "applied": False,
+            "tool": "pdb2pqr",
+            "assignment_count": 0,
+            "assignments": [],
+            "error": "propka crashed under python 3.14",
+        }
+
+    def fake_meeko(src_pdb, output_dir):
+        out = output_dir / f"{src_pdb.stem}.pdbqt"
+        out.write_text(f"RECEPTOR {src_pdb.stem}\n")
+        return out, "test-meeko"
+
+    monkeypatch.setattr(rec, "_run_pdbfixer", fake_pdbfixer)
+    monkeypatch.setattr(rec, "_run_pdb2pqr_protonation", fake_protonation)
+    monkeypatch.setattr(rec, "_run_meeko_receptor", fake_meeko)
+
+    result = rec.prep_receptor(
+        pdb_path=src,
+        chains=["A"],
+        output_dir=tmp_path / "out",
+        receptor_isomers="single",
+    )
+
+    assert result["receptor_variant_modes"] == ["propka_ph"]
+    assert result["report"]["receptor_variant_modes"] == ["propka_ph"]
+    assert result["report"]["receptor_protonation"]["error"].startswith(
+        "local_failed_deferred_to_kaggle"
+    )
     assert any(
         w["category"] == "receptor_protonation_deferred"
         for w in result["report"]["warnings"]

@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.15.0 — 2026-07-04
+
+> Theme: interactive prep. Make receptor and ligand preparation choices visible, configurable, and auditable before screening.
+
+### Added
+
+- **Interactive receptor cleanup** — the run wizard now inventories receptor heteroatoms, groups waters/metals/cofactors/additives/ligands, and lets users keep or remove each group before docking. Kept cofactors and metals survive receptor preparation.
+- **Molecule sketcher** — a Ketcher-backed drawing page can send drawn SMILES directly into the run wizard as a multi-ligand `.smi` file.
+- **Receptor prep QC** — prepared receptors now report Ramachandran angles, missing backbone atoms, close heavy-atom contacts, and unusual inferred valences in prep reports.
+- **Multi-format ligand input** — Mol2, Mol, and PDB ligand files are accepted through the OpenBabel conversion path.
+- **Receptor protonation / isomer docking** — optional PDB2PQR/PROPKA receptor-state handling supports corrected single-state docking (`propka_ph`) and multi-variant docking. Kaggle notebooks prepare receptor variants in-kernel, preserve `receptor_variant`, and the merger keeps the best score per ligand across receptor variants.
+- **Optional prep extra** — `ezscreen[prep]` installs `pdb2pqr` and `propka` for local receptor protonation support.
+
+### Fixed
+
+- Single-state receptor protonation now defers to Kaggle when local PDB2PQR/PROPKA fails, instead of silently falling back to the default receptor.
+- PDB2PQR histidine tautomers are now applied before Meeko conversion by inferring `HID` / `HIE` / `HIP` from PQR hydrogens, so `propka_ph` receptor PDBQT files reflect the corrected protonation state.
+- Kaggle ligand prep now handles salt and multi-fragment SMILES by docking the largest heavy-atom fragment, preserving the submitted SMILES in `input_smiles`, and recording prep failures in `failed_prep.csv`.
+- `unscored_reasons.csv` now reports only fully unscored ligands for receptor-variant runs; partial failures from one receptor variant are omitted when another variant scores successfully.
+
 ## v1.14.0 — 2026-07-01
 
 > Theme: pose & box confidence. Judge how trustworthy a run's box and hits are — both run locally on results you already have.

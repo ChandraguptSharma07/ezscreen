@@ -633,7 +633,7 @@ def _pqr_to_pdb(pqr_path: Path, pdb_path: Path) -> dict[str, Any]:
 
 
 def _pqr_residue_assignments(pqr_path: Path) -> dict[str, Any]:
-    assignments: dict[tuple[str, int, str], str] = {}
+    grouped: dict[tuple[str, int, str], dict[str, Any]] = {}
     fallback_by_resseq: dict[int, str] = {}
     for line in pqr_path.read_text(errors="ignore").splitlines():
         if not line.startswith(("ATOM", "HETATM")):
@@ -650,8 +650,27 @@ def _pqr_residue_assignments(pqr_path: Path) -> dict[str, Any]:
             continue
         chain = pdb_line[21:22].strip()
         icode = pdb_line[26:27].strip()
-        assignments.setdefault((chain, resseq, icode), resname)
-        fallback_by_resseq.setdefault(resseq, resname)
+        entry = grouped.setdefault(
+            (chain, resseq, icode), {"resname": resname, "atom_names": set()}
+        )
+        entry["atom_names"].add(pdb_line[12:16].strip().upper())
+
+    assignments: dict[tuple[str, int, str], str] = {}
+    for key, entry in grouped.items():
+        resname = entry["resname"]
+        atom_names = entry["atom_names"]
+        state = resname
+        if resname == "HIS":
+            has_hd1 = "HD1" in atom_names
+            has_he2 = "HE2" in atom_names
+            if has_hd1 and has_he2:
+                state = "HIP"
+            elif has_hd1:
+                state = "HID"
+            elif has_he2:
+                state = "HIE"
+        assignments[key] = state
+        fallback_by_resseq.setdefault(key[1], state)
     return {"assignments": assignments, "fallback_by_resseq": fallback_by_resseq}
 
 
@@ -1243,13 +1262,19 @@ def prep_receptor(
                 }
             )
         else:
+            receptor_variant_modes = ["propka_ph"]
+            protonation = {
+                **protonation,
+                "tool": protonation.get("tool") or "pdb2pqr_on_kaggle",
+                "error": f"local_failed_deferred_to_kaggle: {protonation.get('error')}",
+            }
             warnings.append(
                 {
                     "severity": "medium",
-                    "category": "receptor_protonation_unavailable",
+                    "category": "receptor_protonation_deferred",
                     "affected_count": 0,
-                    "message": f"PDB2PQR/PROPKA unavailable; receptor protonation fell back to pdbfixer/Meeko guesses ({protonation['error']})",
-                    "action": "install pdb2pqr/propka for pKa-based receptor protonation",
+                    "message": "Local PDB2PQR/PROPKA failed; single-state receptor protonation will run inside Kaggle notebooks",
+                    "action": "inspect Kaggle notebook output if receptor prep fails",
                 }
             )
     elif receptor_isomers == "variants":

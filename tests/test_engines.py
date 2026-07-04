@@ -98,6 +98,10 @@ def test_kaggle_prep_notebook_loads_openbabel_ligand_formats():
     assert "def _convert_with_obabel" in joined
     assert "if _suffix in ('.mol2', '.mol', '.pdb')" in joined
     assert "subprocess.run(['obabel', str(_path), '-O', str(_out)]" in joined
+    assert "def _largest_fragment_mol" in joined
+    assert "failed_prep.csv" in joined
+    assert "'input_smiles'" in joined
+    assert "'prep_note'" in joined
 
 
 

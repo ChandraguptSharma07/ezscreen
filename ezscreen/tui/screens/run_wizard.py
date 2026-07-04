@@ -1166,7 +1166,8 @@ class RunWizardScreen(Screen):
             receptor_pdbqt_paths = rec_result.get("variant_pdbqt_paths") or [receptor_pdbqt]
             receptor_variant_modes = rec_result.get("receptor_variant_modes") or ["default"]
             receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get("receptor_pdb_path")
-            if len(receptor_variant_modes) > 1:
+            _has_kaggle_receptor_prep = any(m != "default" for m in receptor_variant_modes)
+            if _has_kaggle_receptor_prep:
                 log(
                     f"[#6e7681]{len(receptor_variant_modes)} receptor variant mode(s) queued; "
                     "PROPKA/PDB2PQR prep will run on Kaggle[/#6e7681]"
@@ -1328,7 +1329,8 @@ class RunWizardScreen(Screen):
                 _active_assignments = [
                     a for a in (account_assignments or []) if a["shard_count"] != 0
                 ]
-                if len(receptor_variant_modes) > 1 and not _active_assignments:
+                _has_kaggle_receptor_prep = any(m != "default" for m in receptor_variant_modes)
+                if _has_kaggle_receptor_prep and not _active_assignments:
                     _creds = auth.load_credentials()
                     _active_assignments = [
                         {
@@ -1340,7 +1342,7 @@ class RunWizardScreen(Screen):
                             "shard_count": 1,
                         }
                     ]
-                if _active_assignments and (len(_active_assignments) > 1 or len(receptor_variant_modes) > 1):
+                if _active_assignments and (len(_active_assignments) > 1 or _has_kaggle_receptor_prep):
                     # Multi-account/variant Kaggle path
                     if len(_active_assignments) > 1:
                         log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")

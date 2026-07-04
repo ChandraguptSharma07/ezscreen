@@ -139,6 +139,32 @@ def test_merge_without_cnn_scores_has_no_cnn_cols(tmp_path):
     assert "CNNscore" not in rows[0]
 
 
+def test_merge_reports_kaggle_failed_prep_csv(tmp_path):
+    sd = tmp_path / "shard"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score"], [
+        {"ligand": "nb0_lig_00000", "score": "-8.1"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles", "conformer_qc"], [
+        {"ligand": "nb0_lig_00000", "name": "A", "smiles": "CCO", "conformer_qc": ""},
+    ])
+    _write(sd / "failed_prep.csv", ["name", "smiles", "reason"], [
+        {"name": "salt", "smiles": "CCO.Cl", "reason": "meeko_failed"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out)
+
+    reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
+    assert any(
+        r["name"] == "salt"
+        and r["smiles"] == "CCO.Cl"
+        and r["reason"] == "meeko_failed"
+        for r in reasons
+    )
+    assert result["unscored_reason_counts"]["meeko_failed"] == 1
+
+
 
 def test_merge_receptor_variants_keeps_best_per_ligand_identity(tmp_path):
     sd0 = tmp_path / "rv0"
@@ -164,3 +190,29 @@ def test_merge_receptor_variants_keeps_best_per_ligand_identity(tmp_path):
     assert by_smiles["CCO"]["receptor_variant"] == "propka_ph"
     assert by_smiles["CCN"]["score"] == "-8.0"
     assert by_smiles["CCN"]["receptor_variant"] == "default"
+
+
+def test_merge_skips_receptor_variant_partial_failures_in_unscored_reasons(tmp_path):
+    sd = tmp_path / "rv"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score", "name", "smiles", "receptor_variant"], [
+        {"ligand": "nb0_lig_00000", "score": "-6.0", "name": "A", "smiles": "CCO", "receptor_variant": "propka_ph"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles", "conformer_qc"], [
+        {"ligand": "nb0_lig_00000", "name": "A", "smiles": "CCO", "conformer_qc": ""},
+        {"ligand": "nb0_lig_00001", "name": "B", "smiles": "CCN", "conformer_qc": ""},
+    ])
+    _write(sd / "failed_docking.csv", ["ligand", "raw_score", "reason", "receptor_variant"], [
+        {"ligand": "nb0_lig_00000", "raw_score": "25.8", "reason": "score_ceiling", "receptor_variant": "default"},
+        {"ligand": "nb0_lig_00001", "raw_score": "20.0", "reason": "score_ceiling", "receptor_variant": "default"},
+        {"ligand": "nb0_lig_00001", "raw_score": "2.0", "reason": "score_ceiling", "receptor_variant": "propka_ph"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out)
+
+    reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
+    assert len(reasons) == 1
+    assert reasons[0]["ligand"] == "nb0_lig_00001"
+    assert reasons[0]["raw_score"] == "default:20.0; propka_ph:2.0"
+    assert result["unscored_reason_counts"]["score_ceiling"] == 1

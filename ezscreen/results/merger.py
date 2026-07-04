@@ -209,29 +209,66 @@ def _load_failed_docking(shard_dirs: list[Path]) -> list[dict]:
     return rows
 
 
+def _load_failed_prep(shard_dirs: list[Path]) -> list[dict]:
+    """Return Kaggle-side ligand prep failures from failed_prep.csv files."""
+    rows: list[dict] = []
+    for d in shard_dirs:
+        fp = d / "failed_prep.csv"
+        if not fp.exists():
+            continue
+        with fp.open() as f:
+            rows.extend(csv.DictReader(f))
+    return rows
+
+
 def _write_unscored_reasons(
     output_dir: Path,
     index: dict[str, dict],
-    scored_ids: set[str],
+    successful_ids: set[str],
     score_filtered: list[dict],
     gpu_filtered: list[dict],
+    failed_prep: list[dict],
     failed_docking: list[dict],
     id_col: str | None,
     score_col: str | None,
 ) -> Path:
     reasons: list[dict] = []
+    keyed_reasons: dict[tuple[str, str], dict] = {}
+
+    def _append_ligand_reason(row: dict, reason: str, raw_score: str = "") -> None:
+        lig_id = row.get("ligand", "")
+        key = (lig_id, reason)
+        if lig_id and key in keyed_reasons:
+            if raw_score:
+                existing = keyed_reasons[key].get("raw_score", "")
+                scores = [s for s in existing.split("; ") if s]
+                if raw_score not in scores:
+                    scores.append(raw_score)
+                keyed_reasons[key]["raw_score"] = "; ".join(scores)
+            return
+        reasons.append(row)
+        if lig_id:
+            keyed_reasons[key] = row
 
     # Compounds that reached merger but were cut by floor/ceiling.
+    score_filtered_ids: set[str] = set()
     for row in score_filtered:
         lig_id = row.get(id_col, "") if id_col else ""
+        score_filtered_ids.add(lig_id)
+        if lig_id in successful_ids:
+            continue
         info = index.get(lig_id, {})
-        reasons.append({
+        reason = row.get("_reason", "score_filtered")
+        raw_score = row.get(score_col, "") if score_col else ""
+        if row.get("receptor_variant") and raw_score:
+            raw_score = f"{row['receptor_variant']}:{raw_score}"
+        _append_ligand_reason({
             "ligand":    lig_id,
             "name":      info.get("name", row.get("name", "")),
             "smiles":    info.get("smiles", row.get("smiles", "")),
-            "reason":    row.get("_reason", "score_filtered"),
-            "raw_score": row.get(score_col, "") if score_col else "",
-        })
+            "reason":    reason,
+            "raw_score": raw_score,
+        }, reason, raw_score)
 
     # Compounds the Kaggle notebook rejected (score_ceiling, no_remark, etc.)
     # These IDs are in index but never reached merger's scores.csv.
@@ -239,17 +276,23 @@ def _write_unscored_reasons(
     for row in failed_docking:
         lig_id = row.get("ligand", "")
         docking_failed_ids.add(lig_id)
+        if lig_id in successful_ids:
+            continue
         info = index.get(lig_id, {})
-        reasons.append({
+        reason = row.get("reason", "docking_failed")
+        raw_score = row.get("raw_score", "")
+        if row.get("receptor_variant") and raw_score:
+            raw_score = f"{row['receptor_variant']}:{raw_score}"
+        _append_ligand_reason({
             "ligand":    lig_id,
             "name":      info.get("name", ""),
             "smiles":    info.get("smiles", ""),
-            "reason":    row.get("reason", "docking_failed"),
-            "raw_score": row.get("raw_score", ""),
-        })
+            "reason":    reason,
+            "raw_score": raw_score,
+        }, reason, raw_score)
 
     # Compounds that have no output PDBQT at all (UniDock never produced a pose).
-    all_accounted = scored_ids | docking_failed_ids
+    all_accounted = successful_ids | docking_failed_ids | score_filtered_ids
     for lig_id, info in index.items():
         if lig_id not in all_accounted:
             reasons.append({
@@ -266,6 +309,15 @@ def _write_unscored_reasons(
             "name":      fmol.get("name", ""),
             "smiles":    fmol.get("smiles", ""),
             "reason":    "gpu_size_filter",
+            "raw_score": "",
+        })
+
+    for row in failed_prep:
+        reasons.append({
+            "ligand":    "",
+            "name":      row.get("name", ""),
+            "smiles":    row.get("smiles", ""),
+            "reason":    row.get("reason", "prep_failed"),
             "raw_score": "",
         })
 
@@ -294,15 +346,10 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
                 fieldnames = list(reader.fieldnames)
             all_rows.extend(reader)
 
-    # Track every ligand ID that appeared in any scores.csv (before floor/ceiling filter).
-    # Used to identify compounds that simply got no docking pose from UniDock.
-    all_scored_ids: set[str] = set()
-
     # Attach name/smiles from index if not already in scores.csv
     if index:
         for row in all_rows:
             lig_id = row.get("ligand", "")
-            all_scored_ids.add(lig_id)
             if lig_id in index:
                 if "smiles" not in row:
                     row["name"]   = index[lig_id]["name"]
@@ -312,9 +359,6 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             fieldnames += ["name", "smiles"]
         if any(r.get("conformer_qc") for r in all_rows) and "conformer_qc" not in fieldnames:
             fieldnames += ["conformer_qc"]
-    else:
-        for row in all_rows:
-            all_scored_ids.add(row.get("ligand", ""))
 
     id_col = fieldnames[0] if fieldnames else None
     score_col = next(
@@ -354,6 +398,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             else:
                 valid.append(r)
         all_rows = valid
+    valid_scored_ids = {row.get(id_col, "") for row in all_rows} if id_col else set()
 
     receptor_variant_mode = any(row.get("receptor_variant") for row in all_rows)
     if receptor_variant_mode and "receptor_variant" not in fieldnames:
@@ -421,21 +466,19 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
                 has_failures = True
 
     failed_docking = _load_failed_docking(shard_dirs)
-    docking_failed_ids = {r.get("ligand", "") for r in failed_docking}
+    failed_prep = _load_failed_prep(shard_dirs)
 
     reasons_out = _write_unscored_reasons(
-        output_dir, index, all_scored_ids, score_filtered, gpu_filtered, failed_docking, id_col, score_col,
+        output_dir, index, valid_scored_ids, score_filtered, gpu_filtered, failed_prep, failed_docking, id_col, score_col,
     )
 
     reason_counts: dict[str, int] = {}
-    for r in score_filtered:
-        k = r.get("_reason", "score_filtered")
-        reason_counts[k] = reason_counts.get(k, 0) + 1
-    for r in failed_docking:
-        k = r.get("reason", "docking_failed")
-        reason_counts[k] = reason_counts.get(k, 0) + 1
-    all_accounted = all_scored_ids | docking_failed_ids
-    reason_counts["no_pose"] = sum(1 for lid in index if lid not in all_accounted)
+    with reasons_out.open() as f:
+        for r in csv.DictReader(f):
+            k = r.get("reason", "unknown")
+            reason_counts[k] = reason_counts.get(k, 0) + 1
+    if "no_pose" not in reason_counts:
+        reason_counts["no_pose"] = 0
     reason_counts["gpu_size_filter"] = len(gpu_filtered)
 
     # Record the native score type so the viewer/report can label the scale.

@@ -207,6 +207,60 @@ def _tag_scores_with_receptor_variant(output_dir: Path, receptor_variant: str | 
             w.writeheader()
             w.writerows(rows)
 
+
+def _write_single_unscored_reasons(output_dir: Path) -> None:
+    """Write unscored_reasons.csv for single-notebook outputs."""
+    import csv
+
+    reasons: list[dict[str, str]] = []
+
+    for filename, reason in (
+        ("filtered_gpu_size.csv", "gpu_size_filter"),
+        ("failed_prep.csv", "prep_failed"),
+    ):
+        path = output_dir / filename
+        if not path.exists():
+            continue
+        with path.open(newline="") as f:
+            for row in csv.DictReader(f):
+                reasons.append(
+                    {
+                        "ligand": "",
+                        "name": row.get("name", ""),
+                        "smiles": row.get("smiles", ""),
+                        "reason": row.get("reason", reason),
+                        "raw_score": "",
+                    }
+                )
+
+    failed_docking = output_dir / "failed_docking.csv"
+    if failed_docking.exists():
+        index = _load_index(output_dir)
+        with failed_docking.open(newline="") as f:
+            for row in csv.DictReader(f):
+                lig_id = row.get("ligand", "")
+                info = index.get(lig_id, {})
+                reasons.append(
+                    {
+                        "ligand": lig_id,
+                        "name": info.get("name", ""),
+                        "smiles": info.get("smiles", ""),
+                        "reason": row.get("reason", "docking_failed"),
+                        "raw_score": row.get("raw_score", ""),
+                    }
+                )
+
+    if not reasons:
+        return
+
+    with (output_dir / "unscored_reasons.csv").open("w", newline="") as f:
+        w = csv.DictWriter(
+            f, fieldnames=["ligand", "name", "smiles", "reason", "raw_score"]
+        )
+        w.writeheader()
+        w.writerows(reasons)
+
+
 def _fetch_output_urls(kernel_ref: str) -> list:
     """Return list of (filename, url) tuples for a kernel's output files.
     Caller must hold _KAGGLE_API_LOCK and have already set credentials.
@@ -315,6 +369,7 @@ def _download_output(
     _recover_scores(out)
     _enrich_scores_with_identity(out)
     _tag_scores_with_receptor_variant(out, receptor_variant)
+    _write_single_unscored_reasons(out)
     return out
 
 
