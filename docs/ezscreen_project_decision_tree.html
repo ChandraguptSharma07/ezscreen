@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezscreen Decision Tree</title>
+<style>
+  html { scroll-behavior: smooth; }
+  :root {
+    --bg: #091016;
+    --bg2: #0d1822;
+    --panel: rgba(15, 25, 35, 0.92);
+    --panel2: rgba(19, 31, 44, 0.96);
+    --ink: #ecf3fb;
+    --muted: #96a7ba;
+    --line: rgba(104, 183, 255, 0.24);
+    --branch: #4aa1ff;
+    --root: #1dd4a3;
+    --warn: #ff9d57;
+    --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 15% 15%, rgba(29, 212, 163, 0.12), transparent 18%),
+      radial-gradient(circle at 85% 12%, rgba(74, 161, 255, 0.14), transparent 20%),
+      radial-gradient(circle at 50% 100%, rgba(255, 157, 87, 0.08), transparent 24%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+    font: 15px/1.45 "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .page {
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 28px 20px 48px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 20px;
+    align-items: end;
+    margin-bottom: 24px;
+  }
+
+  .hero-copy {
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+  }
+
+  .eyebrow {
+    margin: 0 0 8px;
+    color: #74b8ff;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(34px, 5vw, 68px);
+    line-height: 0.92;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin: 14px 0 0;
+    max-width: 880px;
+    color: var(--muted);
+    font-size: 18px;
+  }
+
+  .meta {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: var(--shadow);
+    padding: 18px;
+    border-radius: 14px;
+  }
+
+  .meta h2,
+  .guide h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+  }
+
+  .legend {
+    display: grid;
+    gap: 10px;
+  }
+
+  .legend-row {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 10px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+  }
+
+  .swatch.root { background: var(--root); }
+  .swatch.branch { background: var(--branch); }
+  .swatch.warn { background: var(--warn); }
+
+  .guide {
+    margin-top: 20px;
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: var(--shadow);
+    padding: 18px;
+    border-radius: 14px;
+  }
+
+  .guide p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .jumpbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 18px;
+    padding: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    background: rgba(9, 16, 22, 0.88);
+    backdrop-filter: blur(10px);
+    box-shadow: var(--shadow);
+  }
+
+  .jumpbar a {
+    display: inline-block;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.04);
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 13px;
+  }
+
+  .jumpbar a:hover {
+    background: rgba(74, 161, 255, 0.14);
+    border-color: rgba(74, 161, 255, 0.28);
+  }
+
+  .tree-wrap {
+    overflow-x: auto;
+    padding: 28px 10px 10px;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    border: 1px solid rgba(255,255,255,0.06);
+    box-shadow: var(--shadow);
+  }
+
+  .tree {
+    min-width: 1720px;
+  }
+
+  .tree ul {
+    position: relative;
+    padding-top: 28px;
+    margin: 0;
+    white-space: nowrap;
+  }
+
+  .tree li {
+    position: relative;
+    display: inline-block;
+    vertical-align: top;
+    text-align: center;
+    list-style: none;
+    padding: 28px 10px 0;
+  }
+
+  .tree li::before,
+  .tree li::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: 50%;
+    width: 50%;
+    height: 28px;
+    border-top: 1px solid var(--line);
+  }
+
+  .tree li::after {
+    right: auto;
+    left: 50%;
+    border-left: 1px solid var(--line);
+  }
+
+  .tree li:only-child::before,
+  .tree li:only-child::after {
+    display: none;
+  }
+
+  .tree li:only-child {
+    padding-top: 0;
+  }
+
+  .tree li:first-child::before,
+  .tree li:last-child::after {
+    border: 0 none;
+  }
+
+  .tree li:last-child::before {
+    border-right: 1px solid var(--line);
+    border-radius: 0 10px 0 0;
+  }
+
+  .tree li:first-child::after {
+    border-radius: 10px 0 0 0;
+  }
+
+  .tree ul ul::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 0;
+    height: 28px;
+    border-left: 1px solid var(--line);
+  }
+
+  .node {
+    position: relative;
+    display: inline-block;
+    width: 236px;
+    min-height: 118px;
+    text-align: left;
+    vertical-align: top;
+    padding: 14px 14px 12px;
+    border-radius: 14px;
+    background: var(--panel2);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: var(--shadow);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+
+  .node.root {
+    width: 300px;
+    min-height: 132px;
+    background: linear-gradient(180deg, rgba(29, 212, 163, 0.22), rgba(29, 212, 163, 0.08));
+    border-color: rgba(29, 212, 163, 0.42);
+  }
+
+  .node.user {
+    background: linear-gradient(180deg, rgba(74, 161, 255, 0.18), rgba(74, 161, 255, 0.08));
+    border-color: rgba(74, 161, 255, 0.26);
+  }
+
+  .node.tool {
+    background: linear-gradient(180deg, rgba(255, 157, 87, 0.18), rgba(255, 157, 87, 0.08));
+    border-color: rgba(255, 157, 87, 0.26);
+  }
+
+  .tag {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    background: rgba(255,255,255,0.08);
+    color: var(--ink);
+  }
+
+  .root .tag { background: rgba(29, 212, 163, 0.18); }
+  .user .tag { background: rgba(74, 161, 255, 0.18); }
+  .tool .tag { background: rgba(255, 157, 87, 0.18); }
+
+  .node h3 {
+    margin: 0 0 7px;
+    font-size: 16px;
+    line-height: 1.12;
+    white-space: normal;
+  }
+
+  .node p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+    white-space: normal;
+  }
+
+  .chip {
+    max-width: 100%;
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.06);
+    color: #d4e0ee;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .footer {
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  @media (max-width: 1100px) {
+    .hero { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">ezscreen project map</p>
+        <h1>The actual tree of the whole project.</h1>
+        <p class="subtitle">
+          This is the full decision tree we discussed before the GitHub Action-specific path: where a user can enter,
+          how a run branches through receptor, pocket, ligands, filtering, engine, backend, and how results become reports.
+        </p>
+      </div>
+      <div>
+        <div class="meta">
+          <h2>Legend</h2>
+          <div class="legend">
+            <div class="legend-row"><span class="swatch root"></span><span>Root of the product or a major pipeline stage</span></div>
+            <div class="legend-row"><span class="swatch branch"></span><span>User choice, execution branch, or workflow path</span></div>
+            <div class="legend-row"><span class="swatch warn"></span><span>Tools, engines, libraries, or external services used there</span></div>
+          </div>
+        </div>
+        <div class="guide">
+          <h2>How to read it</h2>
+          <p>Start at the root, then follow each branch downward. Left side covers how jobs start. Middle covers the run pipeline. Right side covers post-run analysis and outputs.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="jumpbar">
+      <a href="#root-node">Root</a>
+      <a href="#entry-tree">Entry surfaces</a>
+      <a href="#core-run">Core run</a>
+      <a href="#post-run">Post-run</a>
+      <a href="#support-paths">Support paths</a>
+    </div>
+    <div class="tree-wrap">
+      <div class="tree">
+        <ul>
+          <li>
+            <div class="node root" id="root-node">
+              <span class="tag">Root</span>
+              <h3>ezscreen</h3>
+              <p>GPU-accelerated virtual screening app with CLI, TUI, Kaggle backend, local backend, validation, analysis, and reporting.</p>
+              <div class="chips">
+                <span class="chip">Typer</span>
+                <span class="chip">Textual</span>
+                <span class="chip">Rich</span>
+                <span class="chip">SQLite</span>
+              </div>
+            </div>
+            <ul>
+              <li>
+                <div class="node user" id="entry-tree">
+                  <span class="tag">Entry</span>
+                  <h3>User entry surfaces</h3>
+                  <p>How a researcher or system enters the project.</p>
+                </div>
+                <ul>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">CLI</span>
+                      <h3><code>ezscreen run</code></h3>
+                      <p>Interactive terminal wizard for the full docking flow.</p>
+                      <div class="chips"><span class="chip">Typer</span><span class="chip">Questionary</span><span class="chip">Rich</span></div>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">TUI</span>
+                      <h3><code>ezscreen</code> / <code>ezscreen tui</code></h3>
+                      <p>Full-screen app with run wizard, status monitor, settings, and results viewer.</p>
+                      <div class="chips"><span class="chip">Textual</span><span class="chip">Rich</span></div>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Commands</span>
+                      <h3>Other command paths</h3>
+                      <p><code>auth</code>, <code>status</code>, <code>resume</code>, <code>validate</code>, <code>admet</code>, <code>view</code>, <code>clean</code>.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Automation</span>
+                      <h3>Backend / API / worker trigger</h3>
+                      <p>Headless runs can enter through a server or automation layer instead of a local researcher UI.</p>
+                    </div>
+                  </li>
+                </ul>
+              </li>
+
+              <li>
+                <div class="node root" id="core-run">
+                  <span class="tag">Core run</span>
+                  <h3>Main screening pipeline</h3>
+                  <p>Every full run passes through receptor, pocket, ligand, filter, engine, backend, and submission decisions.</p>
+                </div>
+                <ul>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 1</span>
+                      <h3>Choose receptor source</h3>
+                      <p>Local PDB/PDBQT, RCSB PDB ID, AlphaFold ID, or uploaded structure.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Prep</span>
+                          <h3>Prepare receptor</h3>
+                          <p>Chain selection, heteroatom handling, protonation logic, QC, and PDBQT conversion.</p>
+                          <div class="chips"><span class="chip">pdbfixer</span><span class="chip">Meeko</span><span class="chip">PDB2PQR</span><span class="chip">PROPKA</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 2</span>
+                      <h3>Choose binding site path</h3>
+                      <p>Co-crystal ligand, residue-defined box, P2Rank prediction, or blind docking box.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Pocket tools</span>
+                          <h3>Compute and validate box</h3>
+                          <p>Top-3 pocket suggestions, geometry build, and box sanity checks.</p>
+                          <div class="chips"><span class="chip">P2Rank</span><span class="chip">Java</span><span class="chip">box validator</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 3</span>
+                      <h3>Choose ligand source</h3>
+                      <p>SMILES, SDF, Mol2, Mol, PDB, ZINC, ChEMBL, sketcher, or uploaded library.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Ligand prep</span>
+                          <h3>Normalize and prepare ligands</h3>
+                          <p>Convert formats, enumerate variants, embed 3D, minimize, QC, and convert to dockable files.</p>
+                          <div class="chips"><span class="chip">RDKit</span><span class="chip">Gypsum-DL</span><span class="chip">OpenBabel</span><span class="chip">Meeko</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 4</span>
+                      <h3>Choose filters and depth</h3>
+                      <p>ADMET pre-filter on or off, search depth, and preparation settings.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Filter</span>
+                          <h3>Apply chemistry filters</h3>
+                          <p>Rule-based ligand triage before compute-heavy docking.</p>
+                          <div class="chips"><span class="chip">Ro5</span><span class="chip">PAINS</span><span class="chip">Brenk</span><span class="chip">Veber</span><span class="chip">Egan</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 5</span>
+                      <h3>Choose docking engine</h3>
+                      <p>UniDock on Kaggle, local Vina, DiffDock-L, Vinardo, consensus, or rescoring paths.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Engines</span>
+                          <h3>Execution engine profile</h3>
+                          <p>The engine determines score type, box requirement, GPU need, and downstream result semantics.</p>
+                          <div class="chips"><span class="chip">UniDock</span><span class="chip">AutoDock Vina</span><span class="chip">NVIDIA NIM</span><span class="chip">GNINA</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Step 6</span>
+                      <h3>Choose compute backend</h3>
+                      <p>Single Kaggle account, multi-account/team distribution, local CPU, or headless orchestration route.</p>
+                    </div>
+                    <ul>
+                      <li>
+                        <div class="node tool">
+                          <span class="tag">Orchestration</span>
+                          <h3>Shard, render, submit, poll, resume</h3>
+                          <p>Ligands are split, notebooks rendered, datasets uploaded, kernels pushed, and failed shards resumed.</p>
+                          <div class="chips"><span class="chip">Jinja2</span><span class="chip">Kaggle API</span><span class="chip">SQLite</span><span class="chip">ThreadPoolExecutor</span></div>
+                        </div>
+                      </li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+
+              <li>
+                <div class="node root" id="post-run">
+                  <span class="tag">Post-run</span>
+                  <h3>Results and analysis</h3>
+                  <p>Once docking returns, ezscreen turns raw shard outputs into usable science outputs.</p>
+                </div>
+                <ul>
+                  <li>
+                    <div class="node auto">
+                      <span class="tag">Merge</span>
+                      <h3>Merge shard outputs</h3>
+                      <p>Combine CSVs and poses, deduplicate, rerank globally, attach LE/BEI, score type, and variant collapse state.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node tool">
+                      <span class="tag">Validation</span>
+                      <h3>Check pose validity</h3>
+                      <p>Run physical plausibility and geometry checks on downloaded poses.</p>
+                      <div class="chips"><span class="chip">PoseBusters</span></div>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node tool">
+                      <span class="tag">Interactions</span>
+                      <h3>Analyze protein-ligand contacts</h3>
+                      <p>Optional post-run interaction extraction and fingerprinting.</p>
+                      <div class="chips"><span class="chip">PLIP</span><span class="chip">ProLIF</span><span class="chip">OpenBabel</span></div>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node tool">
+                      <span class="tag">Clustering</span>
+                      <h3>Cluster and benchmark hits</h3>
+                      <p>Scaffold clustering, interaction-profile clustering, decoys, ROC, EF, redock confidence.</p>
+                      <div class="chips"><span class="chip">RDKit Butina</span><span class="chip">AUC-ROC</span><span class="chip">EF1%</span></div>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node auto">
+                      <span class="tag">Outputs</span>
+                      <h3>Generate final deliverables</h3>
+                      <p>Results viewer, HTML report, Methods paragraph, Excel export, SDF export, annotations, and shareable artifacts.</p>
+                      <div class="chips"><span class="chip">Mol*</span><span class="chip">RDKit SVG</span><span class="chip">openpyxl</span></div>
+                    </div>
+                  </li>
+                </ul>
+              </li>
+
+              <li>
+                <div class="node root" id="support-paths">
+                  <span class="tag">Support paths</span>
+                  <h3>Non-run commands and maintenance</h3>
+                  <p>Support features that sit beside the main run pipeline.</p>
+                </div>
+                <ul>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Auth</span>
+                      <h3>Credential setup</h3>
+                      <p>Kaggle account validation, optional NIM validation, credentials file management.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Status</span>
+                      <h3>Live run monitoring</h3>
+                      <p>See queued, running, failed, resumed, and completed runs.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Resume</span>
+                      <h3>Resume failed shards</h3>
+                      <p>Recover failed jobs from checkpoint and local run context.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">View</span>
+                      <h3>Inspect results</h3>
+                      <p>Open viewer and reports independently of the run command.</p>
+                    </div>
+                  </li>
+                  <li>
+                    <div class="node user">
+                      <span class="tag">Clean</span>
+                      <h3>Delete remote artifacts</h3>
+                      <p>Remove Kaggle dataset and kernel outputs to free quota and storage.</p>
+                    </div>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="footer">Artifact: <code>docs/ezscreen_project_decision_tree.html</code>. Open directly in a browser.</p>
+  </div>
+</body>
+</html>
