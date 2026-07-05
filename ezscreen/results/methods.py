@@ -4,6 +4,7 @@ from pathlib import Path
 
 _CITATIONS = {
     "unidock":  "UniDock (Yu et al., 2023)",
+    "gnina":    "GNINA (McNutt et al., 2021)",
     "vina":     "AutoDock Vina (Eberhardt et al., 2021)",
     "rdkit":    "RDKit (https://www.rdkit.org)",
     "meeko":    "Meeko (Forli Lab)",
@@ -97,9 +98,32 @@ def build_methods_text(run_meta: dict) -> str:
             "was applied before docking."
         )
 
+    ensemble_mode = dock.get("ensemble_mode") or "off"
+    if ensemble_mode == "manual":
+        total = int(dock.get("ensemble_total_conformers") or 0)
+        if total > 1:
+            sentences.append(
+                f"Receptor ensemble docking was performed across {total} receptor conformations "
+                "(primary structure plus user-supplied conformers), keeping the best score per ligand."
+            )
+    elif ensemble_mode == "auto":
+        generated = int(dock.get("ensemble_generated_conformers") or 0)
+        total = int(dock.get("ensemble_total_conformers") or 0)
+        if total > 1:
+            sentences.append(
+                f"Receptor ensemble docking was performed across {total} receptor conformations; "
+                f"{generated} additional conformer(s) were generated automatically using PDB-derived "
+                "structures with normal-mode fallback, and the best score per ligand was retained."
+            )
+        else:
+            sentences.append(
+                "Automatic receptor ensemble generation was attempted using PDB-derived structures "
+                "with normal-mode fallback, but no additional conformers passed quality control; "
+                "docking proceeded with the primary receptor only."
+            )
+
     # Docking
     engine = dock.get("engine", "UniDock")
-    engine_cite = "vina" if "vina" in engine.lower() else "unidock"
     depth_bits: list[str] = []
     if dock.get("exhaustiveness"):
         depth_bits.append(f"exhaustiveness {dock['exhaustiveness']}")
@@ -110,10 +134,36 @@ def build_methods_text(run_meta: dict) -> str:
     depth = (" at " + ", ".join(depth_bits)) if depth_bits else ""
     backend = dock.get("backend")
     backend_str = f" on {backend}" if backend else ""
-    sentences.append(f"Molecular docking was performed with {engine}{depth}{backend_str}.")
+    consensus_engines = dock.get("consensus_engines") or []
+    if consensus_engines:
+        engines_text = " and ".join(str(e) for e in consensus_engines)
+        sentences.append(
+            f"Consensus docking was performed with {engines_text}{depth}{backend_str}; "
+            "final ranking used the mean normalised rank across engines."
+        )
+    else:
+        sentences.append(f"Molecular docking was performed with {engine}{depth}{backend_str}.")
 
     # Citations
-    cite_keys = [engine_cite, "rdkit", "meeko", "pdbfixer"]
+    cite_keys: list[str] = []
+    if consensus_engines:
+        for eng in consensus_engines:
+            eng_l = str(eng).lower()
+            if "gnina" in eng_l:
+                cite_keys.append("gnina")
+            elif "vina" in eng_l and "unidock" not in eng_l:
+                cite_keys.append("vina")
+            else:
+                cite_keys.append("unidock")
+    else:
+        engine_l = str(engine).lower()
+        if "gnina" in engine_l:
+            cite_keys.append("gnina")
+        elif "vina" in engine_l and "unidock" not in engine_l:
+            cite_keys.append("vina")
+        else:
+            cite_keys.append("unidock")
+    cite_keys += ["rdkit", "meeko", "pdbfixer"]
     if extra_cite:
         cite_keys.append(extra_cite)
     cite_keys.append("plip")
@@ -171,6 +221,20 @@ def run_meta_from_checkpoint(run_id: str) -> dict | None:
     ff = cfg.get("prep", {}).get("force_field", "MMFF94")
 
     run_locally = bool(ctx.get("run_locally"))
+    consensus_enabled = bool(ctx.get("consensus_enabled"))
+    selected_engine = str(ctx.get("engine") or "unidock")
+    if run_locally:
+        engine_label = "AutoDock Vina"
+        consensus_engines = []
+    elif consensus_enabled:
+        engine_label = "Consensus"
+        consensus_engines = ["UniDock", "GNINA"]
+    elif selected_engine == "gnina":
+        engine_label = "GNINA"
+        consensus_engines = []
+    else:
+        engine_label = "UniDock"
+        consensus_engines = []
     box = ctx.get("box") or {}
 
     return {
@@ -196,9 +260,20 @@ def run_meta_from_checkpoint(run_id: str) -> dict | None:
             "force_field":    ff,
         },
         "docking": {
-            "engine":         "AutoDock Vina" if run_locally else "UniDock",
+            "engine":         engine_label,
+            "consensus_engines": consensus_engines,
             "exhaustiveness": ctx.get("exhaustiveness"),
             "search_mode":    (ctx.get("search_params") or {}).get("search_mode"),
             "backend":        "local CPU" if run_locally else "Kaggle GPU",
+            "ensemble_mode":  ctx.get("ensemble_mode", "off"),
+            "ensemble_generated_conformers": len(
+                ctx.get("ensemble_generated_conformers") or []
+            ),
+            "ensemble_total_conformers": 1 + len(
+                ctx.get("ensemble_manual_paths")
+                or ctx.get("ensemble_generated_conformers")
+                or ctx.get("ensemble_receptor_paths")
+                or []
+            ),
         },
     }

@@ -73,3 +73,64 @@ def test_alphafold_phrasing():
     text = build_methods_text(af)
     assert "AlphaFold model for P0DTC2" in text
     assert "v4" in text
+
+
+def test_consensus_methods_name_both_engines():
+    meta = dict(_RUN_META)
+    meta["docking"] = {
+        "engine": "Consensus",
+        "consensus_engines": ["UniDock", "GNINA"],
+        "search_mode": "balance",
+        "backend": "Kaggle GPU",
+    }
+    text = build_methods_text(meta)
+    assert "Consensus docking was performed with UniDock and GNINA" in text
+    assert "mean normalised rank" in text
+    assert "Yu et al., 2023" in text
+    assert "McNutt et al., 2021" in text
+
+
+def test_auto_ensemble_methods_text_mentions_generated_conformers():
+    meta = dict(_RUN_META)
+    meta["docking"] = {
+        "engine": "UniDock",
+        "search_mode": "balance",
+        "backend": "Kaggle GPU",
+        "ensemble_mode": "auto",
+        "ensemble_generated_conformers": 2,
+        "ensemble_total_conformers": 3,
+    }
+    text = build_methods_text(meta)
+    assert "Receptor ensemble docking was performed across 3 receptor conformations" in text
+    assert "2 additional conformer(s) were generated automatically" in text
+    assert "best score per ligand was retained" in text
+
+
+def test_manual_ensemble_methods_text_mentions_user_conformers():
+    meta = dict(_RUN_META)
+    meta["docking"] = {
+        "engine": "UniDock",
+        "search_mode": "balance",
+        "backend": "Kaggle GPU",
+        "ensemble_mode": "manual",
+        "ensemble_total_conformers": 4,
+    }
+    text = build_methods_text(meta)
+    assert "primary structure plus user-supplied conformers" in text
+    assert "best score per ligand" in text
+
+
+def test_auto_ensemble_methods_text_mentions_qc_rejection_when_none_survive():
+    meta = dict(_RUN_META)
+    meta["docking"] = {
+        "engine": "UniDock",
+        "search_mode": "balance",
+        "backend": "Kaggle GPU",
+        "ensemble_mode": "auto",
+        "ensemble_generated_conformers": 0,
+        "ensemble_total_conformers": 1,
+    }
+    text = build_methods_text(meta)
+    assert "Automatic receptor ensemble generation was attempted" in text
+    assert "no additional conformers passed quality control" in text
+    assert "primary receptor only" in text
