@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import secrets
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -33,6 +34,10 @@ _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
     ("UFF — broad element coverage", "UFF"),
 ]
 _RECEPTOR_ISOMER_MODES = {"off", "single", "variants"}
+_ENSEMBLE_MODES = {"off", "manual", "auto"}
+_AUTO_ENSEMBLE_METHOD = "pdb_then_nma"
+_AUTO_ENSEMBLE_DEFAULT_MAX = 3
+_AUTO_ENSEMBLE_HARD_MAX = 8
 
 _HETERO_CATEGORY_ORDER = ("cofactor", "metal", "ligand", "water", "additive", "other")
 _HETERO_CATEGORY_LABELS = {
@@ -150,6 +155,42 @@ class RunWizardScreen(Screen):
                                 "B - multiple binding-site variants",
                                 id="rb-rec-isomer-variants",
                             )
+                    yield Label(
+                        "Ensemble receptor conformations", classes="form-section"
+                    )
+                    yield Static(
+                        "[#6e7681]Dock one receptor, provide conformers, or let ezscreen "
+                        "generate a small ensemble from PDB structures with normal-mode fallback.[/#6e7681]"
+                    )
+                    with RadioSet(id="ensemble-mode"):
+                        yield RadioButton(
+                            "Single receptor",
+                            id="rb-ensemble-off",
+                            value=True,
+                        )
+                        yield RadioButton(
+                            "Use my conformers",
+                            id="rb-ensemble-manual",
+                        )
+                        yield RadioButton(
+                            "Generate automatically",
+                            id="rb-ensemble-auto",
+                        )
+                    with Vertical(id="ensemble-manual-box"):
+                        yield Input(
+                            placeholder="/path/conf1.pdbqt, /path/conf2.pdb",
+                            id="ensemble-receptors-input",
+                        )
+                    with Vertical(id="ensemble-auto-box"):
+                        yield Static(
+                            "[#6e7681]Method: PDB + normal-mode fallback[/#6e7681]"
+                        )
+                        yield Input(
+                            value=str(_AUTO_ENSEMBLE_DEFAULT_MAX),
+                            placeholder="Max conformers (1-8)",
+                            id="ensemble-max-conformers",
+                        )
+                    yield Static("", id="ensemble-status", classes="form-status")
                 # ── Step 3: Binding Site ──────────────────────────────
                 with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
@@ -163,6 +204,11 @@ class RunWizardScreen(Screen):
                         yield RadioButton("Enter coordinates manually", id="rb-manual")
                     with Vertical(id="sub-cocrystal", classes="site-sub"):
                         yield Static("", id="cocrystal-info")
+                        yield Select(
+                            [],
+                            id="cocrystal-select",
+                            prompt="Choose reference ligand",
+                        )
                     with Vertical(id="sub-residues", classes="site-sub"):
                         yield Label(
                             "Residue numbers (comma-separated, e.g. 42,45,78)",
@@ -242,6 +288,13 @@ class RunWizardScreen(Screen):
                     yield Select(
                         [("Vina", "vina")], id="opt-scoring", allow_blank=False
                     )
+                    yield Label("Consensus", classes="form-section", id="lbl-consensus")
+                    yield Static(
+                        "[#6e7681]Run UniDock + GNINA and rank by mean normalized rank.[/#6e7681]",
+                        id="consensus-note",
+                        classes="form-status",
+                    )
+                    yield Switch(id="opt-consensus", value=False)
                     yield Label("Search depth", classes="form-section", id="lbl-depth")
                     with RadioSet(id="opt-depth"):
                         yield RadioButton(
@@ -318,12 +371,15 @@ class RunWizardScreen(Screen):
             self.query_one(f"#{sid}").display = False
         self.query_one("#lbl-exhaustiveness").display = False
         self.query_one("#receptor-isomer-mode-box").display = False
+        self.query_one("#ensemble-manual-box").display = False
+        self.query_one("#ensemble-auto-box").display = False
         self.query_one("#opt-exhaustiveness").display = False
         self.query_one("#lbl-gpu").display = True
         self.query_one("#opt-gpu-type").display = True
         self._load_defaults()
         self._update_engine_note()
         self._update_scoring_options()
+        self._update_consensus_visibility()
         self._populate_account_assignment()
 
     def _load_defaults(self) -> None:
@@ -406,6 +462,7 @@ class RunWizardScreen(Screen):
             self.query_one("#engine-note").display = not local_on
             self.query_one("#lbl-scoring").display = not local_on
             self.query_one("#opt-scoring").display = not local_on
+            self._update_consensus_visibility(local_on=local_on)
             acct_section = self.query_one("#acct-assignment-section", VerticalScroll)
             if local_on:
                 acct_section.display = False
@@ -455,6 +512,9 @@ class RunWizardScreen(Screen):
         if self._refreshing_hetero_controls:
             return
         checkbox_id = event.checkbox.id or ""
+        if checkbox_id.startswith("chain-"):
+            self._refresh_cocrystal_selector()
+            return
         if not checkbox_id.startswith("het-"):
             return
         try:
@@ -483,6 +543,9 @@ class RunWizardScreen(Screen):
         elif event.radio_set.id == "opt-engine":
             self._update_engine_note()
             self._update_scoring_options()
+            self._update_consensus_visibility()
+        elif event.radio_set.id == "ensemble-mode":
+            self._update_ensemble_mode_visibility()
 
     def _selected_receptor_isomer_mode(self) -> str:
         if not self.query_one("#opt-receptor-isomers", Switch).value:
@@ -491,6 +554,57 @@ class RunWizardScreen(Screen):
         if btn and btn.id == "rb-rec-isomer-variants":
             return "variants"
         return "single"
+
+    def _selected_ensemble_mode(self) -> str:
+        btn = self.query_one("#ensemble-mode", RadioSet).pressed_button
+        if btn and btn.id == "rb-ensemble-manual":
+            return "manual"
+        if btn and btn.id == "rb-ensemble-auto":
+            return "auto"
+        return "off"
+
+    def _update_ensemble_mode_visibility(self) -> None:
+        mode = self._selected_ensemble_mode()
+        self.query_one("#ensemble-manual-box").display = mode == "manual"
+        self.query_one("#ensemble-auto-box").display = mode == "auto"
+
+    def _auto_ensemble_max_conformers(self) -> int:
+        raw = self.query_one("#ensemble-max-conformers", Input).value.strip()
+        if not raw:
+            return _AUTO_ENSEMBLE_DEFAULT_MAX
+        value = int(raw)
+        if value < 1 or value > _AUTO_ENSEMBLE_HARD_MAX:
+            raise ValueError(
+                f"Max conformers must be between 1 and {_AUTO_ENSEMBLE_HARD_MAX}."
+            )
+        return value
+
+    def _ensemble_receptor_paths(self) -> list[Path]:
+        raw = self.query_one("#ensemble-receptors-input", Input).value.strip()
+        if not raw:
+            return []
+        parts = [p.strip() for p in re.split(r"[\n,;]+", raw) if p.strip()]
+        paths: list[Path] = []
+        seen: set[Path] = set()
+        for part in parts:
+            path = Path(part).expanduser()
+            if path in seen:
+                continue
+            seen.add(path)
+            paths.append(path)
+        return paths
+
+    def _update_consensus_visibility(self, local_on: bool | None = None) -> None:
+        if local_on is None:
+            try:
+                local_on = self.query_one("#opt-local", Switch).value
+            except Exception:
+                local_on = False
+        visible = (not local_on) and self._selected_engine() in {"unidock", "gnina"}
+        for selector in ("#lbl-consensus", "#consensus-note", "#opt-consensus"):
+            self.query_one(selector).display = visible
+        if not visible:
+            self.query_one("#opt-consensus", Switch).value = False
 
     def _selected_engine(self) -> str:
         btn = self.query_one("#opt-engine", RadioSet).pressed_button
@@ -502,9 +616,13 @@ class RunWizardScreen(Screen):
 
     def _update_scoring_options(self) -> None:
         key = self._selected_engine()
-        fns = engines.scoring_functions(key) or ("vina",)
+        fns = engines.scoring_functions(key)
         sel = self.query_one("#opt-scoring", Select)
         current = sel.value if sel.value != Select.BLANK else None
+        if not fns:
+            sel.set_options([("Native confidence", "diffdock_confidence")])
+            sel.value = "diffdock_confidence"
+            return
         sel.set_options([(f.capitalize(), f) for f in fns])
         sel.value = (
             current if current in fns else (engines.default_scoring(key) or fns[0])
@@ -532,6 +650,73 @@ class RunWizardScreen(Screen):
         elif "manually" in label:
             self.query_one("#sub-manual").display = True
 
+    def _cocrystal_option_value(self, ligand: dict[str, object]) -> str:
+        return (
+            f"{ligand.get('resname', '')}|"
+            f"{ligand.get('chain', '')}|"
+            f"{int(ligand.get('resseq', 0))}"
+        )
+
+    def _selected_chain_ids(self) -> list[str]:
+        selected: list[str] = []
+        for ch in self._chains:
+            safe_id = ch if ch.strip() else "_blank"
+            try:
+                checked = self.query_one(f"#chain-{safe_id}", Checkbox).value
+            except Exception:
+                checked = True
+            if checked:
+                selected.append(ch)
+        return selected
+
+    def _visible_cocrystal_ligands(self) -> list[dict]:
+        selected_chains = set(self._selected_chain_ids())
+        if not selected_chains:
+            return list(self._cocrystal_ligands)
+        visible = [
+            ligand
+            for ligand in self._cocrystal_ligands
+            if str(ligand.get("chain", "")) in selected_chains
+        ]
+        return visible or list(self._cocrystal_ligands)
+
+    def _cocrystal_options(self) -> list[tuple[str, str]]:
+        options: list[tuple[str, str]] = []
+        for ligand in self._visible_cocrystal_ligands():
+            chain = str(ligand.get("chain", "")).strip() or "?"
+            resseq = ligand.get("resseq", "?")
+            n_atoms = len(ligand.get("coords") or [])
+            label = f"{ligand.get('resname', '?')}  chain {chain}  residue {resseq}"
+            if n_atoms:
+                label += f"  ({n_atoms} atoms)"
+            options.append((label, self._cocrystal_option_value(ligand)))
+        return options
+
+    def _selected_cocrystal_ligand(self) -> dict | None:
+        visible_ligands = self._visible_cocrystal_ligands()
+        if not visible_ligands:
+            return None
+        select = self.query_one("#cocrystal-select", Select)
+        value = select.value
+        if value == Select.BLANK:
+            return visible_ligands[0]
+        selected = str(value)
+        for ligand in visible_ligands:
+            if self._cocrystal_option_value(ligand) == selected:
+                return ligand
+        return None
+
+    def _refresh_cocrystal_selector(self) -> None:
+        select = self.query_one("#cocrystal-select", Select)
+        current = select.value
+        options = self._cocrystal_options()
+        select.set_options(options)
+        values = {value for _, value in options}
+        if current != Select.BLANK and current in values:
+            select.value = current
+        elif options:
+            select.value = options[0][1]
+
     # ------------------------------------------------------------------
     # Step 1 — Receptor validation
     # ------------------------------------------------------------------
@@ -549,6 +734,7 @@ class RunWizardScreen(Screen):
         self.query_one("#af-warning-box").display = False
         self._chains = []
         self._cocrystal_ligands = []
+        self.query_one("#cocrystal-select", Select).set_options([])
         self._pockets = []
         self.run_worker(lambda: self._do_rec_validate(raw), thread=True)
 
@@ -611,6 +797,7 @@ class RunWizardScreen(Screen):
         af_ver: str | None,
         cocrystal: list[dict],
     ) -> None:
+        self._cocrystal_ligands = list(cocrystal)
         co_txt = f"  {len(cocrystal)} co-crystal ligand(s) found." if cocrystal else ""
         self.query_one("#rec-status", Static).update(
             f"[#3fb950]Valid — {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
@@ -642,10 +829,12 @@ class RunWizardScreen(Screen):
             self.query_one("#cocrystal-info", Static).update(
                 f"[#3fb950]Found: {names}[/#3fb950]"
             )
+            self._refresh_cocrystal_selector()
         else:
             self.query_one("#cocrystal-info", Static).update(
                 "[#6e7681]No co-crystal ligand found in this structure.[/#6e7681]"
             )
+            self.query_one("#cocrystal-select", Select).set_options([])
 
     def _show_rec_error(self, msg: str) -> None:
         self.query_one("#rec-status", Static).update(f"[#f85149]{msg}[/#f85149]")
@@ -908,6 +1097,33 @@ class RunWizardScreen(Screen):
                 h for i, h in enumerate(self._hetero) if i in self._hetero_keep
             ]
             self._ctx["receptor_isomers"] = self._selected_receptor_isomer_mode()
+            ensemble_mode = self._selected_ensemble_mode()
+            self._ctx["ensemble_mode"] = ensemble_mode
+            self._ctx["ensemble_method"] = None
+            self._ctx["ensemble_manual_paths"] = []
+            self._ctx["ensemble_receptor_paths"] = []
+            self._ctx["ensemble_max_conformers"] = _AUTO_ENSEMBLE_DEFAULT_MAX
+            if ensemble_mode != "off" and self._ctx["receptor_isomers"] != "off":
+                return "Use ensemble conformations or receptor protonation variants, not both."
+            if ensemble_mode == "manual":
+                ensemble_paths = self._ensemble_receptor_paths()
+                if not ensemble_paths:
+                    return "Enter at least one ensemble receptor conformer path."
+                for path in ensemble_paths:
+                    if not path.exists():
+                        return f"Ensemble receptor not found: {path}"
+                    if path.suffix.lower() not in {".pdb", ".pdbqt"}:
+                        return f"Unsupported ensemble receptor format: {path.suffix}"
+                self._ctx["ensemble_manual_paths"] = ensemble_paths
+                self._ctx["ensemble_receptor_paths"] = ensemble_paths
+            elif ensemble_mode == "auto":
+                try:
+                    self._ctx["ensemble_max_conformers"] = (
+                        self._auto_ensemble_max_conformers()
+                    )
+                except ValueError as exc:
+                    return str(exc)
+                self._ctx["ensemble_method"] = _AUTO_ENSEMBLE_METHOD
 
         elif step == "step-site":
             btn = self.query_one("#site-method", RadioSet).pressed_button
@@ -916,6 +1132,8 @@ class RunWizardScreen(Screen):
             label = str(btn.label)
             if "Co-crystal" in label and not self._cocrystal_ligands:
                 return "No co-crystal ligand found. Choose a different method."
+            if "Co-crystal" in label and self._selected_cocrystal_ligand() is None:
+                return "Choose a co-crystal reference ligand."
             if "P2Rank" in label and not self._pockets:
                 return "P2Rank has not finished yet. Wait or choose a different method."
             if "manually" in label:
@@ -945,8 +1163,21 @@ class RunWizardScreen(Screen):
 
         elif step == "step-engine":
             self._ctx["engine"] = self._selected_engine()
+            has_ensemble = self._ctx.get(
+                "ensemble_mode", "off"
+            ) != "off" or self._ctx.get("ensemble_receptor_paths")
+            if has_ensemble and self._ctx["engine"] == "diffdock":
+                return (
+                    "Ensemble docking currently supports UniDock/GNINA, not DiffDock-L."
+                )
             _scoring = self.query_one("#opt-scoring", Select).value
             self._ctx["scoring"] = str(_scoring) if _scoring != Select.BLANK else "vina"
+            self._ctx["consensus_enabled"] = (
+                self._ctx["engine"] in {"unidock", "gnina"}
+                and self.query_one("#opt-consensus", Switch).value
+            )
+            if has_ensemble and self._ctx["consensus_enabled"]:
+                return "Ensemble plus consensus ranking is not supported yet."
             depth_btn = self.query_one("#opt-depth", RadioSet).pressed_button
             label = str(depth_btn.label) if depth_btn else ""
             if "Fast" in label:
@@ -961,6 +1192,11 @@ class RunWizardScreen(Screen):
 
         elif step == "step-compute":
             self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
+            has_ensemble = self._ctx.get(
+                "ensemble_mode", "off"
+            ) != "off" or self._ctx.get("ensemble_receptor_paths")
+            if self._ctx["run_locally"] and has_ensemble:
+                return "Ensemble docking requires Kaggle GPU in this version."
             gpu_btn = self.query_one("#opt-gpu-type", RadioSet).pressed_button
             self._ctx["gpu_type"] = (
                 "nvidiaTeslaT4"
@@ -1020,7 +1256,12 @@ class RunWizardScreen(Screen):
 
     def _collect_site_details(self, label: str) -> dict:
         if "Co-crystal" in label:
-            return {"type": "cocrystal", "ligands": self._cocrystal_ligands}
+            ligand = self._selected_cocrystal_ligand()
+            return {
+                "type": "cocrystal",
+                "ligands": [ligand] if ligand else [],
+                "available_ligands": list(self._cocrystal_ligands),
+            }
         if "residues" in label:
             raw = self.query_one("#residues-input", Input).value.strip()
             res_ids = [int(r.strip()) for r in raw.split(",") if r.strip().isdigit()]
@@ -1069,17 +1310,38 @@ class RunWizardScreen(Screen):
             "single": "single corrected state",
             "variants": "multiple variants",
         }.get(ctx.get("receptor_isomers", "off"), "off")
+        ensemble_mode = ctx.get("ensemble_mode", "off")
+        if ensemble_mode == "manual":
+            ensemble_count = (
+                len(
+                    ctx.get("ensemble_manual_paths")
+                    or ctx.get("ensemble_receptor_paths")
+                    or []
+                )
+                + 1
+            )
+            ensemble_label = f"manual ({ensemble_count} conformations)"
+        elif ensemble_mode == "auto":
+            max_conformers = ctx.get(
+                "ensemble_max_conformers", _AUTO_ENSEMBLE_DEFAULT_MAX
+            )
+            ensemble_label = f"auto PDB + NMA fallback (max {max_conformers})"
+        else:
+            ensemble_label = "off"
         engine_label = (
             "AutoDock Vina (local)"
             if ctx.get("run_locally")
             else engines.get(ctx.get("engine", "unidock")).label
         )
         scoring_label = ctx.get("scoring", "vina").capitalize()
+        consensus_label = "on" if ctx.get("consensus_enabled") else "off"
         if ctx.get("run_locally"):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
+        elif ctx.get("engine") == "diffdock":
+            backend = "NVIDIA NIM API"
         else:
-            gpu_label = "T4 × 2" if ctx.get("gpu_type") == "nvidiaTeslaT4" else "P100"
+            gpu_label = "T4 x 2" if ctx.get("gpu_type") == "nvidiaTeslaT4" else "P100"
             backend = f"Kaggle GPU ({gpu_label})"
         af_note = (
             "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
@@ -1092,10 +1354,12 @@ class RunWizardScreen(Screen):
                     f"[bold #6e7681]Receptor     [/bold #6e7681][#f0f6fc]{pdb}[/#f0f6fc]  chains {chains}",
                     f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
                     f"[bold #6e7681]Rec isomers  [/bold #6e7681][#f0f6fc]{receptor_isomers}[/#f0f6fc]",
+                    f"[bold #6e7681]Ensemble     [/bold #6e7681][#f0f6fc]{ensemble_label}[/#f0f6fc]",
                     f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
                     f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
                     f"[bold #6e7681]Engine       [/bold #6e7681][#f0f6fc]{engine_label}[/#f0f6fc]",
                     f"[bold #6e7681]Scoring      [/bold #6e7681][#f0f6fc]{scoring_label}[/#f0f6fc]",
+                    f"[bold #6e7681]Consensus    [/bold #6e7681][#f0f6fc]{consensus_label}[/#f0f6fc]",
                     f"[bold #6e7681]Search depth [/bold #6e7681][#f0f6fc]{depth}[/#f0f6fc]",
                     f"[bold #6e7681]Force field  [/bold #6e7681][#f0f6fc]{force_field}[/#f0f6fc]",
                     f"[bold #6e7681]Backend      [/bold #6e7681][#f0f6fc]{backend}[/#f0f6fc]",
@@ -1108,6 +1372,31 @@ class RunWizardScreen(Screen):
     # Submit
     # ------------------------------------------------------------------
 
+    def _prepare_ensemble_receptors(
+        self,
+        paths: list[Path],
+        *,
+        rec_prep,
+        work_dir: Path,
+        chains: list[str],
+        ph: float,
+        keep_hetero: list[dict] | None,
+        primary_pdbqt: Path,
+    ) -> list[Path]:
+        if not paths:
+            return [primary_pdbqt]
+        from ezscreen.prep.ensemble import prepare_manual_ensemble
+
+        conformers = prepare_manual_ensemble(
+            paths,
+            output_dir=work_dir / "receptor_ensemble",
+            chains=chains,
+            ph=ph,
+            keep_hetero=keep_hetero,
+            rec_prep_module=rec_prep,
+        )
+        return [primary_pdbqt] + [c.pdbqt_path for c in conformers]
+
     def _submit(self) -> None:
         if self._submitted:
             return
@@ -1118,6 +1407,7 @@ class RunWizardScreen(Screen):
     def _do_submit(self) -> None:
         from ezscreen import auth, checkpoint, config
         from ezscreen.admet.filter import filter_library
+        from ezscreen.backends import engines
         from ezscreen.backends.kaggle import runner as kaggle_runner
         from ezscreen.pocket import detect as pocket
         from ezscreen.prep import ligands as ligand_prep
@@ -1163,38 +1453,132 @@ class RunWizardScreen(Screen):
                 receptor_isomers=ctx.get("receptor_isomers", "off"),
             )
             receptor_pdbqt = rec_result["pdbqt_path"]
-            receptor_pdbqt_paths = rec_result.get("variant_pdbqt_paths") or [receptor_pdbqt]
-            receptor_variant_modes = rec_result.get("receptor_variant_modes") or ["default"]
-            receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get("receptor_pdb_path")
-            _has_kaggle_receptor_prep = any(m != "default" for m in receptor_variant_modes)
+            receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get(
+                "receptor_pdb_path"
+            )
+            ensemble_mode = ctx.get("ensemble_mode", "off")
+            if ensemble_mode == "off" and ctx.get("ensemble_receptor_paths"):
+                ensemble_mode = "manual"
+            if ensemble_mode == "manual":
+                ensemble_paths = list(
+                    ctx.get("ensemble_manual_paths")
+                    or ctx.get("ensemble_receptor_paths")
+                    or []
+                )
+                log(
+                    f"[#79c0ff]Preparing {len(ensemble_paths)} ensemble receptor conformation(s)...[/#79c0ff]"
+                )
+                receptor_pdbqt_paths = self._prepare_ensemble_receptors(
+                    ensemble_paths,
+                    rec_prep=rec_prep,
+                    work_dir=work_dir,
+                    chains=ctx["selected_chains"],
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    keep_hetero=ctx.get("keep_hetero"),
+                    primary_pdbqt=receptor_pdbqt,
+                )
+                receptor_variant_modes = None
+            elif ensemble_mode == "auto":
+                from ezscreen.prep.ensemble import generate_auto_ensemble
+
+                max_conformers = int(
+                    ctx.get("ensemble_max_conformers", _AUTO_ENSEMBLE_DEFAULT_MAX)
+                )
+                log(
+                    f"[#79c0ff]Generating up to {max_conformers} receptor ensemble "
+                    "conformation(s) with PDB + normal-mode fallback...[/#79c0ff]"
+                )
+                conformers = generate_auto_ensemble(
+                    Path(receptor_pdb or ctx["pdb_path"]),
+                    ctx["selected_chains"],
+                    ctx.get("site_details") or {},
+                    max_conformers=max_conformers,
+                    output_dir=work_dir / "receptor_ensemble_auto",
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    keep_hetero=ctx.get("keep_hetero"),
+                    rec_prep_module=rec_prep,
+                    logger=lambda message: log(f"[#6e7681]{message}[/#6e7681]"),
+                )
+                ctx["ensemble_generated_conformers"] = [
+                    {
+                        "name": c.name,
+                        "source": c.source,
+                        "pdb_path": str(c.pdb_path) if c.pdb_path else None,
+                        "pdbqt_path": str(c.pdbqt_path),
+                        "metadata": c.metadata,
+                    }
+                    for c in conformers
+                ]
+                receptor_pdbqt_paths = [receptor_pdbqt] + [
+                    c.pdbqt_path for c in conformers
+                ]
+                if not conformers:
+                    log(
+                        "[#e3b341]Auto ensemble did not yield any prep-valid conformers; "
+                        "continuing with the primary receptor only.[/#e3b341]"
+                    )
+                receptor_variant_modes = None
+            else:
+                receptor_pdbqt_paths = rec_result.get("variant_pdbqt_paths") or [
+                    receptor_pdbqt
+                ]
+                receptor_variant_modes = rec_result.get("receptor_variant_modes") or [
+                    "default"
+                ]
+            _has_receptor_ensemble = (
+                len(receptor_pdbqt_paths) > 1 and not receptor_variant_modes
+            )
+            _has_kaggle_receptor_prep = bool(receptor_variant_modes) and any(
+                m != "default" for m in receptor_variant_modes
+            )
             if _has_kaggle_receptor_prep:
                 log(
                     f"[#6e7681]{len(receptor_variant_modes)} receptor variant mode(s) queued; "
                     "PROPKA/PDB2PQR prep will run on Kaggle[/#6e7681]"
                 )
+            if _has_receptor_ensemble:
+                log(
+                    f"[#6e7681]{len(receptor_pdbqt_paths)} receptor conformation(s) "
+                    "queued for ensemble docking[/#6e7681]"
+                )
 
             # Binding box
-            log("[#79c0ff]Computing binding box...[/#79c0ff]")
+            engine_key = ctx.get("engine", "unidock")
+            engine_profile = engines.get(engine_key)
             site = ctx["site_details"]
-            if site["type"] == "cocrystal":
-                box = pocket.box_from_cocrystal(site["ligands"][0])
-            elif site["type"] == "residues":
-                box = pocket.box_from_residues(
-                    ctx["pdb_path"], site["residues"], ctx["selected_chains"]
+            if engine_profile.requires_box:
+                log("[#79c0ff]Computing binding box...[/#79c0ff]")
+                if site["type"] == "cocrystal":
+                    box = pocket.box_from_cocrystal(site["ligands"][0])
+                elif site["type"] == "residues":
+                    box = pocket.box_from_residues(
+                        ctx["pdb_path"], site["residues"], ctx["selected_chains"]
+                    )
+                elif site["type"] == "p2rank":
+                    box = {**site["pocket"]}
+                elif site["type"] == "manual":
+                    box = {"center": site["center"], "size": site["size"]}
+                else:
+                    box = pocket.box_blind(ctx["pdb_path"])
+                ctx["box"] = box
+                log(
+                    f"[#6e7681]Box: center {box['center']}  size {box['size']}[/#6e7681]"
                 )
-            elif site["type"] == "p2rank":
-                box = {**site["pocket"]}
-            elif site["type"] == "manual":
-                box = {"center": site["center"], "size": site["size"]}
             else:
-                box = pocket.box_blind(ctx["pdb_path"])
-            ctx["box"] = box
-            log(f"[#6e7681]Box: center {box['center']}  size {box['size']}[/#6e7681]")
+                box = None
+                ctx["box"] = None
+                ctx["site_method"] = "Blind docking (box-free)"
+                log(
+                    f"[#6e7681]{engine_profile.label}: box step skipped; blind docking.[/#6e7681]"
+                )
 
+            # Optional box confidence
             # Optional box confidence: redock the co-crystal ligand and measure how
             # well the docked pose reproduces the crystal pose. Fail-soft, opt-in.
-            if site["type"] == "cocrystal" and bool(
-                cfg.get("prep", {}).get("redock_validation", False)
+            if (
+                engine_profile.requires_box
+                and site["type"] == "cocrystal"
+                and bool(cfg.get("prep", {}).get("redock_validation", False))
             ):
                 try:
                     from ezscreen.benchmark.redock import (
@@ -1212,7 +1596,7 @@ class RunWizardScreen(Screen):
                         box,
                         work_dir,
                     )
-                    if _rd and _rd.get("rmsd") is not None:
+                    if _rd.get("rmsd") is not None:
                         ctx["redock_rmsd"] = _rd["rmsd"]
                         if _rd["reliable"]:
                             log(
@@ -1223,8 +1607,16 @@ class RunWizardScreen(Screen):
                                 f"[#e3b341]⚠ Redock RMSD: {_rd['rmsd']:.2f} Å (> {RMSD_WARN_THRESHOLD:.0f} Å) — box may be unreliable[/#e3b341]"
                             )
                     else:
+                        ref_desc = (
+                            f"{_rd.get('reference_ligand', '?')}/"
+                            f"{_rd.get('reference_chain', '?')}/"
+                            f"{_rd.get('reference_resseq', '?')}"
+                        )
+                        reason = _rd.get("reason", "unknown")
+                        detail = _rd.get("detail")
+                        extra = f" ({detail})" if detail else ""
                         log(
-                            "[#6e7681]Redock validation skipped (could not extract/dock the ligand).[/#6e7681]"
+                            f"[#6e7681]Redock validation skipped for {ref_desc}: {reason}{extra}.[/#6e7681]"
                         )
                 except Exception:
                     pass
@@ -1239,6 +1631,33 @@ class RunWizardScreen(Screen):
                 removed = admet_summary.get("admet_removed", 0)
                 log(f"[#6e7681]ADMET: {total - removed:,}/{total:,} passed[/#6e7681]")
                 ligand_input = admet_out
+
+            if ctx.get("engine") == "diffdock":
+                from ezscreen.backends.diffdock.runner import run_diffdock_screening
+
+                log(
+                    "[#79c0ff]Running DiffDock-L blind screening via NVIDIA NIM...[/#79c0ff]"
+                )
+                checkpoint.init_db()
+                checkpoint.create_run(run_id, ctx, 0)
+                result = run_diffdock_screening(
+                    run_id=run_id,
+                    receptor_pdb=Path(receptor_pdb),
+                    ligand_path=Path(ligand_input),
+                    work_dir=work_dir,
+                    progress_cb=log,
+                )
+                if result["status"] == "complete":
+                    checkpoint.mark_run_complete(run_id)
+                    log(f"[#3fb950]Done! Results -> {result['output_dir']}[/#3fb950]")
+                    self.app.call_from_thread(self._on_complete, run_id)
+                    return
+                checkpoint.mark_run_failed(run_id)
+                log(
+                    f"[#f85149]Run failed: {result.get('error_type') or result.get('status', 'unknown')}[/#f85149]"
+                )
+                self.app.call_from_thread(self._on_done)
+                return
 
             # Ligand prep
             _prep_cfg = cfg.get("prep", {})
@@ -1325,89 +1744,223 @@ class RunWizardScreen(Screen):
                     exhaustiveness=ctx.get("exhaustiveness"),
                 )
             else:
-                account_assignments = ctx.get("account_assignments")
-                _active_assignments = [
-                    a for a in (account_assignments or []) if a["shard_count"] != 0
-                ]
-                _has_kaggle_receptor_prep = any(m != "default" for m in receptor_variant_modes)
-                if _has_kaggle_receptor_prep and not _active_assignments:
-                    _creds = auth.load_credentials()
-                    _active_assignments = [
-                        {
-                            "account": {
-                                "name": kaggle_username,
-                                "username": kaggle_username,
-                                "kaggle_json_path": _creds.get("kaggle_json_path", ""),
-                            },
-                            "shard_count": 1,
-                        }
-                    ]
-                if _active_assignments and (len(_active_assignments) > 1 or _has_kaggle_receptor_prep):
-                    # Multi-account/variant Kaggle path
-                    if len(_active_assignments) > 1:
-                        log("[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]")
-                    else:
-                        log("[#79c0ff]Submitting receptor-variant Kaggle run...[/#79c0ff]")
-                    for a in _active_assignments:
-                        n = a["shard_count"] or 1
-                        log(
-                            f"[#6e7681]  {a['account']['name']}: {n} notebook group(s)[/#6e7681]"
-                        )
-                    account_assignments = _active_assignments
-                    result = kaggle_runner.run_multi_account_screening(
-                        run_id=run_id,
-                        receptor_pdbqt=receptor_pdbqt,
-                        receptor_pdbqts=receptor_pdbqt_paths,
-                        receptor_variant_modes=receptor_variant_modes,
-                        receptor_pdb=Path(receptor_pdb) if receptor_pdb else None,
-                        shard_paths=shard_paths,
-                        account_assignments=account_assignments,
-                        work_dir=work_dir,
-                        box_center=box["center"],
-                        box_size=box["size"],
-                        search_mode=ctx["search_params"].get("search_mode", "balance"),
-                        ph=cfg["run"].get("default_ph", 7.4),
-                        retry_limit=cfg["run"].get("shard_retry_limit", 3),
-                        accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
-                        prep_on_kaggle=_prep_on_kaggle,
-                        force_field=_force_field,
-                        enumerate_opts=_enum_opts,
-                        engine=ctx.get("engine", "unidock"),
-                        scoring=ctx.get("scoring", "vina"),
-                    )
-                else:
-                    # Single-account Kaggle path
-                    _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
-                    notebook_src = kaggle_runner.render_vina_notebook(
-                        run_id=run_id,
-                        shard_filenames=[p.name for p in shard_paths],
-                        box_center=box["center"],
-                        box_size=box["size"],
-                        search_mode=ctx["search_params"].get("search_mode", "balance"),
-                        ph=cfg["run"].get("default_ph", 7.4),
-                        prep_on_kaggle=_prep_on_kaggle,
-                        accelerator=_gpu_type,
-                        force_field=_force_field,
-                        enumerate_opts=_enum_opts,
-                        prep_cfg=_prep_cfg,
-                        results_cfg=cfg.get("results", {}),
-                        engine=ctx.get("engine", "unidock"),
-                        scoring=ctx.get("scoring", "vina"),
-                    )
-                    notebook_path = work_dir / "notebook.ipynb"
-                    notebook_path.write_text(notebook_src, encoding="utf-8")
+                if ctx.get("consensus_enabled"):
+                    from ezscreen.results.merger import build_consensus_results
 
-                    log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
-                    result = kaggle_runner.run_screening_job(
-                        run_id=run_id,
-                        receptor_pdbqt=receptor_pdbqt,
-                        shard_paths=shard_paths,
-                        notebook_path=notebook_path,
-                        username=kaggle_username,
-                        work_dir=work_dir,
-                        retry_limit=cfg["run"].get("shard_retry_limit", 3),
-                        accelerator=_gpu_type,
+                    first_engine = ctx.get("engine", "unidock")
+                    second_engine = "gnina" if first_engine != "gnina" else "unidock"
+                    consensus_engines = [first_engine, second_engine]
+                    engine_outputs = []
+                    result = {"status": "failed", "error_type": "consensus_not_started"}
+
+                    for _engine in consensus_engines:
+                        log(f"[#79c0ff]Consensus engine: {_engine}...[/#79c0ff]")
+                        engine_work = work_dir / f"consensus_{_engine}"
+                        engine_work.mkdir(parents=True, exist_ok=True)
+                        account_assignments = ctx.get("account_assignments")
+                        _active_assignments = [
+                            a
+                            for a in (account_assignments or [])
+                            if a["shard_count"] != 0
+                        ]
+                        _has_kaggle_receptor_prep = bool(
+                            receptor_variant_modes
+                        ) and any(m != "default" for m in receptor_variant_modes)
+                        if (
+                            _has_kaggle_receptor_prep or _has_receptor_ensemble
+                        ) and not _active_assignments:
+                            _creds = auth.load_credentials()
+                            _active_assignments = [
+                                {
+                                    "account": {
+                                        "name": kaggle_username,
+                                        "username": kaggle_username,
+                                        "kaggle_json_path": _creds.get(
+                                            "kaggle_json_path", ""
+                                        ),
+                                    },
+                                    "shard_count": 1,
+                                }
+                            ]
+                        if _active_assignments and (
+                            len(_active_assignments) > 1
+                            or _has_kaggle_receptor_prep
+                            or _has_receptor_ensemble
+                        ):
+                            result = kaggle_runner.run_multi_account_screening(
+                                run_id=f"{run_id}-{_engine}",
+                                receptor_pdbqt=receptor_pdbqt,
+                                receptor_pdbqts=receptor_pdbqt_paths,
+                                receptor_variant_modes=receptor_variant_modes,
+                                receptor_pdb=(
+                                    Path(receptor_pdb) if receptor_pdb else None
+                                ),
+                                shard_paths=shard_paths,
+                                account_assignments=_active_assignments,
+                                work_dir=engine_work,
+                                box_center=box["center"],
+                                box_size=box["size"],
+                                search_mode=ctx["search_params"].get(
+                                    "search_mode", "balance"
+                                ),
+                                ph=cfg["run"].get("default_ph", 7.4),
+                                retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                                accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
+                                prep_on_kaggle=_prep_on_kaggle,
+                                force_field=_force_field,
+                                enumerate_opts=_enum_opts,
+                                engine=_engine,
+                                scoring=ctx.get("scoring", "vina"),
+                            )
+                        else:
+                            _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
+                            notebook_src = kaggle_runner.render_vina_notebook(
+                                run_id=f"{run_id}-{_engine}",
+                                shard_filenames=[p.name for p in shard_paths],
+                                box_center=box["center"],
+                                box_size=box["size"],
+                                search_mode=ctx["search_params"].get(
+                                    "search_mode", "balance"
+                                ),
+                                ph=cfg["run"].get("default_ph", 7.4),
+                                prep_on_kaggle=_prep_on_kaggle,
+                                accelerator=_gpu_type,
+                                force_field=_force_field,
+                                enumerate_opts=_enum_opts,
+                                prep_cfg=_prep_cfg,
+                                results_cfg=cfg.get("results", {}),
+                                engine=_engine,
+                                scoring=ctx.get("scoring", "vina"),
+                            )
+                            notebook_path = engine_work / "notebook.ipynb"
+                            notebook_path.write_text(notebook_src, encoding="utf-8")
+                            result = kaggle_runner.run_screening_job(
+                                run_id=f"{run_id}-{_engine}",
+                                receptor_pdbqt=receptor_pdbqt,
+                                shard_paths=shard_paths,
+                                notebook_path=notebook_path,
+                                username=kaggle_username,
+                                work_dir=engine_work,
+                                retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                                accelerator=_gpu_type,
+                                engine=_engine,
+                            )
+                        if result["status"] not in ("complete", "partial"):
+                            break
+                        engine_outputs.append(Path(result["output_dir"]))
+
+                    if len(engine_outputs) == len(consensus_engines):
+                        consensus = build_consensus_results(
+                            engine_outputs, work_dir / "output"
+                        )
+                        result = {
+                            "status": "complete",
+                            "output_dir": consensus["scores_csv"].parent,
+                            "error_type": None,
+                        }
+                else:
+                    account_assignments = ctx.get("account_assignments")
+                    _active_assignments = [
+                        a for a in (account_assignments or []) if a["shard_count"] != 0
+                    ]
+                    _has_kaggle_receptor_prep = bool(receptor_variant_modes) and any(
+                        m != "default" for m in receptor_variant_modes
                     )
+                    if (
+                        _has_kaggle_receptor_prep or _has_receptor_ensemble
+                    ) and not _active_assignments:
+                        _creds = auth.load_credentials()
+                        _active_assignments = [
+                            {
+                                "account": {
+                                    "name": kaggle_username,
+                                    "username": kaggle_username,
+                                    "kaggle_json_path": _creds.get(
+                                        "kaggle_json_path", ""
+                                    ),
+                                },
+                                "shard_count": 1,
+                            }
+                        ]
+                    if _active_assignments and (
+                        len(_active_assignments) > 1
+                        or _has_kaggle_receptor_prep
+                        or _has_receptor_ensemble
+                    ):
+                        # Multi-account/variant Kaggle path
+                        if len(_active_assignments) > 1:
+                            log(
+                                "[#79c0ff]Submitting to multiple Kaggle accounts...[/#79c0ff]"
+                            )
+                        else:
+                            log(
+                                "[#79c0ff]Submitting packed receptor Kaggle run...[/#79c0ff]"
+                            )
+                        for a in _active_assignments:
+                            n = a["shard_count"] or 1
+                            log(
+                                f"[#6e7681]  {a['account']['name']}: {n} notebook group(s)[/#6e7681]"
+                            )
+                        account_assignments = _active_assignments
+                        result = kaggle_runner.run_multi_account_screening(
+                            run_id=run_id,
+                            receptor_pdbqt=receptor_pdbqt,
+                            receptor_pdbqts=receptor_pdbqt_paths,
+                            receptor_variant_modes=receptor_variant_modes,
+                            receptor_pdb=Path(receptor_pdb) if receptor_pdb else None,
+                            shard_paths=shard_paths,
+                            account_assignments=account_assignments,
+                            work_dir=work_dir,
+                            box_center=box["center"],
+                            box_size=box["size"],
+                            search_mode=ctx["search_params"].get(
+                                "search_mode", "balance"
+                            ),
+                            ph=cfg["run"].get("default_ph", 7.4),
+                            retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                            accelerator=ctx.get("gpu_type", "nvidiaTeslaP100"),
+                            prep_on_kaggle=_prep_on_kaggle,
+                            force_field=_force_field,
+                            enumerate_opts=_enum_opts,
+                            engine=ctx.get("engine", "unidock"),
+                            scoring=ctx.get("scoring", "vina"),
+                        )
+                    else:
+                        # Single-account Kaggle path
+                        _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
+                        notebook_src = kaggle_runner.render_vina_notebook(
+                            run_id=run_id,
+                            shard_filenames=[p.name for p in shard_paths],
+                            box_center=box["center"],
+                            box_size=box["size"],
+                            search_mode=ctx["search_params"].get(
+                                "search_mode", "balance"
+                            ),
+                            ph=cfg["run"].get("default_ph", 7.4),
+                            prep_on_kaggle=_prep_on_kaggle,
+                            accelerator=_gpu_type,
+                            force_field=_force_field,
+                            enumerate_opts=_enum_opts,
+                            prep_cfg=_prep_cfg,
+                            results_cfg=cfg.get("results", {}),
+                            engine=ctx.get("engine", "unidock"),
+                            scoring=ctx.get("scoring", "vina"),
+                        )
+                        notebook_path = work_dir / "notebook.ipynb"
+                        notebook_path.write_text(notebook_src, encoding="utf-8")
+
+                        log("[#79c0ff]Submitting to Kaggle...[/#79c0ff]")
+                        result = kaggle_runner.run_screening_job(
+                            run_id=run_id,
+                            receptor_pdbqt=receptor_pdbqt,
+                            shard_paths=shard_paths,
+                            notebook_path=notebook_path,
+                            username=kaggle_username,
+                            work_dir=work_dir,
+                            retry_limit=cfg["run"].get("shard_retry_limit", 3),
+                            accelerator=_gpu_type,
+                            engine=ctx.get("engine", "unidock"),
+                        )
 
             if result["status"] in ("complete", "partial"):
                 if result["status"] == "complete":

@@ -15,6 +15,7 @@ from ezscreen.pocket.detect import (
 # Minimal PDB fixtures
 # ---------------------------------------------------------------------------
 
+
 def _write_pdb(path: Path, lines: list[str]) -> Path:
     pdb = path / "receptor.pdb"
     pdb.write_text("\n".join(lines) + "\n")
@@ -44,15 +45,15 @@ def _make_ca_pdb(tmp_path: Path) -> Path:
 def _make_hetatm_pdb(tmp_path: Path) -> Path:
     """Minimal PDB with a drug-like HETATM (8 atoms, not an additive)."""
     lines = [
-        _atom_line(1, "CA",  "ALA", "A", 5, 0.0, 0.0, 0.0),
-        _atom_line(2, "N1",  "LIG", "A", 1, 10.0, 10.0, 10.0, "HETATM"),
-        _atom_line(3, "C1",  "LIG", "A", 1, 11.0, 10.0, 10.0, "HETATM"),
-        _atom_line(4, "C2",  "LIG", "A", 1, 12.0, 10.0, 10.0, "HETATM"),
-        _atom_line(5, "C3",  "LIG", "A", 1, 13.0, 10.0, 10.0, "HETATM"),
-        _atom_line(6, "C4",  "LIG", "A", 1, 14.0, 10.0, 10.0, "HETATM"),
-        _atom_line(7, "O1",  "LIG", "A", 1, 15.0, 10.0, 10.0, "HETATM"),
-        _atom_line(8, "O2",  "LIG", "A", 1, 16.0, 10.0, 10.0, "HETATM"),
-        _atom_line(9, "S1",  "LIG", "A", 1, 17.0, 10.0, 10.0, "HETATM"),
+        _atom_line(1, "CA", "ALA", "A", 5, 0.0, 0.0, 0.0),
+        _atom_line(2, "N1", "LIG", "A", 1, 10.0, 10.0, 10.0, "HETATM"),
+        _atom_line(3, "C1", "LIG", "A", 1, 11.0, 10.0, 10.0, "HETATM"),
+        _atom_line(4, "C2", "LIG", "A", 1, 12.0, 10.0, 10.0, "HETATM"),
+        _atom_line(5, "C3", "LIG", "A", 1, 13.0, 10.0, 10.0, "HETATM"),
+        _atom_line(6, "C4", "LIG", "A", 1, 14.0, 10.0, 10.0, "HETATM"),
+        _atom_line(7, "O1", "LIG", "A", 1, 15.0, 10.0, 10.0, "HETATM"),
+        _atom_line(8, "O2", "LIG", "A", 1, 16.0, 10.0, 10.0, "HETATM"),
+        _atom_line(9, "S1", "LIG", "A", 1, 17.0, 10.0, 10.0, "HETATM"),
     ]
     return _write_pdb(tmp_path, lines)
 
@@ -70,9 +71,32 @@ def _make_additive_pdb(tmp_path: Path) -> Path:
     return _write_pdb(tmp_path, lines)
 
 
+def _make_modified_residue_pdb(tmp_path: Path) -> Path:
+    lines = [
+        "MODRES 1ABC PTR A  393  TYR  O-PHOSPHOTYROSINE",
+        "SEQADV 1ABC PTR A  393  UNP  P00000    TYR   393 MODIFIED RESIDUE",
+        _atom_line(1, "P", "PTR", "A", 393, 0.0, 0.0, 0.0, "HETATM"),
+        _atom_line(2, "O1", "PTR", "A", 393, 1.0, 0.0, 0.0, "HETATM"),
+        _atom_line(3, "O2", "PTR", "A", 393, 2.0, 0.0, 0.0, "HETATM"),
+        _atom_line(4, "O3", "PTR", "A", 393, 3.0, 0.0, 0.0, "HETATM"),
+        _atom_line(5, "C1", "PTR", "A", 393, 4.0, 0.0, 0.0, "HETATM"),
+        _atom_line(6, "C2", "PTR", "A", 393, 5.0, 0.0, 0.0, "HETATM"),
+        _atom_line(7, "N1", "1N1", "A", 501, 10.0, 10.0, 10.0, "HETATM"),
+        _atom_line(8, "C1", "1N1", "A", 501, 11.0, 10.0, 10.0, "HETATM"),
+        _atom_line(9, "C2", "1N1", "A", 501, 12.0, 10.0, 10.0, "HETATM"),
+        _atom_line(10, "C3", "1N1", "A", 501, 13.0, 10.0, 10.0, "HETATM"),
+        _atom_line(11, "C4", "1N1", "A", 501, 14.0, 10.0, 10.0, "HETATM"),
+        _atom_line(12, "O1", "1N1", "A", 501, 15.0, 10.0, 10.0, "HETATM"),
+        _atom_line(13, "O2", "1N1", "A", 501, 16.0, 10.0, 10.0, "HETATM"),
+        _atom_line(14, "S1", "1N1", "A", 501, 17.0, 10.0, 10.0, "HETATM"),
+    ]
+    return _write_pdb(tmp_path, lines)
+
+
 # ---------------------------------------------------------------------------
 # _box_from_coords
 # ---------------------------------------------------------------------------
+
 
 def test_box_center_single_point():
     box = _box_from_coords([(5.0, 10.0, 15.0)], padding=0.0)
@@ -103,9 +127,12 @@ def test_box_volume_computed():
 # box_from_cocrystal
 # ---------------------------------------------------------------------------
 
+
 def test_box_from_cocrystal_sets_method():
     ligand = {
-        "resname": "LIG", "chain": "A", "resseq": 1,
+        "resname": "LIG",
+        "chain": "A",
+        "resseq": 1,
         "coords": [(0.0, 0.0, 0.0), (10.0, 10.0, 10.0)],
     }
     box = box_from_cocrystal(ligand, padding=5.0)
@@ -116,7 +143,9 @@ def test_box_from_cocrystal_sets_method():
 
 def test_box_from_cocrystal_center():
     ligand = {
-        "resname": "LIG", "chain": "A", "resseq": 1,
+        "resname": "LIG",
+        "chain": "A",
+        "resseq": 1,
         "coords": [(0.0, 0.0, 0.0), (10.0, 0.0, 0.0)],
     }
     box = box_from_cocrystal(ligand, padding=0.0)
@@ -126,6 +155,7 @@ def test_box_from_cocrystal_center():
 # ---------------------------------------------------------------------------
 # box_from_residues
 # ---------------------------------------------------------------------------
+
 
 def test_box_from_residues_correct_center(tmp_path):
     pdb = _make_ca_pdb(tmp_path)
@@ -158,6 +188,7 @@ def test_box_from_residues_chain_filter(tmp_path):
 # find_cocrystal_ligands
 # ---------------------------------------------------------------------------
 
+
 def test_find_cocrystal_ligands_finds_drug_like(tmp_path):
     pdb = _make_hetatm_pdb(tmp_path)
     ligands = find_cocrystal_ligands(pdb)
@@ -177,6 +208,13 @@ def test_find_cocrystal_ligands_centroid_computed(tmp_path):
     cx, cy, cz = ligands[0]["centroid"]
     # atoms span x=10..17, centroid x should be in that range
     assert 10.0 <= cx <= 17.0
+
+
+def test_find_cocrystal_ligands_filters_modified_polymer_residues(tmp_path):
+    pdb = _make_modified_residue_pdb(tmp_path)
+    ligands = find_cocrystal_ligands(pdb)
+    assert len(ligands) == 1
+    assert ligands[0]["resname"] == "1N1"
 
 
 def test_blind_box_covers_whole_protein(tmp_path):

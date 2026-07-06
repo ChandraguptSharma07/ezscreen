@@ -8,7 +8,11 @@ from rdkit import Chem  # noqa: E402
 from rdkit.Chem import AllChem  # noqa: E402
 from rdkit.Geometry import Point3D  # noqa: E402
 
-from ezscreen.benchmark.redock import extract_cocrystal_mol, symmetry_rmsd  # noqa: E402
+from ezscreen.benchmark.redock import (  # noqa: E402
+    extract_cocrystal_mol,
+    redock_cocrystal,
+    symmetry_rmsd,
+)
 
 
 def _embedded_benzene():
@@ -50,19 +54,53 @@ def _het(serial, name, resn, chain, resseq, x, y, z, elem):
 
 def test_extract_cocrystal_mol_selects_the_right_residue(tmp_path):
     pdb = tmp_path / "complex.pdb"
-    pdb.write_text("\n".join([
-        # a protein atom and a water — must be ignored
-        "ATOM      1  CA  ALA A  10      0.000   0.000   0.000  1.00  0.00           C",
-        _het(2, "O", "HOH", "A", 700, 9.0, 9.0, 9.0, "O"),
-        # the target co-crystal ligand LIG/A/500 — three bonded heavy atoms
-        _het(3, "C1", "LIG", "A", 500, 0.0, 0.0, 0.0, "C"),
-        _het(4, "C2", "LIG", "A", 500, 1.5, 0.0, 0.0, "C"),
-        _het(5, "O1", "LIG", "A", 500, 2.9, 0.0, 0.0, "O"),
-        "END",
-    ]) + "\n")
+    pdb.write_text(
+        "\n".join(
+            [
+                # a protein atom and a water — must be ignored
+                "ATOM      1  CA  ALA A  10      0.000   0.000   0.000  1.00  0.00           C",
+                _het(2, "O", "HOH", "A", 700, 9.0, 9.0, 9.0, "O"),
+                # the target co-crystal ligand LIG/A/500 — three bonded heavy atoms
+                _het(3, "C1", "LIG", "A", 500, 0.0, 0.0, 0.0, "C"),
+                _het(4, "C2", "LIG", "A", 500, 1.5, 0.0, 0.0, "C"),
+                _het(5, "O1", "LIG", "A", 500, 2.9, 0.0, 0.0, "O"),
+                "END",
+            ]
+        )
+        + "\n"
+    )
 
     mol = extract_cocrystal_mol(pdb, "LIG", "A", 500)
     assert mol is not None
     assert mol.GetNumAtoms() == 3  # only the LIG residue's atoms
 
     assert extract_cocrystal_mol(pdb, "LIG", "A", 999) is None  # no such residue
+
+
+def test_redock_cocrystal_reports_extract_failure(tmp_path):
+    pdb = tmp_path / "complex.pdb"
+    pdb.write_text(
+        "\n".join(
+            [
+                "ATOM      1  CA  ALA A  10      0.000   0.000   0.000  1.00  0.00           C",
+                _het(2, "O", "HOH", "A", 700, 9.0, 9.0, 9.0, "O"),
+                "END",
+            ]
+        )
+        + "\n"
+    )
+
+    result = redock_cocrystal(
+        tmp_path / "missing_receptor.pdbqt",
+        pdb,
+        {"resname": "LIG", "chain": "A", "resseq": 500},
+        {"center": [0.0, 0.0, 0.0], "size": [10.0, 10.0, 10.0]},
+        tmp_path,
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "extract_failed"
+    assert result["reference_ligand"] == "LIG"
+    assert result["reference_chain"] == "A"
+    assert result["reference_resseq"] == 500
+    assert result["rmsd"] is None

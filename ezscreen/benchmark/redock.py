@@ -23,7 +23,7 @@ def symmetry_rmsd(ref, probe) -> float | None:
         from rdkit import Chem
         from rdkit.Chem import rdMolAlign
 
-        ref_h   = Chem.RemoveHs(ref)
+        ref_h = Chem.RemoveHs(ref)
         probe_h = Chem.RemoveHs(probe)
         return float(rdMolAlign.CalcRMS(probe_h, ref_h))
     except Exception:
@@ -42,9 +42,11 @@ def extract_cocrystal_mol(pdb_path: Path, resname: str, chain: str, resseq: int)
         if not line.startswith(("HETATM", "ATOM")):
             continue
         try:
-            if (line[17:20].strip() == resname
-                    and line[21:22].strip() == chain
-                    and int(line[22:26]) == resseq):
+            if (
+                line[17:20].strip() == resname
+                and line[21:22].strip() == chain
+                and int(line[22:26]) == resseq
+            ):
                 lines.append(line)
         except (ValueError, IndexError):
             continue
@@ -62,6 +64,7 @@ def _mol_to_pdbqt(mol) -> str | None:
     from rdkit.Chem import AllChem
 
     from ezscreen.prep.ligands import _to_pdbqt
+
     try:
         mol_h = AllChem.AddHs(mol, addCoords=True)
     except Exception:
@@ -73,6 +76,7 @@ def _docked_pose_mol(out_pdbqt: Path):
     """Read the top docked pose from a Vina output PDBQT into an RDKit mol."""
     try:
         from meeko import PDBQTMolecule, RDKitMolCreate
+
         pm = PDBQTMolecule.from_file(str(out_pdbqt), skip_typing=True)
         result = RDKitMolCreate.from_pdbqt_mol(pm)
         mols = result[0] if isinstance(result, tuple) else result
@@ -85,6 +89,23 @@ def _docked_pose_mol(out_pdbqt: Path):
     return None
 
 
+def _failure_result(
+    ligand: dict[str, Any],
+    reason: str,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "rmsd": None,
+        "reliable": False,
+        "reference_ligand": ligand.get("resname", ""),
+        "reference_chain": ligand.get("chain", ""),
+        "reference_resseq": ligand.get("resseq"),
+        "status": "skipped",
+        "reason": reason,
+        "detail": detail,
+    }
+
+
 def redock_cocrystal(
     receptor_pdbqt: Path,
     pdb_path: Path,
@@ -92,7 +113,7 @@ def redock_cocrystal(
     box: dict[str, Any],
     work_dir: Path,
     exhaustiveness: int = 8,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Redock the co-crystal ligand into the box; return {rmsd, reliable, reference_ligand}.
 
     Local, single-ligand AutoDock Vina run reusing the local backend. Fail-soft:
@@ -100,23 +121,37 @@ def redock_cocrystal(
     """
     import tempfile
 
+    try:
+        resseq = int(ligand.get("resseq", 0))
+    except (TypeError, ValueError):
+        return _failure_result(
+            ligand, "invalid_ligand_resseq", str(ligand.get("resseq"))
+        )
+
     ref = extract_cocrystal_mol(
-        pdb_path, ligand.get("resname", ""), ligand.get("chain", ""),
-        int(ligand.get("resseq", 0)),
+        pdb_path,
+        ligand.get("resname", ""),
+        ligand.get("chain", ""),
+        resseq,
     )
     if ref is None:
-        return None
+        return _failure_result(
+            ligand,
+            "extract_failed",
+            f"{ligand.get('resname', '')}:{ligand.get('chain', '')}:{resseq}",
+        )
 
     lig_pdbqt_text = _mol_to_pdbqt(ref)
     if not lig_pdbqt_text:
-        return None
+        return _failure_result(ligand, "ligand_pdbqt_failed")
 
     try:
         from ezscreen.backends.local.runner import _run_vina
         from ezscreen.backends.local.vina_binary import get_vina_binary
+
         vina = get_vina_binary()
-    except Exception:
-        return None
+    except Exception as exc:
+        return _failure_result(ligand, "vina_setup_failed", str(exc))
 
     with tempfile.TemporaryDirectory(dir=str(work_dir)) as td:
         tdp = Path(td)
@@ -124,21 +159,33 @@ def redock_cocrystal(
         lig_in.write_text(lig_pdbqt_text)
         out_pdbqt = tdp / "cocrystal_out.pdbqt"
         text = _run_vina(
-            vina, Path(receptor_pdbqt), lig_in, out_pdbqt,
-            box["center"], box["size"], exhaustiveness, num_modes=1,
+            vina,
+            Path(receptor_pdbqt),
+            lig_in,
+            out_pdbqt,
+            box["center"],
+            box["size"],
+            exhaustiveness,
+            num_modes=1,
             ligand_name=ligand.get("resname", "cocrystal"),
         )
         if text is None or not out_pdbqt.exists():
-            return None
+            detail = None if text is None else text.strip()[-400:]
+            return _failure_result(ligand, "vina_docking_failed", detail)
         docked = _docked_pose_mol(out_pdbqt)
 
     if docked is None:
-        return None
+        return _failure_result(ligand, "docked_pose_parse_failed")
     rmsd = symmetry_rmsd(ref, docked)
     if rmsd is None:
-        return None
+        return _failure_result(ligand, "rmsd_failed")
     return {
         "rmsd": round(rmsd, 3),
         "reliable": rmsd <= RMSD_WARN_THRESHOLD,
         "reference_ligand": ligand.get("resname", ""),
+        "reference_chain": ligand.get("chain", ""),
+        "reference_resseq": resseq,
+        "status": "ok",
+        "reason": None,
+        "detail": None,
     }
