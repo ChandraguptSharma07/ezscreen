@@ -1589,24 +1589,53 @@ class RunWizardScreen(Screen):
                     log(
                         "[#79c0ff]Validating box (redocking co-crystal ligand)...[/#79c0ff]"
                     )
-                    _rd = redock_cocrystal(
-                        receptor_pdbqt,
-                        ctx["pdb_path"],
-                        site["ligands"][0],
-                        box,
-                        work_dir,
-                    )
-                    if _rd.get("rmsd") is not None:
-                        ctx["redock_rmsd"] = _rd["rmsd"]
-                        if _rd["reliable"]:
+                    validation_receptors = []
+                    for idx, receptor_path in enumerate(receptor_pdbqt_paths):
+                        variant_name = (
+                            "default" if idx == 0 else Path(receptor_path).stem
+                        )
+                        validation_receptors.append((variant_name, receptor_path))
+
+                    _rd_results = []
+                    for variant_name, receptor_path in validation_receptors:
+                        _rd = redock_cocrystal(
+                            Path(receptor_path),
+                            ctx["pdb_path"],
+                            site["ligands"][0],
+                            box,
+                            work_dir,
+                        )
+                        _rd["receptor_variant"] = variant_name
+                        _rd_results.append(_rd)
+
+                    _rd_ok = [
+                        result
+                        for result in _rd_results
+                        if result.get("rmsd") is not None
+                    ]
+                    if _rd_ok:
+                        _rd_best = min(_rd_ok, key=lambda result: result["rmsd"])
+                        ctx["redock_rmsd"] = _rd_best["rmsd"]
+                        ctx["redock_best_receptor_variant"] = _rd_best[
+                            "receptor_variant"
+                        ]
+                        ctx["redock_best_mode_rank"] = _rd_best.get("best_mode_rank")
+                        _variant_note = ""
+                        if len(validation_receptors) > 1:
+                            _variant_note = f" on {_rd_best['receptor_variant']}"
+                        _mode_note = ""
+                        if _rd_best.get("best_mode_rank"):
+                            _mode_note = f" (mode {_rd_best['best_mode_rank']})"
+                        if _rd_best["reliable"]:
                             log(
-                                f"[#3fb950]Redock RMSD: {_rd['rmsd']:.2f} Å — box reproduces the crystal pose[/#3fb950]"
+                                f"[#3fb950]Redock best RMSD: {_rd_best['rmsd']:.2f} A{_variant_note}{_mode_note} - box reproduces the crystal pose[/#3fb950]"
                             )
                         else:
                             log(
-                                f"[#e3b341]⚠ Redock RMSD: {_rd['rmsd']:.2f} Å (> {RMSD_WARN_THRESHOLD:.0f} Å) — box may be unreliable[/#e3b341]"
+                                f"[#e3b341]Warning: redock best RMSD: {_rd_best['rmsd']:.2f} A{_variant_note}{_mode_note} (> {RMSD_WARN_THRESHOLD:.0f} A) - box may be unreliable[/#e3b341]"
                             )
                     else:
+                        _rd = _rd_results[0]
                         ref_desc = (
                             f"{_rd.get('reference_ligand', '?')}/"
                             f"{_rd.get('reference_chain', '?')}/"
