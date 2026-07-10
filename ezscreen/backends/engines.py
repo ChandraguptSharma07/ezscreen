@@ -117,8 +117,8 @@ _ENGINES: dict[str, EngineProfile] = {
         default_scoring="",
         supports_cnn=False,
         native_score_type="diffdock_confidence",
-        implemented=False,
-        note="Diffusion model; blind docking, no box required.",
+        implemented=True,
+        note="Diffusion model via NVIDIA NIM; blind docking, no box required.",
     ),
     "autodock-gpu": EngineProfile(
         key="autodock-gpu",
@@ -150,8 +150,8 @@ def implemented_engines() -> list[EngineProfile]:
 
 
 def dockable_engines() -> list[EngineProfile]:
-    """Engines the run wizard offers — those with a working docking template."""
-    return [e for e in _ENGINES.values() if e.implemented and e.kaggle_template]
+    """Engines the run wizard offers - those with a working runtime path."""
+    return [e for e in _ENGINES.values() if e.implemented and (e.kaggle_template or e.key == "diffdock")]
 
 
 def scoring_functions(key: str) -> tuple[str, ...]:

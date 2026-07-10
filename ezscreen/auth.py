@@ -68,6 +68,19 @@ def has_nim_key() -> bool:
     return get_nim_key() is not None
 
 
+def onboarding_status() -> dict[str, bool]:
+    from ezscreen.team.client import load_local_state
+
+    state = load_local_state()
+    github_ok = bool(state.get("session_token") and state.get("user_id") and state.get("github_login"))
+    kaggle_ok = has_kaggle_credentials()
+    return {
+        "github_ok": github_ok,
+        "kaggle_ok": kaggle_ok,
+        "complete": github_ok and kaggle_ok,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Team accounts
 # ---------------------------------------------------------------------------

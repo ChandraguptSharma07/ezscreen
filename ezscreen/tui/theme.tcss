@@ -288,9 +288,20 @@ Button:hover {
     margin-left: 1;
 }
 
+#compute-assignment-sections {
+    height: auto;
+    margin-top: 1;
+}
+
 #acct-assignment-section {
     max-height: 16;
     height: auto;
+}
+
+#team-assignment-section {
+    max-height: 16;
+    height: auto;
+    margin-top: 1;
 }
 
 .acct-row {

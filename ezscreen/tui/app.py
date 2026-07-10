@@ -29,8 +29,14 @@ class EzscreenApp(App):
         self.nav = NavState()
 
     def on_mount(self) -> None:
+        from ezscreen import auth
+        from ezscreen.tui.screens.auth_setup import AuthScreen
         from ezscreen.tui.screens.home import HomeScreen
-        self.push_screen(HomeScreen())
+
+        if auth.onboarding_status()["complete"]:
+            self.push_screen(HomeScreen())
+            return
+        self.push_screen(AuthScreen(required=True))
 
     # ------------------------------------------------------------------
     # Clipboard paste — Ctrl+Shift+V into focused Input

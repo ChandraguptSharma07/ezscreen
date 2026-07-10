@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import csv
+import json
 
-from ezscreen.results.merger import join_cnn_scores, merge_shard_results
+from ezscreen.results.merger import (
+    build_consensus_results,
+    join_cnn_scores,
+    merge_shard_results,
+)
 
 
 def _write(path, fieldnames, rows):
@@ -216,3 +221,104 @@ def test_merge_skips_receptor_variant_partial_failures_in_unscored_reasons(tmp_p
     assert reasons[0]["ligand"] == "nb0_lig_00001"
     assert reasons[0]["raw_score"] == "default:20.0; propka_ph:2.0"
     assert result["unscored_reason_counts"]["score_ceiling"] == 1
+
+
+def test_merge_adds_engine_column_and_meta(tmp_path):
+    sd = tmp_path / "shard"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score"], [
+        {"ligand": "nb0_lig_00000", "score": "-8.1"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out, engine="gnina")
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    meta = json.loads((out / "results_meta.json").read_text())
+    assert rows[0]["engine"] == "gnina"
+    assert meta["engine"] == "gnina"
+    assert result["engine"] == "gnina"
+    assert result["score_type"] == "vina_kcal_mol"
+
+
+def test_merge_diffdock_confidence_keeps_highest_and_sorts_desc(tmp_path):
+    sd0 = tmp_path / "d0"
+    sd1 = tmp_path / "d1"
+    sd0.mkdir()
+    sd1.mkdir()
+    _write(sd0 / "scores.csv", ["ligand", "name", "diffdock_confidence", "engine"], [
+        {"ligand": "l0", "name": "A", "diffdock_confidence": "0.2", "engine": "diffdock"},
+        {"ligand": "l1", "name": "B", "diffdock_confidence": "0.7", "engine": "diffdock"},
+    ])
+    _write(sd1 / "scores.csv", ["ligand", "name", "diffdock_confidence", "engine"], [
+        {"ligand": "l0", "name": "A", "diffdock_confidence": "0.9", "engine": "diffdock"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd0, sd1], out, engine="diffdock")
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    assert [r["name"] for r in rows] == ["A", "B"]
+    assert rows[0]["diffdock_confidence"] == "0.9"
+    assert result["score_type"] == "diffdock_confidence"
+
+
+def test_build_consensus_results_averages_normalized_ranks(tmp_path):
+    u = tmp_path / "unidock"
+    g = tmp_path / "gnina"
+    u.mkdir()
+    g.mkdir()
+    _write(u / "scores.csv", ["ligand", "name", "smiles", "score"], [
+        {"ligand": "u0", "name": "A", "smiles": "CCO", "score": "-9.0"},
+        {"ligand": "u1", "name": "B", "smiles": "CCN", "score": "-8.0"},
+        {"ligand": "u2", "name": "C", "smiles": "CCC", "score": "-7.0"},
+    ])
+    _write(g / "scores.csv", ["ligand", "name", "smiles", "score"], [
+        {"ligand": "g0", "name": "A", "smiles": "CCO", "score": "-6.0"},
+        {"ligand": "g1", "name": "B", "smiles": "CCN", "score": "-10.0"},
+        {"ligand": "g2", "name": "C", "smiles": "CCC", "score": "-7.0"},
+    ])
+    (u / "results_meta.json").write_text(json.dumps({"engine": "unidock", "score_col": "score"}))
+    (g / "results_meta.json").write_text(json.dumps({"engine": "gnina", "score_col": "score"}))
+
+    out = tmp_path / "consensus"
+    result = build_consensus_results([u, g], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    meta = json.loads((out / "results_meta.json").read_text())
+    assert result["engine"] == "consensus"
+    assert meta["score_type"] == "consensus_rank"
+    assert [r["name"] for r in rows] == ["B", "A", "C"]
+    assert rows[0]["consensus_rank"] == "1"
+    assert rows[0]["unidock_rank"] == "2"
+    assert rows[0]["gnina_rank"] == "1"
+    assert rows[1]["unidock_rank"] == "1"
+    assert rows[1]["gnina_rank"] == "3"
+
+
+def test_results_report_includes_consensus_section(tmp_path):
+    from ezscreen.results.report_html import write_results_report
+
+    out = tmp_path / "output"
+    out.mkdir()
+    _write(out / "scores.csv", [
+        "consensus_rank", "consensus_norm_rank", "consensus_engines",
+        "ligand", "name", "smiles", "unidock_rank", "gnina_rank",
+    ], [
+        {
+            "consensus_rank": "1",
+            "consensus_norm_rank": "0.25",
+            "consensus_engines": "unidock,gnina",
+            "ligand": "l0",
+            "name": "A",
+            "smiles": "CCO",
+            "unidock_rank": "1",
+            "gnina_rank": "2",
+        },
+    ])
+    (out / "results_meta.json").write_text(json.dumps({"score_type": "consensus_rank"}))
+
+    html = write_results_report(out / "scores.csv", out / "report.html", cluster=False).read_text()
+    assert "Consensus Ranking" in html
+    assert "unidock rank" in html
+

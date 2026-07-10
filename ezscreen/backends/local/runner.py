@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import csv
+import json
 import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from rich.console import Console
 from rich.progress import (
@@ -16,6 +17,7 @@ from rich.progress import (
     TextColumn,
 )
 
+from ezscreen.backends.base import DockingBackend
 from ezscreen.backends.local.vina_binary import get_vina_binary
 
 console = Console()
@@ -200,6 +202,7 @@ def run_local_screening(
                         "ligand":        name,
                         "name":          info.get("name") or name,
                         "docking_score": score,
+                        "engine":        "vina-local",
                     }
                     if info.get("smiles"):
                         row["smiles"] = info["smiles"]
@@ -217,6 +220,60 @@ def run_local_screening(
             w.writerows(rows)
 
     (output_dir / "poses.pdbqt").write_text("\n".join(poses_parts))
+    (output_dir / "results_meta.json").write_text(
+        json.dumps(
+            {
+                "score_type": "vina_kcal_mol",
+                "score_col": "docking_score",
+                "engine": "vina-local",
+            },
+            indent=2,
+        )
+    )
 
     console.print(f"  [green]Local docking done [{run_id}] — {len(rows)} scored poses[/green]")
     return {"status": "complete", "output_dir": output_dir, "error_type": None}
+
+
+class LocalVinaBackend(DockingBackend):
+    engine_key = "vina-local"
+
+    @property
+    def profile(self):
+        from ezscreen.backends import engines
+
+        return engines.get(self.engine_key)
+
+    @property
+    def score_type(self) -> str:
+        return self.profile.native_score_type
+
+    @property
+    def requires_gpu(self) -> bool:
+        return self.profile.requires_gpu
+
+    @property
+    def requires_box(self) -> bool:
+        return self.profile.requires_box
+
+    def run(
+        self,
+        ligands: Sequence[Path],
+        receptor: Path,
+        box: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        if box is None:
+            raise ValueError("Local Vina backend requires a docking box")
+        center = list(box.center if hasattr(box, "center") else box["center"])
+        size = list(box.size if hasattr(box, "size") else box["size"])
+        return run_local_screening(
+            run_id=str(config.get("run_id", "")),
+            receptor_pdbqt=Path(receptor),
+            shard_paths=[Path(p) for p in ligands],
+            box_center=center,
+            box_size=size,
+            work_dir=Path(config["work_dir"]),
+            exhaustiveness=config.get("exhaustiveness"),
+            num_modes=int(config.get("num_modes", 3)),
+        )

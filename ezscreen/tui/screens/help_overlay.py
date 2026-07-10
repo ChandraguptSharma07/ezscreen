@@ -36,7 +36,7 @@ _HELP_TEXT = """\
   Status        Live view of all runs with elapsed time and progress
   ADMET Filter  Apply drug-likeness filters to a compound library
   Validate      Re-score top hits with DiffDock-L via NVIDIA NIM
-  Auth Setup    Store Kaggle credentials and NIM API key
+  Account       Sign in, log out, and manage Kaggle or NIM credentials
   Settings      Edit default pH, search depth, ADMET toggle, etc.
 
 [#6e7681]Docs: https://github.com/ChandraguptSharma07/SwiftScreen[/#6e7681]

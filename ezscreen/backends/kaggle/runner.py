@@ -6,11 +6,12 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import requests as _req
 from rich.console import Console
 
+from ezscreen.backends.base import DockingBackend
 from ezscreen.backends.kaggle.dataset import upload_run_dataset
 from ezscreen.backends.kaggle.kernel import delete_kernel, push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
@@ -21,6 +22,83 @@ _DATASET_TIMEOUT = 300        # 5 minutes
 _MAX_PARALLEL_KERNELS = 2
 _KAGGLE_API_LOCK = threading.Lock()  # serialises env-var switching + authenticate()
 
+
+class KaggleVinaBackend(DockingBackend):
+    def __init__(self, engine: str = "unidock") -> None:
+        self.engine_key = engine
+
+    def run(
+        self,
+        ligands: Sequence[Path],
+        receptor: Path,
+        box: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        if self.requires_box and box is None:
+            raise ValueError(f"{self.engine_key} backend requires a docking box")
+        cfg = dict(config)
+        center = list(box.center if hasattr(box, "center") else box["center"])
+        size = list(box.size if hasattr(box, "size") else box["size"])
+        work_dir = Path(cfg["work_dir"])
+
+        account_assignments = cfg.get("account_assignments")
+        if account_assignments:
+            return run_multi_account_screening(
+                run_id=str(cfg["run_id"]),
+                receptor_pdbqt=Path(receptor),
+                shard_paths=[Path(path) for path in ligands],
+                account_assignments=account_assignments,
+                work_dir=work_dir,
+                receptor_pdbqts=cfg.get("receptor_pdbqts"),
+                receptor_variant_modes=cfg.get("receptor_variant_modes"),
+                receptor_pdb=cfg.get("receptor_pdb"),
+                box_center=center,
+                box_size=size,
+                search_mode=str(cfg.get("search_mode", "balance")),
+                ph=float(cfg.get("ph", 7.4)),
+                retry_limit=int(cfg.get("retry_limit", 3)),
+                accelerator=str(cfg.get("accelerator", "nvidiaTeslaP100")),
+                prep_on_kaggle=bool(cfg.get("prep_on_kaggle", True)),
+                force_field=cfg.get("force_field"),
+                enumerate_opts=cfg.get("enumerate_opts"),
+                engine=self.engine_key,
+                scoring=str(cfg.get("scoring", "vina")),
+            )
+
+        notebook_path = Path(cfg.get("notebook_path", work_dir / "notebook.ipynb"))
+        if not notebook_path.exists():
+            notebook_path.parent.mkdir(parents=True, exist_ok=True)
+            notebook_path.write_text(
+                render_vina_notebook(
+                    run_id=str(cfg["run_id"]),
+                    shard_filenames=[Path(path).name for path in ligands],
+                    box_center=center,
+                    box_size=size,
+                    search_mode=str(cfg.get("search_mode", "balance")),
+                    ph=float(cfg.get("ph", 7.4)),
+                    prep_on_kaggle=bool(cfg.get("prep_on_kaggle", True)),
+                    accelerator=str(cfg.get("accelerator", "nvidiaTeslaP100")),
+                    force_field=cfg.get("force_field"),
+                    enumerate_opts=cfg.get("enumerate_opts"),
+                    prep_cfg=cfg.get("prep_cfg"),
+                    results_cfg=cfg.get("results_cfg"),
+                    engine=self.engine_key,
+                    scoring=str(cfg.get("scoring", "vina")),
+                ),
+                encoding="utf-8",
+            )
+
+        return run_screening_job(
+            run_id=str(cfg["run_id"]),
+            receptor_pdbqt=Path(receptor),
+            shard_paths=[Path(path) for path in ligands],
+            notebook_path=notebook_path,
+            username=str(cfg["username"]),
+            work_dir=work_dir,
+            retry_limit=int(cfg.get("retry_limit", 3)),
+            accelerator=str(cfg.get("accelerator", "nvidiaTeslaP100")),
+            engine=self.engine_key,
+        )
 
 def _wait_for_dataset(dataset_ref: str) -> None:
     """Block until the Kaggle dataset status is 'ready'."""
@@ -208,6 +286,59 @@ def _tag_scores_with_receptor_variant(output_dir: Path, receptor_variant: str | 
             w.writerows(rows)
 
 
+
+
+def _tag_scores_with_engine(output_dir: Path, engine: str) -> None:
+    """Ensure scores rows identify the engine that produced them."""
+    import csv
+
+    path = output_dir / "scores.csv"
+    if not path.exists():
+        return
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+        fieldnames = list(reader.fieldnames or [])
+    if not fieldnames:
+        return
+    if "engine" not in fieldnames:
+        fieldnames.append("engine")
+    for row in rows:
+        row.setdefault("engine", engine)
+        if not row["engine"]:
+            row["engine"] = engine
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+
+
+def _write_results_meta(output_dir: Path, engine: str, score_col: str | None = None) -> None:
+    """Write viewer/report metadata for a downloaded engine output."""
+    import csv
+
+    from ezscreen.backends import engines as _engines
+
+    if score_col is None:
+        scores_csv = output_dir / "scores.csv"
+        if scores_csv.exists():
+            with scores_csv.open(newline="") as f:
+                fieldnames = list(csv.DictReader(f).fieldnames or [])
+            score_col = next(
+                (h for h in fieldnames if "score" in h.lower() or "affinity" in h.lower()),
+                fieldnames[-1] if fieldnames else None,
+            )
+    (output_dir / "results_meta.json").write_text(
+        json.dumps(
+            {
+                "score_type": _engines.native_score_type(engine),
+                "score_col": score_col,
+                "engine": engine,
+            },
+            indent=2,
+        )
+    )
+
 def _write_single_unscored_reasons(output_dir: Path) -> None:
     """Write unscored_reasons.csv for single-notebook outputs."""
     import csv
@@ -289,6 +420,7 @@ def _download_output(
     index_csv: Path | None = None,
     filtered_csv: Path | None = None,
     receptor_variant: str | None = None,
+    engine: str = "unidock",
     retries: int = 5,
 ) -> Path:
     out = work_dir / "output"
@@ -369,6 +501,8 @@ def _download_output(
     _recover_scores(out)
     _enrich_scores_with_identity(out)
     _tag_scores_with_receptor_variant(out, receptor_variant)
+    _tag_scores_with_engine(out, engine)
+    _write_results_meta(out, engine)
     _write_single_unscored_reasons(out)
     return out
 
@@ -382,6 +516,7 @@ def run_screening_job(
     work_dir: Path,
     retry_limit: int = 3,
     accelerator: str = "nvidiaTeslaP100",
+    engine: str = "unidock",
 ) -> dict[str, Any]:
     """
     Full pipeline: upload dataset → push kernel → poll → download output.
@@ -438,7 +573,7 @@ def run_screening_job(
 
         if result["status"] == "complete":
             console.print("  [green]Run complete — downloading results...[/green]")
-            output_dir = _download_output(kernel_ref, work_dir)
+            output_dir = _download_output(kernel_ref, work_dir, engine=engine)
             return {"status": "complete", "output_dir": output_dir, "error_type": None}
 
         if result["status"] == "retry":
@@ -1022,6 +1157,7 @@ def run_multi_account_screening(
                 index_csv=_index_csv,
                 filtered_csv=_filtered_csv,
                 receptor_variant=sub.get("receptor_variant"),
+                engine=engine,
             )
         except Exception as exc:
             console.print(f"  [yellow]Download failed for {sub['kernel_ref']}: {exc}[/yellow]")
@@ -1037,7 +1173,7 @@ def run_multi_account_screening(
 
     from ezscreen.results.merger import merge_shard_results
     main_output = work_dir / "output"
-    merge_shard_results(output_dirs, main_output)
+    merge_shard_results(output_dirs, main_output, engine=engine)
     console.print(
         f"  [green]Multi-account run complete — merged "
         f"{len(output_dirs)}/{len(submissions)} notebook result(s)[/green]"

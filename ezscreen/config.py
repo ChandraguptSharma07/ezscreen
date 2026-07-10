@@ -20,6 +20,9 @@ DEFAULTS: dict[str, Any] = {
     "kaggle": {
         "default_dataset": "",
     },
+    "team": {
+        "server_url": "",
+    },
     "defaults": {
         "box_padding": 5.0,
     },

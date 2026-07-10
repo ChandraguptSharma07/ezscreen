@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual.widgets import (
+    Button,
     Checkbox,
     DataTable,
     Input,
@@ -10,14 +13,17 @@ from textual.widgets import (
     ProgressBar,
     RadioButton,
     Select,
+    Static,
     Switch,
 )
 
 from ezscreen.tui.app import EzscreenApp
 from ezscreen.tui.screens._placeholder import PlaceholderScreen
+from ezscreen.tui.screens.auth_setup import AuthScreen
 from ezscreen.tui.screens.home import HomeScreen
 from ezscreen.tui.screens.md_simulation import MDSimulationScreen
 from ezscreen.tui.screens.run_wizard import RunWizardScreen
+from ezscreen.tui.screens.team_runs import TeamRunsScreen
 
 
 async def test_app_title() -> None:
@@ -26,12 +32,66 @@ async def test_app_title() -> None:
         assert app.title == "ezscreen"
 
 
-async def test_home_screen_mounts() -> None:
+async def test_app_starts_in_required_account_setup_when_onboarding_incomplete(monkeypatch) -> None:
+    from ezscreen import auth
+
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": False, "kaggle_ok": False, "complete": False})
+    app = EzscreenApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, AuthScreen)
+        assert app.screen.query_one("#btn-team-signin", Button)
+
+
+async def test_home_screen_mounts_after_required_onboarding(monkeypatch) -> None:
+    from ezscreen import auth
+
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": True, "kaggle_ok": True, "complete": True})
     app = EzscreenApp()
     async with app.run_test() as pilot:
         await pilot.pause()
         assert isinstance(app.screen, HomeScreen)
         assert app.screen.query_one("#action-md", ListItem).id == "action-md"
+
+async def test_home_screen_has_single_team_action(monkeypatch) -> None:
+    from ezscreen import auth
+
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": True, "kaggle_ok": True, "complete": True})
+    app = EzscreenApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.screen.query_one("#action-team", ListItem).id == "action-team"
+        assert not app.screen.query("#action-team-create")
+        assert not app.screen.query("#action-team-join")
+        assert not app.screen.query("#action-team-pause")
+
+async def test_required_account_screen_can_log_out_without_leaving_screen(monkeypatch, tmp_path) -> None:
+    from ezscreen import auth
+    from ezscreen.team import client as team_client
+
+    state_path = tmp_path / "team-client.json"
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", state_path)
+    team_client.save_local_state({
+        "server_url": "http://team.invalid",
+        "user_name": "Alice",
+        "session_token": "session",
+        "user_id": "gh_1",
+        "github_login": "octocat",
+        "team_id": "team_1",
+    })
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": False, "kaggle_ok": False, "complete": False})
+    monkeypatch.setattr(team_client.TeamClient, "logout", lambda self: {"ok": True})
+
+    app = EzscreenApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert isinstance(app.screen, AuthScreen)
+        await pilot.click("#btn-team-signout")
+        await pilot.pause()
+        assert isinstance(app.screen, AuthScreen)
+        state = team_client.load_local_state()
+        assert state == {"server_url": "http://team.invalid", "user_name": "Alice"}
+        assert "Signed out" in app.screen.query_one("#github-status", Static).renderable
 
 
 async def test_quit_with_q() -> None:
@@ -41,7 +101,10 @@ async def test_quit_with_q() -> None:
     # reaches here only if app exited cleanly
 
 
-async def test_placeholder_navigates_back() -> None:
+async def test_placeholder_navigates_back(monkeypatch) -> None:
+    from ezscreen import auth
+
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": True, "kaggle_ok": True, "complete": True})
     app = EzscreenApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -172,6 +235,86 @@ async def test_run_wizard_records_ensemble_receptors(tmp_path) -> None:
             screen._validate_step()
             == "Ensemble plus consensus ranking is not supported yet."
         )
+
+
+async def test_team_runs_screen_hides_server_and_repo_fields() -> None:
+    app = EzscreenApp()
+    screen = TeamRunsScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        assert screen.query_one("#team-service-text", Static)
+        assert screen.query_one("#team-auth-text", Static)
+        assert screen.query_one("#team-account-note", Static)
+        assert screen.query_one("#btn-team-signin", Button)
+        assert screen.query_one("#btn-team-auth-poll", Button)
+        assert screen.query_one("#team-github-token", Input)
+        assert screen.query_one("#btn-team-connect", Button)
+        assert screen.query_one("#btn-team-disconnect", Button)
+        assert not screen.query("#team-server-url")
+        assert not screen.query("#team-repo")
+
+
+def test_team_runs_sign_in_errors_are_actionable() -> None:
+    from ezscreen.tui.screens.team_runs import format_sign_in_error
+
+    assert "older code" in format_sign_in_error(RuntimeError('HTTP 404: {"error": "not_found"}'))
+    assert "EZSCREEN_GITHUB_CLIENT_ID" in format_sign_in_error(
+        RuntimeError("HTTP 400: EZSCREEN_GITHUB_CLIENT_ID is not configured")
+    )
+
+
+async def test_run_wizard_team_assignment_section_stays_hidden_without_team_toggle(monkeypatch) -> None:
+    from ezscreen.team import client as team_client
+
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", Path("C:/tmp/ezscreen-missing-team-state.json"))
+    app = EzscreenApp()
+    screen = RunWizardScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        section = screen.query_one("#team-assignment-section")
+        assert section.display is False
+
+
+async def test_run_wizard_team_toggle_hides_local_account_assignments(monkeypatch, tmp_path) -> None:
+    import json
+
+    from ezscreen.team import client as team_client
+
+    state_path = tmp_path / "team-state.json"
+    state_path.write_text(
+        json.dumps({"server_url": "http://team.invalid", "user_id": "u1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", state_path)
+
+    def fake_status(self, user_id):
+        return {
+            "team": {"team_id": "team_1"},
+            "members": [
+                {"member_id": "mem_a", "display_name": "Alice", "enabled": 1, "left_at": None},
+                {"member_id": "mem_b", "display_name": "Bob", "enabled": 1, "left_at": None},
+            ],
+        }
+
+    monkeypatch.setattr(team_client.TeamClient, "status", fake_status)
+    app = EzscreenApp()
+    screen = RunWizardScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        screen.query_one("#opt-team-runners", Switch).value = True
+        await pilot.pause()
+
+        assert screen.query_one("#acct-assignment-section").display is False
+        assert screen.query_one("#team-assignment-section").display is True
 
 
 async def test_run_wizard_records_auto_ensemble_settings() -> None:
@@ -341,7 +484,10 @@ async def test_run_wizard_records_consensus_toggle() -> None:
         assert screen.query_one("#opt-consensus", Switch).value is False
 
 
-async def test_home_md_simulation_action_opens_screen() -> None:
+async def test_home_md_simulation_action_opens_screen(monkeypatch) -> None:
+    from ezscreen import auth
+
+    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": True, "kaggle_ok": True, "complete": True})
     app = EzscreenApp()
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -362,3 +508,45 @@ async def test_md_simulation_screen_has_browser_controls() -> None:
         assert app.screen.query_one("#md-progress", ProgressBar)
         assert app.screen.query_one("#md-account", Select)
         assert app.screen.query_one("#md-run-filter", Input)
+
+
+async def test_team_runs_screen_prioritizes_worker_actions_when_already_in_team(monkeypatch, tmp_path) -> None:
+    import json
+
+    from ezscreen.team import client as team_client
+
+    state_path = tmp_path / "team-state.json"
+    state_path.write_text(
+        json.dumps({
+            "server_url": "http://team.invalid",
+            "user_id": "u1",
+            "session_token": "session-token",
+            "github_login": "alice",
+            "user_name": "Alice",
+            "team_id": "team_1",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", state_path)
+
+    def fake_status(self, user_id):
+        return {
+            "team": {"team_id": "team_1"},
+            "members": [
+                {"member_id": "mem_a", "display_name": "Alice", "github_repo": "", "enabled": 1, "paused": 0, "left_at": None},
+            ],
+            "jobs": [],
+        }
+
+    monkeypatch.setattr(team_client.TeamClient, "status", fake_status)
+
+    app = EzscreenApp()
+    screen = TeamRunsScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        assert screen.query_one("#team-worker-actions").display is True
+        assert screen.query_one("#team-setup-section").display is False
+        assert screen.query_one("#btn-team-connect", Button)

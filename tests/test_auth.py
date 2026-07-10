@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from ezscreen.auth import validate_kaggle_json, validate_nim_key
+from ezscreen.auth import onboarding_status, validate_kaggle_json, validate_nim_key
 from ezscreen.errors import KaggleAuthError, NetworkTimeoutError, NIMAuthError
 
 # ---------------------------------------------------------------------------
@@ -110,3 +110,44 @@ def test_validate_nim_key_sends_bearer_header():
         headers = kwargs.get("headers", {})
         assert "Authorization" in headers
         assert "my-secret-key" in headers["Authorization"]
+
+
+def test_onboarding_status_requires_github_and_kaggle(monkeypatch, tmp_path):
+    from ezscreen import auth
+    from ezscreen.team import client as team_client
+
+    creds_path = tmp_path / "credentials"
+    kaggle_json = tmp_path / "kaggle.json"
+    kaggle_json.write_text(json.dumps({"username": "testuser", "key": "abc123xyz"}), encoding="utf-8")
+    state_path = tmp_path / "team-client.json"
+
+    monkeypatch.setattr(auth, "CREDS_PATH", creds_path)
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", state_path)
+
+    assert onboarding_status() == {"github_ok": False, "kaggle_ok": False, "complete": False}
+
+    auth.save_credentials({"kaggle_json_path": str(kaggle_json)})
+    assert onboarding_status() == {"github_ok": False, "kaggle_ok": True, "complete": False}
+
+    team_client.save_local_state({"session_token": "session", "user_id": "gh_1", "github_login": "octocat"})
+    assert onboarding_status() == {"github_ok": True, "kaggle_ok": True, "complete": True}
+
+
+def test_clear_local_session_preserves_server_and_name(monkeypatch, tmp_path):
+    from ezscreen.team import client as team_client
+
+    state_path = tmp_path / "team-client.json"
+    monkeypatch.setattr(team_client, "LOCAL_STATE_PATH", state_path)
+    team_client.save_local_state({
+        "server_url": "http://team.invalid",
+        "user_name": "Alice",
+        "session_token": "session",
+        "user_id": "gh_1",
+        "github_login": "octocat",
+        "team_id": "team_1",
+    })
+
+    kept = team_client.clear_local_session()
+
+    assert kept == {"server_url": "http://team.invalid", "user_name": "Alice"}
+    assert team_client.load_local_state() == kept

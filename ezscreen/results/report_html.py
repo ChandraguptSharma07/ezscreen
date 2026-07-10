@@ -130,8 +130,10 @@ def write_benchmark_report(result: BenchmarkResult, output_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 def _detect_score_col(headers: list[str]) -> str:
+    if "consensus_norm_rank" in headers:
+        return "consensus_norm_rank"
     for h in headers:
-        if "score" in h.lower() or "affinity" in h.lower():
+        if "score" in h.lower() or "affinity" in h.lower() or "confidence" in h.lower():
             return h
     return headers[-1]
 
@@ -556,6 +558,26 @@ def _cnn_section_html(
     return f"{img}<table>{header}\n{body}</table>"
 
 
+def _consensus_section_html(rows: list[dict]) -> str:
+    if not rows or "consensus_rank" not in rows[0]:
+        return ""
+    engine_cols = [h for h in rows[0] if h.endswith("_rank") and h != "consensus_rank"]
+    header = "<tr><th>Consensus</th><th>Compound</th><th>Engines</th>"
+    header += "".join(f"<th>{h.replace('_rank', '')} rank</th>" for h in engine_cols)
+    header += "<th>Norm rank</th></tr>"
+    body = []
+    for row in rows[:25]:
+        name = row.get("name") or row.get("ligand", "")
+        cells = [
+            row.get("consensus_rank", ""),
+            name,
+            row.get("consensus_engines", ""),
+        ]
+        cells.extend(row.get(h, "") for h in engine_cols)
+        cells.append(row.get("consensus_norm_rank", ""))
+        body.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+    return "<table>" + header + "\n" + "\n".join(body) + "</table>"
+
 def write_results_report(
     scores_csv: Path,
     output_path: Path,
@@ -607,6 +629,7 @@ def write_results_report(
             plots_html += f'<img src="data:image/png;base64,{b64}" alt="{alt}">\n'
 
     cnn_html       = _cnn_section_html(rows, score_col, score_label)
+    consensus_html = _consensus_section_html(rows)
     try:
         _ix_path = scores_csv.parent / "interactions_top_n.json"
         _ix_entries = json.loads(_ix_path.read_text()) if _ix_path.exists() else []
@@ -618,6 +641,9 @@ def write_results_report(
     cluster_html = _cluster_section_html(rows, score_col) if cluster else ""
     interactions_html = _interactions_heatmap_html(interactions) if interactions else ""
 
+    consensus_section = (
+        f"\n<h2>Consensus Ranking</h2>\n{consensus_html}" if consensus_html else ""
+    )
     cnn_section = (
         f"\n<h2>GNINA CNN Rescoring</h2>\n{cnn_html}" if cnn_html else ""
     )
@@ -657,6 +683,7 @@ def write_results_report(
 <div class="structs">
 {structs_html}
 </div>
+{consensus_section}
 {cnn_section}
 {validity_section}
 {annotations_section}

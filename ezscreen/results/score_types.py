@@ -23,6 +23,11 @@ _SCORE_TYPES: dict[str, dict[str, str]] = {
         "unit":  "",
         "desc":  "higher = more confident pose",
     },
+    "consensus_rank": {
+        "label": "Consensus normalized rank",
+        "unit":  "",
+        "desc":  "lower = better mean rank across engines",
+    },
 }
 
 

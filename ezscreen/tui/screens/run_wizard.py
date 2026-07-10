@@ -29,9 +29,9 @@ from ezscreen.backends import engines
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
 _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
-    ("MMFF94 — general purpose", "MMFF94"),
-    ("MMFF94s — planar amides/aromatics", "MMFF94s"),
-    ("UFF — broad element coverage", "UFF"),
+    ("MMFF94 â€” general purpose", "MMFF94"),
+    ("MMFF94s â€” planar amides/aromatics", "MMFF94s"),
+    ("UFF â€” broad element coverage", "UFF"),
 ]
 _RECEPTOR_ISOMER_MODES = {"off", "single", "variants"}
 _ENSEMBLE_MODES = {"off", "manual", "auto"}
@@ -63,14 +63,14 @@ _STEPS = [
 ]
 
 _STEP_LABELS = [
-    "Step 1 of 8 — Receptor & Chains",
-    "Step 2 of 8 — Receptor Prep",
-    "Step 3 of 8 — Binding Site",
-    "Step 4 of 8 — Ligand Library",
-    "Step 5 of 8 — Ligand Prep",
-    "Step 6 of 8 — Engine & Scoring",
-    "Step 7 of 8 — Compute",
-    "Step 8 of 8 — Confirm & Submit",
+    "Step 1 of 8 â€” Receptor & Chains",
+    "Step 2 of 8 â€” Receptor Prep",
+    "Step 3 of 8 â€” Binding Site",
+    "Step 4 of 8 â€” Ligand Library",
+    "Step 5 of 8 â€” Ligand Prep",
+    "Step 6 of 8 â€” Engine & Scoring",
+    "Step 7 of 8 â€” Compute",
+    "Step 8 of 8 â€” Confirm & Submit",
 ]
 
 
@@ -102,7 +102,7 @@ class RunWizardScreen(Screen):
         with Vertical(id="wizard-body"):
             yield Static("", id="step-indicator")
             with ContentSwitcher(initial="step-receptor", id="wizard-switcher"):
-                # ── Step 1: Receptor & Chains ─────────────────────────
+                # â”€â”€ Step 1: Receptor & Chains â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 with VerticalScroll(id="step-receptor", classes="wizard-step"):
                     yield Label(
                         "PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file",
@@ -121,7 +121,7 @@ class RunWizardScreen(Screen):
                         yield Label("Select chains to include", classes="form-label")
                         yield Vertical(id="chain-list")
 
-                # ── Step 2: Receptor Prep ─────────────────────────────
+                # â”€â”€ Step 2: Receptor Prep â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 with Vertical(id="step-recprep", classes="wizard-step"):
                     yield Label(
                         "Heteroatoms (waters, ions, cofactors, ligands)",
@@ -191,7 +191,7 @@ class RunWizardScreen(Screen):
                             id="ensemble-max-conformers",
                         )
                     yield Static("", id="ensemble-status", classes="form-status")
-                # ── Step 3: Binding Site ──────────────────────────────
+                # â”€â”€ Step 3: Binding Site â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
                     with RadioSet(id="site-method"):
@@ -220,23 +220,23 @@ class RunWizardScreen(Screen):
                         yield Vertical(id="p2rank-picks")
                     with Vertical(id="sub-blind", classes="site-sub"):
                         yield Static(
-                            "[\u26a0] Blind docking scans the entire protein — "
+                            "[\u26a0] Blind docking scans the entire protein â€” "
                             "slow and noisy. Only use if no binding pocket is known.",
                             id="blind-warning",
                         )
                     with Vertical(id="sub-manual", classes="site-sub"):
-                        yield Label("Box center (Å)", classes="form-label")
+                        yield Label("Box center (Ã…)", classes="form-label")
                         with Horizontal(classes="form-row"):
                             yield Input(placeholder="X", id="manual-cx")
                             yield Input(placeholder="Y", id="manual-cy")
                             yield Input(placeholder="Z", id="manual-cz")
-                        yield Label("Box size (Å)", classes="form-label")
+                        yield Label("Box size (Ã…)", classes="form-label")
                         with Horizontal(classes="form-row"):
                             yield Input(placeholder="X", id="manual-sx")
                             yield Input(placeholder="Y", id="manual-sy")
                             yield Input(placeholder="Z", id="manual-sz")
 
-                # ── Step 3: Ligand Library ────────────────────────────
+                # â”€â”€ Step 3: Ligand Library â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 with Vertical(id="step-ligands", classes="wizard-step"):
                     yield Label(
                         "Ligand library  (.sdf, .smi, .smiles, or .ism file)",
@@ -315,10 +315,17 @@ class RunWizardScreen(Screen):
                 with VerticalScroll(id="step-compute", classes="wizard-step"):
                     yield Label("Compute backend", classes="form-section")
                     yield Static(
-                        "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
+                        "[#6e7681]Run locally on CPU (AutoDock Vina) â€” no Kaggle account needed."
                         " Slower than GPU for large libraries.[/#6e7681]"
                     )
                     yield Switch(id="opt-local", value=False)
+                    yield Label("Use team runners", id="lbl-team-runners", classes="form-section")
+                    yield Static(
+                        "[#6e7681]Split this Kaggle run across enabled team workers.[/#6e7681]",
+                        id="team-runners-note",
+                        classes="form-status",
+                    )
+                    yield Switch(id="opt-team-runners", value=False)
                     yield Label(
                         "Exhaustiveness (Vina)",
                         id="lbl-exhaustiveness",
@@ -330,15 +337,17 @@ class RunWizardScreen(Screen):
                     yield Label("Kaggle GPU", id="lbl-gpu", classes="form-section")
                     with RadioSet(id="opt-gpu-type"):
                         yield RadioButton(
-                            "P100 (16 GB) ★ — standard, widest availability",
+                            "P100 (16 GB) â˜… â€” standard, widest availability",
                             id="rb-p100",
                             value=True,
                         )
                         yield RadioButton(
-                            "T4 × 2 (32 GB) — more memory, uses both GPUs",
+                            "T4 Ã— 2 (32 GB) â€” more memory, uses both GPUs",
                             id="rb-t4x2",
                         )
-                    yield VerticalScroll(id="acct-assignment-section")
+                    with Vertical(id="compute-assignment-sections"):
+                        yield Vertical(id="acct-assignment-section")
+                        yield Vertical(id="team-assignment-section")
 
                 # -- Step 7: Confirm & Submit --
                 with Vertical(id="step-confirm", classes="wizard-step"):
@@ -374,13 +383,14 @@ class RunWizardScreen(Screen):
         self.query_one("#ensemble-manual-box").display = False
         self.query_one("#ensemble-auto-box").display = False
         self.query_one("#opt-exhaustiveness").display = False
+        self._update_team_runner_visibility()
         self.query_one("#lbl-gpu").display = True
         self.query_one("#opt-gpu-type").display = True
         self._load_defaults()
         self._update_engine_note()
         self._update_scoring_options()
         self._update_consensus_visibility()
-        self._populate_account_assignment()
+        self._update_compute_assignment_visibility()
 
     def _load_defaults(self) -> None:
         try:
@@ -416,7 +426,7 @@ class RunWizardScreen(Screen):
         from ezscreen import auth
 
         accounts = auth.get_all_kaggle_accounts()
-        section = self.query_one("#acct-assignment-section", VerticalScroll)
+        section = self.query_one("#acct-assignment-section", Vertical)
         section.remove_children()
         if len(accounts) <= 1:
             section.display = False
@@ -446,6 +456,81 @@ class RunWizardScreen(Screen):
                 )
             )
 
+    def _team_member_input_id(self, member_id: str) -> str:
+        safe = re.sub(r"[^a-zA-Z0-9_-]+", "-", member_id)
+        return f"team-shards-{safe}"
+
+    def _populate_team_member_assignment(self) -> None:
+        section = self.query_one("#team-assignment-section", Vertical)
+        section.remove_children()
+        if self.query_one("#opt-local", Switch).value:
+            section.display = False
+            return
+        section.display = True
+        section.mount(Label("Team runner shard assignment", classes="form-section"))
+        try:
+            from ezscreen.team.client import TeamClient, load_local_state
+
+            state = load_local_state()
+            if not state.get("server_url") or not state.get("user_id"):
+                section.mount(
+                    Static(
+                        "[#6e7681]No team runner is connected. Open Team to connect or resume a worker before using team runners.[/#6e7681]"
+                    )
+                )
+                return
+            status = TeamClient(state["server_url"]).status(state["user_id"])
+            members = [
+                member
+                for member in status.get("members", [])
+                if member.get("enabled") and not member.get("left_at") and (member.get("github_repo") or "").strip()
+            ]
+        except Exception as exc:
+            section.mount(Static(f"[#f85149]Team status unavailable: {exc}[/#f85149]"))
+            return
+        if not members:
+            section.mount(Static("[#6e7681]No connected team workers are available. Open Team to connect or resume a worker.[/#6e7681]"))
+            return
+        section.mount(
+            Static(
+                "[#6e7681]Ligand shards per team worker (blank = auto, 0 = exclude). Receptor and notebook are sent to each assigned worker.[/#6e7681]"
+            )
+        )
+        for member in members:
+            name = member.get("display_name") or member.get("github_repo") or member.get("member_id", "")
+            state = "paused" if member.get("paused") else "enabled"
+            if member.get("active_worker_job_id"):
+                state = "busy"
+            section.mount(
+                Horizontal(
+                    Label(f"  {name} ({state})", classes="acct-row-label"),
+                    Input(
+                        id=self._team_member_input_id(member["member_id"]),
+                        placeholder="auto",
+                        classes="acct-row-input",
+                    ),
+                    classes="acct-row",
+                )
+            )
+
+    def _update_compute_assignment_visibility(self) -> None:
+        local_on = self.query_one("#opt-local", Switch).value
+        team_on = (not local_on) and self.query_one("#opt-team-runners", Switch).value
+        acct_section = self.query_one("#acct-assignment-section", Vertical)
+        team_section = self.query_one("#team-assignment-section", Vertical)
+        if local_on:
+            acct_section.display = False
+            team_section.display = False
+            return
+        if team_on:
+            acct_section.display = False
+            self._populate_team_member_assignment()
+            team_section.display = True
+            return
+        self._populate_account_assignment()
+        acct_section.display = bool(acct_section.children)
+        team_section.display = False
+
     def on_switch_changed(self, event: Switch.Changed) -> None:
         if event.switch.id == "opt-receptor-isomers":
             self.query_one("#receptor-isomer-mode-box").display = event.value
@@ -455,6 +540,10 @@ class RunWizardScreen(Screen):
             self.query_one("#opt-exhaustiveness").display = local_on
             self.query_one("#lbl-gpu").display = not local_on
             self.query_one("#opt-gpu-type").display = not local_on
+            for selector in ("#lbl-team-runners", "#team-runners-note", "#opt-team-runners"):
+                self.query_one(selector).display = (not local_on) and self._has_local_team_state()
+            if local_on:
+                self.query_one("#opt-team-runners", Switch).value = False
             self.query_one("#lbl-depth").display = not local_on
             self.query_one("#opt-depth").display = not local_on
             self.query_one("#lbl-engine").display = not local_on
@@ -463,12 +552,26 @@ class RunWizardScreen(Screen):
             self.query_one("#lbl-scoring").display = not local_on
             self.query_one("#opt-scoring").display = not local_on
             self._update_consensus_visibility(local_on=local_on)
-            acct_section = self.query_one("#acct-assignment-section", VerticalScroll)
-            if local_on:
-                acct_section.display = False
-            else:
-                self._populate_account_assignment()
+            self._update_compute_assignment_visibility()
+        elif event.switch.id == "opt-team-runners":
+            self._update_compute_assignment_visibility()
 
+    def _has_local_team_state(self) -> bool:
+        try:
+            from ezscreen.team.client import load_local_state
+
+            state = load_local_state()
+            return bool(state.get("server_url") and state.get("user_id"))
+        except Exception:
+            return False
+
+    def _update_team_runner_visibility(self) -> None:
+        visible = self._has_local_team_state()
+        for selector in ("#lbl-team-runners", "#team-runners-note", "#opt-team-runners"):
+            self.query_one(selector).display = visible
+        if not visible:
+            self.query_one("#opt-team-runners", Switch).value = False
+        self._update_compute_assignment_visibility()
     def _update_ui(self) -> None:
         self.query_one("#step-indicator", Static).update(
             f"[#6e7681]{_STEP_LABELS[self._step]}[/#6e7681]"
@@ -718,7 +821,7 @@ class RunWizardScreen(Screen):
             select.value = options[0][1]
 
     # ------------------------------------------------------------------
-    # Step 1 — Receptor validation
+    # Step 1 â€” Receptor validation
     # ------------------------------------------------------------------
 
     def _start_rec_validate(self) -> None:
@@ -800,7 +903,7 @@ class RunWizardScreen(Screen):
         self._cocrystal_ligands = list(cocrystal)
         co_txt = f"  {len(cocrystal)} co-crystal ligand(s) found." if cocrystal else ""
         self.query_one("#rec-status", Static).update(
-            f"[#3fb950]Valid — {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
+            f"[#3fb950]Valid â€” {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
         )
         self.query_one("#btn-rec-validate").disabled = False
 
@@ -819,7 +922,7 @@ class RunWizardScreen(Screen):
                 af_ver or "", "AlphaFold"
             )
             self.query_one("#af-warning", Static).update(
-                f"[#e3b341]\u26a0  {ver_label} structure detected — "
+                f"[#e3b341]\u26a0  {ver_label} structure detected â€” "
                 "P2Rank will use AF profile. Pocket reliability is lower.[/#e3b341]"
             )
             self.query_one("#af-warning-box").display = True
@@ -1029,13 +1132,13 @@ class RunWizardScreen(Screen):
     def _show_p2rank_results(self, pockets: list[dict]) -> None:
         if not pockets:
             self.query_one("#p2rank-status", Static).update(
-                "[#e3b341]P2Rank found no pockets for this structure — "
+                "[#e3b341]P2Rank found no pockets for this structure â€” "
                 "try Active site residues or Blind docking.[/#e3b341]"
             )
             return
 
         self.query_one("#p2rank-status", Static).update(
-            f"[#3fb950]{len(pockets)} pocket(s) found — select one below.[/#3fb950]"
+            f"[#3fb950]{len(pockets)} pocket(s) found â€” select one below.[/#3fb950]"
         )
         picks = self.query_one("#p2rank-picks", Vertical)
         picks.remove_children()
@@ -1192,6 +1295,7 @@ class RunWizardScreen(Screen):
 
         elif step == "step-compute":
             self._ctx["run_locally"] = self.query_one("#opt-local", Switch).value
+            self._ctx["use_team_runners"] = (not self._ctx["run_locally"]) and self.query_one("#opt-team-runners", Switch).value
             has_ensemble = self._ctx.get(
                 "ensemble_mode", "off"
             ) != "off" or self._ctx.get("ensemble_receptor_paths")
@@ -1210,28 +1314,61 @@ class RunWizardScreen(Screen):
                 return "Exhaustiveness must be a whole number."
             # Collect account shard assignments when Kaggle backend is selected
             if not self._ctx["run_locally"]:
-                from ezscreen import auth
-
-                accounts = auth.get_all_kaggle_accounts()
-                if len(accounts) > 1:
-                    assignments = []
-                    for acct in accounts:
-                        safe = acct["name"].replace(" ", "-").lower()
-                        try:
-                            raw = self.query_one(
-                                f"#acct-shards-{safe}", Input
-                            ).value.strip()
-                            count = (
-                                int(raw) if raw else None
-                            )  # None = auto, 0 = exclude, N = explicit
-                        except Exception:
-                            count = None
-                        assignments.append({"account": acct, "shard_count": count})
-                    self._ctx["account_assignments"] = assignments
-                else:
+                if self._ctx.get("use_team_runners"):
                     self._ctx["account_assignments"] = None
+                    self._ctx["team_member_assignments"] = []
+                    try:
+                        from ezscreen.team.client import TeamClient, load_local_state
+
+                        state = load_local_state()
+                        status = TeamClient(state["server_url"]).status(state["user_id"])
+                        team_assignments = []
+                        for member in status.get("members", []):
+                            if not member.get("enabled") or member.get("left_at") or not (member.get("github_repo") or "").strip():
+                                continue
+                            input_id = self._team_member_input_id(member["member_id"])
+                            raw = self.query_one(f"#{input_id}", Input).value.strip()
+                            count = int(raw) if raw else None
+                            if count is not None and count < 0:
+                                return "Team runner shard counts must be zero or greater."
+                            team_assignments.append(
+                                {
+                                    "member_id": member["member_id"],
+                                    "display_name": member.get("display_name", ""),
+                                    "github_repo": member.get("github_repo") or "",
+                                    "shard_count": count,
+                                }
+                            )
+                        self._ctx["team_member_assignments"] = team_assignments
+                    except ValueError:
+                        return "Team runner shard counts must be whole numbers."
+                    except Exception as exc:
+                        return f"Team runner assignments are unavailable: {exc}"
+                else:
+                    from ezscreen import auth
+
+                    accounts = auth.get_all_kaggle_accounts()
+                    if len(accounts) > 1:
+                        assignments = []
+                        for acct in accounts:
+                            safe = acct["name"].replace(" ", "-").lower()
+                            try:
+                                raw = self.query_one(
+                                    f"#acct-shards-{safe}", Input
+                                ).value.strip()
+                                count = (
+                                    int(raw) if raw else None
+                                )  # None = auto, 0 = exclude, N = explicit
+                            except Exception:
+                                count = None
+                            assignments.append({"account": acct, "shard_count": count})
+                        self._ctx["account_assignments"] = assignments
+                    else:
+                        self._ctx["account_assignments"] = None
+                    self._ctx["team_member_assignments"] = []
             else:
                 self._ctx["account_assignments"] = None
+                self._ctx["team_member_assignments"] = []
 
         return None
 
@@ -1291,17 +1428,17 @@ class RunWizardScreen(Screen):
         return {"type": "blind"}
 
     # ------------------------------------------------------------------
-    # Step 5 — Confirm summary
+    # Step 5 â€” Confirm summary
     # ------------------------------------------------------------------
 
     def _populate_confirm(self) -> None:
         ctx = self._ctx
         pdb = ctx.get("pdb_id") or (
-            ctx["pdb_path"].name if ctx.get("pdb_path") else "—"
+            ctx["pdb_path"].name if ctx.get("pdb_path") else "â€”"
         )
         chains = ", ".join(ctx.get("selected_chains", []))
-        site = ctx.get("site_method", "—")
-        lig = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
+        site = ctx.get("site_method", "â€”")
+        lig = ctx["ligand_path"].name if ctx.get("ligand_path") else "â€”"
         admet = "yes" if ctx.get("admet_pre_filter") else "no"
         depth = ctx.get("search_label", "Balanced")
         force_field = ctx.get("force_field", "MMFF94")
@@ -1342,9 +1479,9 @@ class RunWizardScreen(Screen):
             backend = "NVIDIA NIM API"
         else:
             gpu_label = "T4 x 2" if ctx.get("gpu_type") == "nvidiaTeslaT4" else "P100"
-            backend = f"Kaggle GPU ({gpu_label})"
+            backend = "Team runners" if ctx.get("use_team_runners") else f"Kaggle GPU ({gpu_label})"
         af_note = (
-            "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
+            "\n[#e3b341]\u26a0  AlphaFold structure â€” P2Rank AF profile active[/#e3b341]"
             if ctx.get("is_alphafold")
             else ""
         )
@@ -1704,12 +1841,20 @@ class RunWizardScreen(Screen):
                 "ring": bool(_prep_cfg.get("enumerate_ring", False)),
                 "max_variants": int(_prep_cfg.get("max_variants_per_ligand", 4)),
             }
-            account_assignments = ctx.get("account_assignments")
-            _active = [a for a in (account_assignments or []) if a["shard_count"] != 0]
-            if _active and len(_active) > 1:
-                n_shards_target = sum(a["shard_count"] or 1 for a in _active)
+            if ctx.get("use_team_runners"):
+                team_assignments = ctx.get("team_member_assignments")
+                _active = [a for a in (team_assignments or []) if a["shard_count"] != 0]
+                if _active:
+                    n_shards_target = sum(a["shard_count"] or 1 for a in _active)
+                else:
+                    n_shards_target = None
             else:
-                n_shards_target = None
+                account_assignments = ctx.get("account_assignments")
+                _active = [a for a in (account_assignments or []) if a["shard_count"] != 0]
+                if _active and len(_active) > 1:
+                    n_shards_target = sum(a["shard_count"] or 1 for a in _active)
+                else:
+                    n_shards_target = None
 
             if ctx.get("run_locally"):
                 log("[#79c0ff]Prepping ligands locally...[/#79c0ff]")
@@ -1758,6 +1903,58 @@ class RunWizardScreen(Screen):
                 n_per = lig_result["report"]["total_input"] // len(shard_paths)
                 checkpoint.add_shard(run_id, i, n_per)
 
+            if ctx.get("use_team_runners"):
+                from ezscreen.team.client import TeamClient, load_local_state
+                from ezscreen.team.coordinator import start_team_job, upload_job_files
+
+                state = load_local_state()
+                if not state.get("server_url") or not state.get("user_id"):
+                    raise RuntimeError("Team runner state is missing. Open Team Runs first.")
+                _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
+                notebook_src = kaggle_runner.render_vina_notebook(
+                    run_id=run_id,
+                    shard_filenames=[p.name for p in shard_paths],
+                    box_center=box["center"],
+                    box_size=box["size"],
+                    search_mode=ctx["search_params"].get("search_mode", "balance"),
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    prep_on_kaggle=_prep_on_kaggle,
+                    accelerator=_gpu_type,
+                    force_field=_force_field,
+                    enumerate_opts=_enum_opts,
+                    prep_cfg=_prep_cfg,
+                    results_cfg=cfg.get("results", {}),
+                    engine=ctx.get("engine", "unidock"),
+                    scoring=ctx.get("scoring", "vina"),
+                )
+                notebook_path = work_dir / "team_notebook.ipynb"
+                notebook_path.write_text(notebook_src, encoding="utf-8")
+                client = TeamClient(state["server_url"])
+                team_job = start_team_job(
+                    client=client,
+                    user_id=state["user_id"],
+                    run_id=run_id,
+                    receptor_pdbqt=Path(receptor_pdbqt),
+                    shard_paths=[Path(p) for p in shard_paths],
+                    notebook_path=notebook_path,
+                    engine=ctx.get("engine", "unidock"),
+                    team_member_assignments=ctx.get("team_member_assignments") or [],
+                )
+                log(f"[#79c0ff]Team job queued: {team_job['team_job_id']}[/#79c0ff]")
+                try:
+                    upload_job_files(
+                        client=client,
+                        user_id=state["user_id"],
+                        team_job_id=team_job["team_job_id"],
+                        file_paths=[Path(receptor_pdbqt), notebook_path, *[Path(p) for p in shard_paths]],
+                        expected_ticket_count=sum(len(worker_job.get("files", [])) for worker_job in team_job.get("worker_jobs", [])),
+                        poll_timeout_s=int(cfg.get("run", {}).get("team_upload_ticket_timeout_s", 360)),
+                    )
+                    log("[#3fb950]Team upload tickets consumed; files uploaded directly to Kaggle.[/#3fb950]")
+                except TimeoutError:
+                    log("[#e3b341]Team job is waiting for workers to mint upload tickets.[/#e3b341]")
+                self.app.call_from_thread(self._on_done)
+                return
             if ctx.get("run_locally"):
                 # Local AutoDock Vina path
                 from ezscreen.backends.local.runner import run_local_screening
@@ -2000,7 +2197,7 @@ class RunWizardScreen(Screen):
                 else:
                     checkpoint.mark_run_complete(run_id)
                     log(
-                        f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
+                        f"[#e3b341]\u26a0 Partial results â€” some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
                     )
                 try:
                     from ezscreen.results.methods import (

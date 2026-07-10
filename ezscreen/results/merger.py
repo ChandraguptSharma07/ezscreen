@@ -35,6 +35,28 @@ def _load_index(shard_dirs: list[Path]) -> dict[str, dict]:
     return index
 
 
+
+
+def _infer_engine(shard_dirs: list[Path], rows: list[dict], explicit: str | None) -> str:
+    if explicit:
+        return explicit
+    for row in rows:
+        engine = row.get("engine")
+        if engine:
+            return str(engine)
+    try:
+        import json
+
+        for d in shard_dirs:
+            meta = d / "results_meta.json"
+            if meta.exists():
+                engine = json.loads(meta.read_text()).get("engine")
+                if engine:
+                    return str(engine)
+    except Exception:
+        pass
+    return "unidock"
+
 def _add_efficiency_cols(
     rows: list[dict],
     fieldnames: list[str],
@@ -329,7 +351,135 @@ def _write_unscored_reasons(
     return out
 
 
-def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
+def _score_is_higher_better(engine: str) -> bool:
+    return engine == "diffdock"
+
+
+def _score_col_from_headers(headers: list[str]) -> str:
+    return next(
+        (h for h in headers if "score" in h.lower() or "affinity" in h.lower() or "confidence" in h.lower()),
+        headers[-1] if headers else "",
+    )
+
+
+def _row_identity(row: dict) -> str:
+    return row.get("smiles") or row.get("name") or row.get("ligand") or ""
+
+
+def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
+    """Rank ligands by mean normalized rank across completed engine outputs."""
+    import json
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    by_identity: dict[str, dict[str, Any]] = {}
+    engines_used: list[str] = []
+    fieldnames = [
+        "consensus_rank",
+        "consensus_norm_rank",
+        "consensus_engines",
+        "ligand",
+        "name",
+        "smiles",
+    ]
+
+    for engine_dir in engine_output_dirs:
+        scores_csv = engine_dir / "scores.csv"
+        if not scores_csv.exists():
+            continue
+        meta_path = engine_dir / "results_meta.json"
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        engine = str(meta.get("engine") or engine_dir.name)
+        engines_used.append(engine)
+
+        with scores_csv.open(newline="") as f:
+            rows = list(csv.DictReader(f))
+            headers = list(rows[0].keys()) if rows else []
+        if not rows:
+            continue
+        score_col = str(meta.get("score_col") or _score_col_from_headers(headers))
+
+        def _score_value(row: dict) -> float:
+            try:
+                return float(row.get(score_col, "0"))
+            except (TypeError, ValueError):
+                return 0.0
+
+        ranked = sorted(
+            rows,
+            key=_score_value,
+            reverse=_score_is_higher_better(engine),
+        )
+        denom = max(len(ranked) - 1, 1)
+        score_field = f"{engine}_score"
+        rank_field = f"{engine}_rank"
+        for h in (score_field, rank_field):
+            if h not in fieldnames:
+                fieldnames.append(h)
+
+        for rank, row in enumerate(ranked, 1):
+            identity = _row_identity(row)
+            if not identity:
+                continue
+            entry = by_identity.setdefault(
+                identity,
+                {
+                    "ligand": row.get("ligand", ""),
+                    "name": row.get("name", "") or row.get("ligand", ""),
+                    "smiles": row.get("smiles", ""),
+                    "_norms": [],
+                    "_engines": [],
+                },
+            )
+            for base in ("ligand", "name", "smiles"):
+                if not entry.get(base) and row.get(base):
+                    entry[base] = row.get(base, "")
+            entry[score_field] = row.get(score_col, "")
+            entry[rank_field] = str(rank)
+            entry["_norms"].append((rank - 1) / denom)
+            entry["_engines"].append(engine)
+
+    rows_out: list[dict[str, Any]] = []
+    for entry in by_identity.values():
+        norms = entry.pop("_norms")
+        seen_engines = entry.pop("_engines")
+        if not norms:
+            continue
+        entry["consensus_norm_rank"] = f"{sum(norms) / len(norms):.6f}"
+        entry["consensus_engines"] = ",".join(seen_engines)
+        rows_out.append(entry)
+
+    rows_out.sort(key=lambda r: float(r["consensus_norm_rank"]))
+    for rank, row in enumerate(rows_out, 1):
+        row["consensus_rank"] = str(rank)
+
+    scores_out = output_dir / "scores.csv"
+    if rows_out:
+        with scores_out.open("w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
+            w.writeheader()
+            w.writerows(rows_out)
+    (output_dir / "results_meta.json").write_text(
+        json.dumps(
+            {
+                "score_type": "consensus_rank",
+                "score_col": "consensus_norm_rank",
+                "engine": "consensus",
+                "engines": engines_used,
+            },
+            indent=2,
+        )
+    )
+    return {
+        "scores_csv": scores_out,
+        "total_hits": len(rows_out),
+        "score_col": "consensus_norm_rank",
+        "score_type": "consensus_rank",
+        "engine": "consensus",
+        "engines": engines_used,
+    }
+
+def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     all_rows: list[dict] = []
@@ -346,6 +496,13 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
                 fieldnames = list(reader.fieldnames)
             all_rows.extend(reader)
 
+    result_engine = _infer_engine(shard_dirs, all_rows, engine)
+    if all_rows:
+        if "engine" not in fieldnames:
+            fieldnames.append("engine")
+        for row in all_rows:
+            if not row.get("engine"):
+                row["engine"] = result_engine
     # Attach name/smiles from index if not already in scores.csv
     if index:
         for row in all_rows:
@@ -361,10 +518,9 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             fieldnames += ["conformer_qc"]
 
     id_col = fieldnames[0] if fieldnames else None
-    score_col = next(
-        (h for h in fieldnames if "score" in h.lower() or "affinity" in h.lower()),
-        fieldnames[-1] if fieldnames else None,
-    )
+    score_col = _score_col_from_headers(fieldnames) if fieldnames else None
+
+    higher_is_better = _score_is_higher_better(result_engine)
 
     def _score(row: dict) -> float:
         try:
@@ -382,7 +538,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
         _enable_floor, _score_floor, _score_ceil = True, -15.0, 0.0
 
     score_filtered: list[dict] = []
-    if _enable_floor:
+    if _enable_floor and result_engine != "diffdock":
         # Vina-family scores are always negative for real binding events.
         # Scores below the floor are GPU underflow artifacts; scores at or above
         # the ceiling (≥ 0) are GPU overflow artifacts (e.g. 3.776e+06 kcal/mol).
@@ -410,10 +566,14 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             key = row.get("smiles") or row.get("name") or row.get(id_col, "")
         else:
             key = row.get(id_col, "") if id_col else str(id(row))
-        if key not in best or _score(row) < _score(best[key]):
+        if key not in best:
+            best[key] = row
+            continue
+        better = _score(row) > _score(best[key]) if higher_is_better else _score(row) < _score(best[key])
+        if better:
             best[key] = row
 
-    deduped = sorted(best.values(), key=_score)
+    deduped = sorted(best.values(), key=_score, reverse=higher_is_better)
 
     # Append GPU-filtered molecules with score=0 so they appear in results
     # ranked last rather than being excluded from AUC/EF calculations entirely.
@@ -423,12 +583,15 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
             fieldnames = ["ligand", "score", "name", "smiles"]
         if "name" not in fieldnames and any(r.get("name") for r in gpu_filtered):
             fieldnames += ["name", "smiles"]
+        if "engine" not in fieldnames:
+            fieldnames.append("engine")
         for i, fmol in enumerate(gpu_filtered):
             deduped.append({
                 "ligand": f"gpu_filt_{i:05d}",
                 "score":  0.0,
                 "name":   fmol.get("name", ""),
                 "smiles": fmol.get("smiles", ""),
+                "engine": result_engine,
             })
 
     deduped, fieldnames = _add_efficiency_cols(deduped, fieldnames, score_col)
@@ -481,22 +644,26 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path) -> dict[str, A
         reason_counts["no_pose"] = 0
     reason_counts["gpu_size_filter"] = len(gpu_filtered)
 
-    # Record the native score type so the viewer/report can label the scale.
-    # Default is Vina kcal/mol; the engine selector (Phase 32) will set this per engine.
+    # Record native score metadata so the viewer/report can label the scale.
     import json
 
-    from ezscreen.results.score_types import DEFAULT_SCORE_TYPE
-    (output_dir / "results_meta.json").write_text(
-        json.dumps({"score_type": DEFAULT_SCORE_TYPE, "score_col": score_col}, indent=2)
-    )
+    from ezscreen.backends import engines as _engines
 
+    score_type = _engines.native_score_type(result_engine)
+    (output_dir / "results_meta.json").write_text(
+        json.dumps(
+            {"score_type": score_type, "score_col": score_col, "engine": result_engine},
+            indent=2,
+        )
+    )
     return {
         "scores_csv": scores_out,
         "poses_sdf": poses_out,
         "failed_prep_sdf": failed_out if has_failures else None,
         "total_hits": len(deduped),
         "score_col": score_col,
-        "score_type": DEFAULT_SCORE_TYPE,
+        "score_type": score_type,
+        "engine": result_engine,
         "unscored_reasons_csv": reasons_out,
         "unscored_reason_counts": reason_counts,
     }

@@ -33,15 +33,15 @@ def test_implemented_engines_are_a_subset():
     everything = {e.key for e in engines.all_engines()}
     # UniDock-Pro's structure-based docking == UniDock, so it is not a distinct
     # engine; its value (LBVS/hybrid) is a future feature.
-    assert impl == {"unidock", "gnina"}
-    assert impl < everything  # smina / diffdock / unidock-pro declared but not offered
+    assert impl == {"unidock", "gnina", "diffdock"}
+    assert impl < everything  # smina / unidock-pro declared but not offered
 
 
 def test_dockable_engines_have_a_template():
     dockable = {e.key for e in engines.dockable_engines()}
-    assert dockable == {"unidock", "gnina"}
+    assert dockable == {"unidock", "gnina", "diffdock"}
     for e in engines.dockable_engines():
-        assert e.kaggle_template
+        assert e.kaggle_template or e.key == "diffdock"
 
 
 def test_diffdock_is_box_free():
@@ -60,7 +60,7 @@ def test_offered_engines_exclude_ad4_scoring():
     # ad4 needs precomputed affinity maps, so it is not a drop-in scoring choice.
     for e in engines.dockable_engines():
         assert "ad4" not in e.scoring_functions
-        assert set(e.scoring_functions) == {"vina", "vinardo"}
+        assert set(e.scoring_functions) in ({"vina", "vinardo"}, set())
 
 
 def test_scoring_flag_threaded_into_docking_command():
@@ -148,6 +148,24 @@ def test_kaggle_receptor_variant_notebook_prepares_propka_receptor():
 
 
 
+
+def test_receptor_variant_specs_accept_ensemble_pdbqts(tmp_path):
+    from ezscreen.backends.kaggle import runner
+
+    primary = tmp_path / "receptor.pdbqt"
+    primary.write_text("PRIMARY\n")
+    conf = tmp_path / "receptor_conformer_001_open.pdbqt"
+    conf.write_text("CONF\n")
+
+    specs = runner._receptor_variant_specs(primary, [primary, conf], None)
+
+    assert [s["name"] for s in specs] == ["default", "conformer_001_open"]
+    assert [s["filename"] for s in specs] == [
+        "receptor.pdbqt",
+        "receptor_variant_001.pdbqt",
+    ]
+    assert all(not s["prepare_on_kaggle"] for s in specs)
+
 def test_multi_account_runner_packs_receptor_variants_into_selected_kernel_count(tmp_path, monkeypatch):
     from pathlib import Path
 
@@ -207,7 +225,7 @@ def test_multi_account_runner_packs_receptor_variants_into_selected_kernel_count
         )
         return out
 
-    def fake_merge_shard_results(output_dirs, main_output):
+    def fake_merge_shard_results(output_dirs, main_output, **kwargs):
         main_output.mkdir(parents=True, exist_ok=True)
         (main_output / "scores.csv").write_text("ligand,score,receptor_variant\n")
         return {}
@@ -239,3 +257,50 @@ def test_multi_account_runner_packs_receptor_variants_into_selected_kernel_count
     assert all(len(call["receptor_variants"]) == 2 for call in rendered)
     assert [call["notebook_index"] for call in rendered] == [0, 1, 2, 3]
     assert all(call["total_notebooks"] == 4 for call in rendered)
+
+
+def test_backend_adapters_expose_engine_profile(tmp_path):
+    from ezscreen.backends.kaggle.runner import KaggleVinaBackend
+    from ezscreen.backends.local.runner import LocalVinaBackend
+
+    gnina = KaggleVinaBackend("gnina")
+    local = LocalVinaBackend()
+
+    assert gnina.engine_key == "gnina"
+    assert gnina.requires_gpu
+    assert gnina.requires_box
+    assert gnina.score_type == engines.native_score_type("gnina")
+    assert local.engine_key == "vina-local"
+    assert not local.requires_gpu
+    assert local.requires_box
+
+
+def test_local_backend_adapter_calls_legacy_runner(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from ezscreen.backends.base import DockingBox
+    from ezscreen.backends.local import runner as local_runner
+
+    calls = []
+
+    def fake_run_local_screening(**kwargs):
+        calls.append(kwargs)
+        return {"status": "complete", "output_dir": kwargs["work_dir"] / "output"}
+
+    monkeypatch.setattr(local_runner, "run_local_screening", fake_run_local_screening)
+
+    result = local_runner.LocalVinaBackend().run(
+        ligands=[tmp_path / "shard_0000.pdbqt"],
+        receptor=tmp_path / "receptor.pdbqt",
+        box=DockingBox(center=(1.0, 2.0, 3.0), size=(20.0, 21.0, 22.0)),
+        config={"run_id": "ezs-local", "work_dir": tmp_path / "run", "exhaustiveness": 8},
+    )
+
+    assert result["status"] == "complete"
+    assert calls[0]["run_id"] == "ezs-local"
+    assert calls[0]["box_center"] == [1.0, 2.0, 3.0]
+    assert calls[0]["box_size"] == [20.0, 21.0, 22.0]
+    assert calls[0]["exhaustiveness"] == 8
+    assert calls[0]["shard_paths"] == [Path(tmp_path / "shard_0000.pdbqt")]
+
+
