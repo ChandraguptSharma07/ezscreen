@@ -1289,3 +1289,73 @@ def test_collect_can_resume_from_dataset_ref_only(monkeypatch, tmp_path):
     put_call = next(item for item in calls if item[0] == 'PUT')
     assert put_call[1] == 'wjob_2'
 
+
+def test_list_team_job_workers_and_read_result_zip(tmp_path):
+    store = TeamStore(tmp_path / 'team.db')
+    store.create_team(owner_name='alice', owner_user_id='u1', team_name='Lab')
+    connected = store.connect_worker('u1', github_repo='alice/worker')
+    job = store.create_team_job(
+        user_id='u1',
+        run_id='ezs-results',
+        payload={'files': [{'filename': 'shard.smi', 'size_bytes': 1}]},
+    )
+    worker_job_id = job['worker_jobs'][0]['worker_job_id']
+    payload = b'PK\x05\x06' + (b'\x00' * 18)
+    store.save_result_zip(
+        token=connected['team_token'],
+        worker_job_id=worker_job_id,
+        data=payload,
+        storage_root=tmp_path / 'results',
+    )
+
+    workers = store.list_team_job_workers(user_id='u1', team_job_id=job['team_job_id'])
+
+    assert workers[0]['worker_job_id'] == worker_job_id
+    assert workers[0]['status'] == 'complete'
+    assert store.read_result_zip(user_id='u1', team_job_id=job['team_job_id'], worker_job_id=worker_job_id) == payload
+
+
+def test_dispatch_team_job_workers_uses_local_repo_tokens(monkeypatch):
+    from ezscreen.team import coordinator as coordinator_mod
+
+    dispatches = []
+
+    class FakeClient:
+        def status(self, user_id):
+            assert user_id == 'u1'
+            return {
+                'members': [
+                    {'member_id': 'mem1', 'github_repo': 'alice/worker', 'workflow_file': 'team-worker.yml'},
+                    {'member_id': 'mem2', 'github_repo': 'bob/worker', 'workflow_file': 'team-worker.yml'},
+                ]
+            }
+
+    monkeypatch.setattr(coordinator_mod, 'load_github_dispatch_token', lambda repo: {'alice/worker': 'tok-a'}.get(repo, ''))
+    monkeypatch.setattr(
+        coordinator_mod,
+        'dispatch_worker_workflow',
+        lambda **kwargs: dispatches.append(kwargs),
+    )
+
+    result = coordinator_mod.dispatch_team_job_workers(
+        client=FakeClient(),
+        user_id='u1',
+        team_job={
+            'worker_jobs': [
+                {'worker_job_id': 'w1', 'member_id': 'mem1'},
+                {'worker_job_id': 'w2', 'member_id': 'mem2'},
+            ]
+        },
+    )
+
+    assert dispatches == [{
+        'repo': 'alice/worker',
+        'token': 'tok-a',
+        'mode': 'prepare_upload',
+        'worker_job_id': 'w1',
+        'workflow_file': 'team-worker.yml',
+    }]
+    assert result['dispatched'][0]['worker_job_id'] == 'w1'
+    assert result['skipped'][0]['worker_job_id'] == 'w2'
+    assert result['skipped'][0]['reason'] == 'dispatch_token_missing'
+

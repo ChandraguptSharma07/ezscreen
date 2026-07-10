@@ -67,6 +67,7 @@ def _post_failed(client: TeamClient, worker_job_id: str, *, error_type: str, mes
         payload["message"] = message
     if extra:
         payload.update(extra)
+    print(f"ezscreen worker failed: {payload}", file=sys.stderr)
     client.request(
         "POST",
         "/v1/worker/status",

@@ -48,7 +48,7 @@ class TeamRunsScreen(Screen):
                 yield Static("", id="team-auth-text")
                 yield Static("", id="team-account-note", classes="form-status")
                 yield Label("GitHub setup token", classes="form-label")
-                yield Input(id="team-github-token", password=True, placeholder="local only; not saved")
+                yield Input(id="team-github-token", password=True, placeholder="stored only on this device for worker dispatch")
                 with Horizontal(classes="form-row", id="team-signin-row"):
                     yield Button("Sign in with GitHub", id="btn-team-signin", variant="primary")
                     yield Button("I signed in", id="btn-team-auth-poll")
@@ -241,7 +241,10 @@ class TeamRunsScreen(Screen):
             return
         try:
             from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
-            from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
+            from ezscreen.team.local_credentials import (
+                resolve_worker_kaggle_credentials,
+                save_github_dispatch_token,
+            )
 
             kaggle_creds = resolve_worker_kaggle_credentials(use_local=True)
             repo_info = provision_managed_worker_repo(github_token=github_token)
@@ -255,11 +258,15 @@ class TeamRunsScreen(Screen):
                 team_token=result["team_token"],
                 server_url=default_server_url(),
             )
+            save_github_dispatch_token(worker_repo, github_token)
             state["github_repo"] = worker_repo
             save_local_state(state)
             self.query_one("#team-github-token", Input).value = ""
             action = "created" if repo_info.get("created") else "synced"
-            self._set_status(f"[#3fb950]Worker connected via dedicated private repo {worker_repo} ({action}).[/#3fb950]")
+            self._set_status(
+                f"[#3fb950]Worker connected via dedicated private repo {worker_repo} ({action}). "
+                "Its dispatch token is stored only on this device.[/#3fb950]"
+            )
             self.refresh_status()
         except Exception as exc:
             self._set_status(f"[#f85149]{exc}[/#f85149]")
@@ -280,7 +287,12 @@ class TeamRunsScreen(Screen):
     def disconnect_worker(self) -> None:
         state = load_local_state()
         try:
+            from ezscreen.team.local_credentials import remove_github_dispatch_token
+
+            repo = str(state.get("github_repo") or "")
             self._client().disconnect_worker(user_id=state.get("user_id"))
+            if repo:
+                remove_github_dispatch_token(repo)
             state["github_repo"] = ""
             save_local_state(state)
             self._set_status("[#e3b341]Worker disconnected. Team membership is unchanged; reconnect later to receive jobs again.[/#e3b341]")

@@ -914,6 +914,49 @@ class TeamStore:
             ).fetchall()
         return [Path(row["result_zip_path"]) for row in rows]
 
+    def list_team_job_workers(self, *, user_id: str, team_job_id: str) -> list[dict[str, Any]]:
+        membership = self.active_membership(user_id)
+        if not membership:
+            raise TeamStateError("user is not in an active team")
+        with self.connection() as conn:
+            job = conn.execute("SELECT * FROM team_jobs WHERE team_job_id = ?", (team_job_id,)).fetchone()
+            if not job or job["team_id"] != membership["team_id"]:
+                raise TeamStateError("team job does not belong to this team")
+            rows = conn.execute(
+                """
+                SELECT worker_job_id, member_id, status, result_zip_path, created_at, completed_at, status_payload_json
+                FROM worker_jobs
+                WHERE team_job_id = ?
+                ORDER BY created_at, worker_job_id
+                """,
+                (team_job_id,),
+            ).fetchall()
+        workers = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("status_payload_json") or "{}")
+            workers.append(item)
+        return workers
+
+    def read_result_zip(self, *, user_id: str, team_job_id: str, worker_job_id: str) -> bytes:
+        membership = self.active_membership(user_id)
+        if not membership:
+            raise TeamStateError("user is not in an active team")
+        with self.connection() as conn:
+            row = conn.execute(
+                """
+                SELECT result_zip_path FROM worker_jobs
+                WHERE worker_job_id = ? AND team_job_id = ? AND team_id = ? AND status = 'complete'
+                """,
+                (worker_job_id, team_job_id, membership["team_id"]),
+            ).fetchone()
+        if not row or not row["result_zip_path"]:
+            raise TeamStateError("completed result zip is not available for this worker job")
+        path = Path(row["result_zip_path"])
+        if not path.exists():
+            raise TeamStateError("result zip file is missing on the team server")
+        return path.read_bytes()
+
 
 def extract_result_zip(zip_path: Path, output_dir: Path) -> Path:
     """Extract one worker result ZIP while blocking path traversal."""

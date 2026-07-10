@@ -56,3 +56,4 @@ tmp_logs*/
 # Local scratch ligand libraries and PoC run output
 Enamine_*.sdf
 poc_runs/
+.team_trial_runs/

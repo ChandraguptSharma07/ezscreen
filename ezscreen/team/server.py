@@ -32,6 +32,13 @@ class TeamHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_bytes(self, status: int, data: bytes, *, content_type: str) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         if length == 0:
@@ -187,6 +194,21 @@ class TeamHandler(BaseHTTPRequestHandler):
                 return self._send_json(
                     HTTPStatus.OK,
                     {"tickets": self.store.list_upload_tickets(user_id=self._user_id_from_request(query=query), team_job_id=parts[2])},
+                )
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "jobs" and parts[3] == "workers":
+                return self._send_json(
+                    HTTPStatus.OK,
+                    {"workers": self.store.list_team_job_workers(user_id=self._user_id_from_request(query=query), team_job_id=parts[2])},
+                )
+            if len(parts) == 5 and parts[0] == "v1" and parts[1] == "jobs" and parts[3] == "result":
+                return self._send_bytes(
+                    HTTPStatus.OK,
+                    self.store.read_result_zip(
+                        user_id=self._user_id_from_request(query=query),
+                        team_job_id=parts[2],
+                        worker_job_id=parts[4],
+                    ),
+                    content_type="application/zip",
                 )
             return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
         except Exception as exc:

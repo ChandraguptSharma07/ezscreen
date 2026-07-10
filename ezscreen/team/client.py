@@ -121,6 +121,10 @@ class TeamClient:
         query = urllib.parse.urlencode({"user_id": user_id})
         return self.request("GET", f"/v1/team/status?{query}")
 
+    def team_job_workers(self, *, user_id: str, team_job_id: str) -> list[dict[str, Any]]:
+        query = urllib.parse.urlencode({"user_id": user_id})
+        return self.request("GET", f"/v1/jobs/{team_job_id}/workers?{query}").get("workers", [])
+
     def start_github_device_login(self) -> dict[str, Any]:
         return self.request("POST", "/v1/auth/github/device/start", {})
 
@@ -164,3 +168,19 @@ class TeamClient:
             detail = exc.read().decode("utf-8", errors="replace")
             raise TeamClientError(f"HTTP {exc.code}: {detail}") from exc
         return json.loads(raw) if raw else {}
+
+    def download_result_zip(self, *, user_id: str, team_job_id: str, worker_job_id: str) -> bytes:
+        query = urllib.parse.urlencode({"user_id": user_id})
+        req = urllib.request.Request(
+            f"{self.server_url}/v1/jobs/{team_job_id}/result/{worker_job_id}?{query}",
+            method="GET",
+            headers={"Accept": "application/zip"},
+        )
+        if self.token:
+            req.add_header("Authorization", f"Bearer {self.token}")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise TeamClientError(f"HTTP {exc.code}: {detail}") from exc

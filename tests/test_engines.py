@@ -105,6 +105,27 @@ def test_kaggle_prep_notebook_loads_openbabel_ligand_formats():
 
 
 
+def test_team_worker_notebook_accepts_local_shard_subset():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    src = runner.render_vina_notebook(
+        run_id="ezs-team",
+        shard_filenames=["shard_000.smi", "shard_001.smi"],
+        box_center=[1, 2, 3],
+        box_size=[20, 20, 20],
+        prep_on_kaggle=True,
+    )
+    joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+
+    assert "_missing_shards = []" in joined
+    assert "if not _candidates:" in joined
+    assert "_missing_shards.append(_fn)" in joined
+    assert "assert LIGAND_PATHS" in joined
+    assert "Ignoring shard filenames not present in this dataset" in joined
+
+
 def test_kaggle_receptor_variant_notebook_prepares_propka_receptor():
     import json
 

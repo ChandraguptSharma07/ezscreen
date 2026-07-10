@@ -1905,7 +1905,15 @@ class RunWizardScreen(Screen):
 
             if ctx.get("use_team_runners"):
                 from ezscreen.team.client import TeamClient, load_local_state
-                from ezscreen.team.coordinator import start_team_job, upload_job_files
+                from ezscreen.team.coordinator import (
+                    dispatch_team_job_runs,
+                    dispatch_team_job_workers,
+                    download_team_result_zips,
+                    merge_team_result_zips,
+                    start_team_job,
+                    upload_job_files,
+                    wait_for_team_job,
+                )
 
                 state = load_local_state()
                 if not state.get("server_url") or not state.get("user_id"):
@@ -1929,7 +1937,7 @@ class RunWizardScreen(Screen):
                 )
                 notebook_path = work_dir / "team_notebook.ipynb"
                 notebook_path.write_text(notebook_src, encoding="utf-8")
-                client = TeamClient(state["server_url"])
+                client = TeamClient(state["server_url"], token=state.get("session_token"))
                 team_job = start_team_job(
                     client=client,
                     user_id=state["user_id"],
@@ -1941,6 +1949,25 @@ class RunWizardScreen(Screen):
                     team_member_assignments=ctx.get("team_member_assignments") or [],
                 )
                 log(f"[#79c0ff]Team job queued: {team_job['team_job_id']}[/#79c0ff]")
+                prepare_dispatch = dispatch_team_job_workers(
+                    client=client,
+                    user_id=state["user_id"],
+                    team_job=team_job,
+                )
+                if prepare_dispatch["dispatched"]:
+                    log(
+                        f"[#79c0ff]Triggered {len(prepare_dispatch['dispatched'])} worker upload-ticket workflow(s).[/#79c0ff]"
+                    )
+                if prepare_dispatch["skipped"]:
+                    log(
+                        "[#e3b341]Some workers have no local GitHub dispatch token on this device; "
+                        "their scheduled workflow will pick the job up automatically.[/#e3b341]"
+                    )
+                if prepare_dispatch["failed"]:
+                    log(
+                        f"[#e3b341]Immediate GitHub dispatch failed for {len(prepare_dispatch['failed'])} worker(s); "
+                        "scheduled polling remains available.[/#e3b341]"
+                    )
                 try:
                     upload_job_files(
                         client=client,
@@ -1953,8 +1980,56 @@ class RunWizardScreen(Screen):
                     log("[#3fb950]Team upload tickets consumed; files uploaded directly to Kaggle.[/#3fb950]")
                 except TimeoutError:
                     log("[#e3b341]Team job is waiting for workers to mint upload tickets.[/#e3b341]")
-                self.app.call_from_thread(self._on_done)
-                return
+                    self.app.call_from_thread(self._on_done)
+                    return
+                run_dispatch = dispatch_team_job_runs(
+                    client=client,
+                    user_id=state["user_id"],
+                    team_job=team_job,
+                )
+                if run_dispatch["dispatched"]:
+                    log(
+                        f"[#79c0ff]Triggered {len(run_dispatch['dispatched'])} worker run workflow(s).[/#79c0ff]"
+                    )
+                if run_dispatch["skipped"]:
+                    log(
+                        "[#e3b341]Some workers are relying on scheduled GitHub Actions polling for the run phase.[/#e3b341]"
+                    )
+                if run_dispatch["failed"]:
+                    log(
+                        f"[#e3b341]Immediate GitHub run dispatch failed for {len(run_dispatch['failed'])} worker(s); "
+                        "scheduled polling remains available.[/#e3b341]"
+                    )
+                team_result = wait_for_team_job(
+                    client=client,
+                    user_id=state["user_id"],
+                    team_job_id=team_job["team_job_id"],
+                    poll_interval_s=int(cfg.get("run", {}).get("team_status_poll_interval_s", 15)),
+                    timeout_s=int(cfg.get("run", {}).get("team_job_timeout_s", 7200)),
+                )
+                if team_result.get("status") != "complete":
+                    result = {
+                        "status": "failed",
+                        "error_type": f"team_job_{team_result.get('status', 'failed')}",
+                        "output_dir": work_dir,
+                    }
+                else:
+                    result_zips = download_team_result_zips(
+                        client=client,
+                        user_id=state["user_id"],
+                        team_job=team_job,
+                        output_dir=work_dir / "team_result_zips",
+                    )
+                    merged = merge_team_result_zips(
+                        result_zips,
+                        work_dir,
+                        engine=ctx.get("engine", "unidock"),
+                    )
+                    result = {
+                        "status": "complete",
+                        "output_dir": work_dir,
+                        **merged,
+                    }
             if ctx.get("run_locally"):
                 # Local AutoDock Vina path
                 from ezscreen.backends.local.runner import run_local_screening

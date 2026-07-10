@@ -240,6 +240,32 @@ def sync_managed_worker_repo(repo: str, *, token: str) -> None:
         _put_repo_text_file(repo, path, text, token=token, message=f"ezscreen: sync {path}")
 
 
+def dispatch_worker_workflow(
+    *,
+    repo: str,
+    token: str,
+    mode: str,
+    worker_job_id: str,
+    workflow_file: str = "team-worker.yml",
+) -> None:
+    repo_info = _github_request("GET", f"/repos/{repo}", token=token)
+    default_branch = str(repo_info.get("default_branch", "")).strip()
+    if not default_branch:
+        raise GitHubError(f"GitHub did not return a default branch for {repo}")
+    _github_request(
+        "POST",
+        f"/repos/{repo}/actions/workflows/{urllib.parse.quote(workflow_file, safe='')}/dispatches",
+        token=token,
+        payload={
+            "ref": default_branch,
+            "inputs": {
+                "mode": mode,
+                "worker_job_id": worker_job_id,
+            },
+        },
+    )
+
+
 def provision_managed_worker_repo(*, github_token: str, repo_name: str | None = None) -> dict[str, Any]:
     user = _github_request("GET", "/user", token=github_token)
     login = str(user.get("login", "")).strip()
