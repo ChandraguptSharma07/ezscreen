@@ -189,6 +189,7 @@ def run_kaggle(args: argparse.Namespace, client: TeamClient) -> int:
         with tempfile.TemporaryDirectory(prefix="ezscreen-team-worker-") as tmp:
             work_dir = Path(tmp)
             notebook_path = _download_dataset_file(dataset_ref, "team_notebook.ipynb", work_dir)
+            accelerator = str(job.get("payload", {}).get("accelerator") or "nvidiaTeslaP100")
             for attempt in range(_KERNEL_RETRY_LIMIT + 1):
                 kernel_run_id = _kaggle_kernel_run_id(job["team_job_id"], job["worker_job_id"], attempt)
                 kernel_ref = push_kernel(
@@ -197,6 +198,7 @@ def run_kaggle(args: argparse.Namespace, client: TeamClient) -> int:
                     dataset_ref=dataset_ref,
                     username=os.environ["KAGGLE_USERNAME"],
                     work_dir=work_dir,
+                    accelerator=accelerator,
                 )
                 running_payload = {
                     "dataset_ref": dataset_ref,
@@ -255,6 +257,7 @@ def collect(args: argparse.Namespace, client: TeamClient) -> int:
             with tempfile.TemporaryDirectory(prefix="ezscreen-team-worker-") as tmp:
                 work_dir = Path(tmp)
                 notebook_path = _download_dataset_file(dataset_ref, "team_notebook.ipynb", work_dir)
+                accelerator = str(job.get("payload", {}).get("accelerator") or "nvidiaTeslaP100")
                 kernel_run_id = _kaggle_kernel_run_id(job["team_job_id"], job["worker_job_id"], int(payload.get("retry_attempt") or 0))
                 kernel_ref = push_kernel(
                     run_id=kernel_run_id,
@@ -262,6 +265,7 @@ def collect(args: argparse.Namespace, client: TeamClient) -> int:
                     dataset_ref=dataset_ref,
                     username=os.environ["KAGGLE_USERNAME"],
                     work_dir=work_dir,
+                    accelerator=accelerator,
                 )
                 payload.update({"dataset_ref": dataset_ref, "kernel_ref": kernel_ref, "kernel_run_id": kernel_run_id})
         client.request(

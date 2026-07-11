@@ -23,12 +23,14 @@ _GITHUB_TOKEN_KEY = "github_dispatch_tokens"
 
 def resolve_worker_kaggle_credentials(
     *,
+    team_account_name: str | None = None,
     kaggle_username: str | None = None,
     kaggle_key: str | None = None,
-    use_local: bool = True,
+    use_local: bool = False,
     creds: dict[str, Any] | None = None,
 ) -> WorkerKaggleCredentials:
     """Resolve credentials for GitHub worker secrets without mutating local files."""
+    creds = creds or auth.load_credentials()
     env_username = os.environ.get("KAGGLE_USERNAME")
     env_key = os.environ.get("KAGGLE_KEY")
 
@@ -45,12 +47,28 @@ def resolve_worker_kaggle_credentials(
             source="explicit" if kaggle_key else "environment",
         )
 
-    if not use_local:
-        raise KaggleAuthError(
-            "No Kaggle key provided. Re-run with --use-local-kaggle or pass --kaggle-key."
+    if team_account_name:
+        team_account_name = team_account_name.strip()
+        if not team_account_name:
+            raise KaggleAuthError("Saved team account name is empty.")
+        accounts = {acct["name"]: acct for acct in auth.list_team_accounts(creds)}
+        account = accounts.get(team_account_name)
+        if not account:
+            raise KaggleAuthError(f"Saved team account not found: {team_account_name}")
+        kaggle_json = Path(str(account.get("kaggle_json_path", ""))).expanduser()
+        data = auth.validate_kaggle_json(kaggle_json)
+        return WorkerKaggleCredentials(
+            username=str(account.get("username") or data["username"]),
+            key=data["key"],
+            source=f"saved team account: {team_account_name}",
+            path=kaggle_json,
         )
 
-    creds = creds or auth.load_credentials()
+    if not use_local:
+        raise KaggleAuthError(
+            "Choose a saved team account or provide a Kaggle username and key for this worker."
+        )
+
     kaggle_json = auth.get_kaggle_json_path(creds)
     if kaggle_json is None:
         raise KaggleAuthError("No local kaggle_json_path is saved in ezscreen credentials.")

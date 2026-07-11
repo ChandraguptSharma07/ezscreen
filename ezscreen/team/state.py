@@ -121,6 +121,8 @@ class TeamStore:
                     user_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     github_repo TEXT,
+                    github_installation_id INTEGER,
+                    kaggle_username TEXT,
                     workflow_file TEXT NOT NULL DEFAULT 'team-worker.yml',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     paused INTEGER NOT NULL DEFAULT 0,
@@ -214,6 +216,7 @@ class TeamStore:
                 """
             )
             self._ensure_worker_job_columns(conn)
+            self._ensure_member_columns(conn)
             self._release_stale_worker_slots(conn)
 
 
@@ -221,6 +224,13 @@ class TeamStore:
         columns = {row['name'] for row in conn.execute("PRAGMA table_info(worker_jobs)").fetchall()}
         if 'status_payload_json' not in columns:
             conn.execute("ALTER TABLE worker_jobs ADD COLUMN status_payload_json TEXT NOT NULL DEFAULT '{}'")
+
+    def _ensure_member_columns(self, conn: sqlite3.Connection) -> None:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(members)").fetchall()}
+        if "github_installation_id" not in columns:
+            conn.execute("ALTER TABLE members ADD COLUMN github_installation_id INTEGER")
+        if "kaggle_username" not in columns:
+            conn.execute("ALTER TABLE members ADD COLUMN kaggle_username TEXT")
 
     def _refresh_team_job_status(self, conn: sqlite3.Connection, team_job_id: str) -> None:
         rows = conn.execute(
@@ -529,6 +539,8 @@ class TeamStore:
         user_id: str,
         *,
         github_repo: str,
+        github_installation_id: int | None = None,
+        kaggle_username: str = "",
         workflow_file: str = "team-worker.yml",
     ) -> dict[str, Any]:
         membership = self.active_membership(user_id)
@@ -542,17 +554,36 @@ class TeamStore:
             conn.execute(
                 """
                 UPDATE members
-                SET github_repo = ?, workflow_file = ?, token_hash = ?, enabled = 1, paused = 0
+                SET github_repo = ?, github_installation_id = ?, kaggle_username = ?, workflow_file = ?, token_hash = ?, enabled = 1, paused = 0
                 WHERE member_id = ?
                 """,
-                (github_repo, workflow_file, _hash_token(team_token), membership["member_id"]),
+                (github_repo, github_installation_id, kaggle_username.strip(), workflow_file, _hash_token(team_token), membership["member_id"]),
             )
         return {
             "member_id": membership["member_id"],
             "github_repo": github_repo,
+            "github_installation_id": github_installation_id,
+            "kaggle_username": kaggle_username.strip(),
             "workflow_file": workflow_file,
             "team_token": team_token,
         }
+
+    def set_worker_installation(self, user_id: str, github_installation_id: int | None) -> dict[str, Any]:
+        membership = self.active_membership(user_id)
+        if not membership:
+            raise TeamStateError("user is not in an active team")
+        return self.set_worker_installation_by_member_id(
+            member_id=membership["member_id"],
+            github_installation_id=github_installation_id,
+        )
+
+    def set_worker_installation_by_member_id(self, *, member_id: str, github_installation_id: int | None) -> dict[str, Any]:
+        with self.connection() as conn:
+            conn.execute(
+                "UPDATE members SET github_installation_id = ? WHERE member_id = ?",
+                (github_installation_id, member_id),
+            )
+        return {"member_id": member_id, "github_installation_id": github_installation_id}
 
 
     def disconnect_worker(self, user_id: str) -> dict[str, Any]:
@@ -563,7 +594,7 @@ class TeamStore:
             conn.execute(
                 """
                 UPDATE members
-                SET github_repo = '', paused = 1, active_worker_job_id = NULL
+                SET github_repo = '', github_installation_id = NULL, kaggle_username = '', paused = 1, active_worker_job_id = NULL
                 WHERE member_id = ?
                 """,
                 (membership["member_id"],),
@@ -580,7 +611,7 @@ class TeamStore:
                 dict(row)
                 for row in conn.execute(
                     """
-                    SELECT m.member_id, m.user_id, u.display_name, m.role, m.github_repo,
+                    SELECT m.member_id, m.user_id, u.display_name, m.role, m.github_repo, m.github_installation_id, m.kaggle_username,
                            m.workflow_file, m.enabled, m.paused, m.active_worker_job_id, m.left_at
                     FROM members m JOIN users u ON u.user_id = m.user_id
                     WHERE m.team_id = ? AND m.left_at IS NULL
@@ -656,12 +687,15 @@ class TeamStore:
             worker_jobs = []
             for member, assigned in assignments:
                 worker_job_id = _id("wjob")
+                worker_payload = {
+                    "accelerator": str(payload.get("accelerator") or "nvidiaTeslaP100"),
+                }
                 conn.execute(
                     """
                     INSERT INTO worker_jobs(worker_job_id, team_job_id, team_id, member_id, status, status_payload_json, required_files_json, created_at)
-                    VALUES (?, ?, ?, ?, 'needs_upload_tickets', '{}', ?, ?)
+                    VALUES (?, ?, ?, ?, 'needs_upload_tickets', ?, ?, ?)
                     """,
-                    (worker_job_id, team_job_id, membership["team_id"], member["member_id"], _json(assigned), _now()),
+                    (worker_job_id, team_job_id, membership["team_id"], member["member_id"], _json(worker_payload), _json(assigned), _now()),
                 )
                 conn.execute(
                     "UPDATE members SET active_worker_job_id = ? WHERE member_id = ?",
@@ -937,6 +971,26 @@ class TeamStore:
             item["payload"] = json.loads(item.pop("status_payload_json") or "{}")
             workers.append(item)
         return workers
+
+    def team_job_dispatch_targets(self, *, user_id: str, team_job_id: str) -> list[dict[str, Any]]:
+        membership = self.active_membership(user_id)
+        if not membership:
+            raise TeamStateError("user is not in an active team")
+        with self.connection() as conn:
+            job = conn.execute("SELECT * FROM team_jobs WHERE team_job_id = ?", (team_job_id,)).fetchone()
+            if not job or job["team_id"] != membership["team_id"]:
+                raise TeamStateError("team job does not belong to this team")
+            rows = conn.execute(
+                """
+                SELECT w.worker_job_id, w.member_id, w.status, m.github_repo, m.github_installation_id, m.workflow_file
+                FROM worker_jobs w
+                JOIN members m ON m.member_id = w.member_id
+                WHERE w.team_job_id = ?
+                ORDER BY w.created_at, w.worker_job_id
+                """,
+                (team_job_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def read_result_zip(self, *, user_id: str, team_job_id: str, worker_job_id: str) -> bytes:
         membership = self.active_membership(user_id)

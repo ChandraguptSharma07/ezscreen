@@ -1922,6 +1922,7 @@ class RunWizardScreen(Screen):
                 notebook_src = kaggle_runner.render_vina_notebook(
                     run_id=run_id,
                     shard_filenames=[p.name for p in shard_paths],
+                    receptor_filename=Path(receptor_pdbqt).name,
                     box_center=box["center"],
                     box_size=box["size"],
                     search_mode=ctx["search_params"].get("search_mode", "balance"),
@@ -1946,6 +1947,7 @@ class RunWizardScreen(Screen):
                     shard_paths=[Path(p) for p in shard_paths],
                     notebook_path=notebook_path,
                     engine=ctx.get("engine", "unidock"),
+                    accelerator=_gpu_type,
                     team_member_assignments=ctx.get("team_member_assignments") or [],
                 )
                 log(f"[#79c0ff]Team job queued: {team_job['team_job_id']}[/#79c0ff]")
@@ -2030,7 +2032,7 @@ class RunWizardScreen(Screen):
                         "output_dir": work_dir,
                         **merged,
                     }
-            if ctx.get("run_locally"):
+            elif ctx.get("run_locally"):
                 # Local AutoDock Vina path
                 from ezscreen.backends.local.runner import run_local_screening
 
@@ -2118,6 +2120,7 @@ class RunWizardScreen(Screen):
                             notebook_src = kaggle_runner.render_vina_notebook(
                                 run_id=f"{run_id}-{_engine}",
                                 shard_filenames=[p.name for p in shard_paths],
+                                receptor_filename=Path(receptor_pdbqt).name,
                                 box_center=box["center"],
                                 box_size=box["size"],
                                 search_mode=ctx["search_params"].get(
@@ -2232,6 +2235,7 @@ class RunWizardScreen(Screen):
                         notebook_src = kaggle_runner.render_vina_notebook(
                             run_id=run_id,
                             shard_filenames=[p.name for p in shard_paths],
+                            receptor_filename=Path(receptor_pdbqt).name,
                             box_center=box["center"],
                             box_size=box["size"],
                             search_mode=ctx["search_params"].get(

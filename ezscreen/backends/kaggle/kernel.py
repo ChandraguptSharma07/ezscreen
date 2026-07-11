@@ -59,12 +59,12 @@ def push_kernel(
     # title must slugify to exactly the slug — replace hyphens with spaces so
     # Kaggle's slug derivation round-trips back to the same value
     title = slug.replace("-", " ")
-    # enable_gpu is deprecated in favour of machine_shape per kagglesdk. Sending
-    # enable_gpu=True alongside machine_shape="NvidiaTeslaT4" still produced P100,
-    # so the server appears to prefer the deprecated bool. Force enable_gpu=False
-    # and let machine_shape pick the device. T4 sessions are always 2x T4.
+    # Kaggle still needs GPU to be explicitly enabled or the notebook may start
+    # on a CPU-only runtime even when machine_shape is present. machine_shape
+    # still carries the desired accelerator selection; Kaggle exposes the
+    # dual-T4 shape as GPU_T4x2.
     _MACHINE_SHAPE = {
-        "nvidiaTeslaT4": "NvidiaTeslaT4",
+        "nvidiaTeslaT4": "GPU_T4x2",
         "nvidiaTeslaP100": "NvidiaTeslaP100",
     }
     machine_shape = _MACHINE_SHAPE.get(accelerator)
@@ -75,7 +75,7 @@ def push_kernel(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": False,
+        "enable_gpu": True,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],

@@ -126,6 +126,49 @@ def test_team_worker_notebook_accepts_local_shard_subset():
     assert "Ignoring shard filenames not present in this dataset" in joined
 
 
+def test_team_worker_notebook_uses_shard_prefix_for_ligand_ids():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    src = runner.render_vina_notebook(
+        run_id="ezs-team",
+        shard_filenames=["shard_000.smi", "shard_001.smi"],
+        box_center=[1, 2, 3],
+        box_size=[20, 20, 20],
+        prep_on_kaggle=True,
+    )
+    joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+
+    assert "_shard_prefix = re.sub(r'[^A-Za-z0-9]+', '_', _shard_path.stem).strip('_')" in joined
+    assert "_lig_id = f'{_lig_prefix}_lig_{_prep_passed:05d}'" in joined
+
+
+def test_team_worker_notebook_prefers_packaged_unidock_before_source_build():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    src = runner.render_vina_notebook(
+        run_id="ezs-team",
+        shard_filenames=["shard_000.smi"],
+        box_center=[1, 2, 3],
+        box_size=[20, 20, 20],
+        engine="unidock",
+        prep_on_kaggle=True,
+    )
+    joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+
+    assert "_PACKAGED_BIN = _sh.which('unidock')" in joined
+    assert "_FALLBACK_URL = 'https://github.com/dptech-corp/Uni-Dock/releases/download/1.1.0/unidock-1.1.0-cuda120-linux-x86_64'" in joined
+    assert "_nvcc_bin = _sh.which('nvcc')" in joined
+    assert "if _pl.Path(_BIN).exists() and _os.path.getsize(_BIN) > 500_000:" in joined
+    assert "elif _nvcc_bin:" in joined
+    assert "Downloading UniDock fallback binary" in joined
+    assert "if _pl.Path(_BIN).exists() and _os.path.getsize(_BIN) > 500_000:" in joined
+    assert "elif (not _PACKAGED_BIN) and _pl.Path(_FALLBACK_BIN).exists()" in joined
+
+
 def test_kaggle_receptor_variant_notebook_prepares_propka_receptor():
     import json
 

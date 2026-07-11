@@ -86,25 +86,28 @@ def test_connect_worker_rotates_member_repo_and_token(tmp_path):
     store = TeamStore(tmp_path / "team.db")
     team = store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
 
-    updated = store.connect_worker("u1", github_repo="alice/worker")
+    updated = store.connect_worker("u1", github_repo="alice/worker", kaggle_username="alice_kaggle")
 
     assert updated["github_repo"] == "alice/worker"
+    assert updated["kaggle_username"] == "alice_kaggle"
     assert updated["team_token"]
     status = store.status("u1")
     assert status["members"][0]["github_repo"] == "alice/worker"
+    assert status["members"][0]["kaggle_username"] == "alice_kaggle"
     assert store.worker_from_token(updated["team_token"])["member_id"] == team["member_id"]
 
 
 def test_disconnect_worker_keeps_membership_but_makes_worker_unavailable(tmp_path):
     store = TeamStore(tmp_path / "team.db")
     store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
-    store.connect_worker("u1", github_repo="alice/worker")
+    store.connect_worker("u1", github_repo="alice/worker", kaggle_username="alice_kaggle")
 
     result = store.disconnect_worker("u1")
 
     assert result["disconnected"] is True
     status = store.status("u1")
     assert status["members"][0]["github_repo"] == ""
+    assert status["members"][0]["kaggle_username"] == ""
     assert status["members"][0]["paused"] == 1
 
 
@@ -596,6 +599,30 @@ def test_resolve_worker_kaggle_credentials_prefers_explicit_key(tmp_path):
     assert resolved.source == "explicit"
     assert resolved.path is None
 
+
+def test_resolve_worker_kaggle_credentials_reads_saved_team_account(monkeypatch, tmp_path):
+    from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
+
+    kaggle_json = tmp_path / "team-kaggle.json"
+    kaggle_json.write_text('{"username": "team_user", "key": "team_key"}', encoding="utf-8")
+    monkeypatch.setattr(
+        "ezscreen.auth.list_team_accounts",
+        lambda _creds: [
+            {
+                "name": "Worker A",
+                "username": "team_user",
+                "kaggle_json_path": str(kaggle_json),
+            }
+        ],
+    )
+
+    resolved = resolve_worker_kaggle_credentials(team_account_name="Worker A", creds={})
+
+    assert resolved.username == "team_user"
+    assert resolved.key == "team_key"
+    assert resolved.source == "saved team account: Worker A"
+    assert resolved.path == kaggle_json
+
 def test_worker_selects_explicit_worker_job():
     from ezscreen.team.worker import _select_job
 
@@ -721,6 +748,62 @@ def test_run_kaggle_uses_sanitized_dataset_slug(monkeypatch):
     assert commit['slug'] == 'ezscreen-tjob-16f73f7d6a644c0e-wjob-1578f745788f4ec5'
 
 
+def test_run_kaggle_passes_worker_accelerator_to_push_kernel(monkeypatch):
+    import argparse
+    import os
+
+    from ezscreen.team import worker as worker_mod
+
+    calls = []
+
+    class FakeClient:
+        def request(self, method, path, payload=None):
+            if path == '/v1/worker/jobs':
+                return {
+                    'jobs': [
+                        {
+                            'worker_job_id': 'wjob_1578f745788f4ec5',
+                            'team_job_id': 'tjob_16f73f7d6a644c0e',
+                            'required_files': [],
+                            'payload': {'accelerator': 'nvidiaTeslaT4'},
+                        }
+                    ]
+                }
+            if path == '/v1/worker/upload-tickets?worker_job_id=wjob_1578f745788f4ec5':
+                return {'tickets': [{'filename': 'shard_001.smi', 'blob_token': 'blob-1'}]}
+            calls.append((method, path, payload))
+            return {'ok': True}
+
+    monkeypatch.setattr(worker_mod, 'commit_dataset_from_blob_tokens', lambda **kwargs: f"{kwargs['username']}/{kwargs['slug']}")
+    monkeypatch.setattr(worker_mod, '_wait_for_dataset', lambda _ref: None)
+    monkeypatch.setattr(worker_mod, '_download_dataset_file', lambda *_args, **_kwargs: Path('team_notebook.ipynb'))
+    monkeypatch.setattr(worker_mod, '_finalize_kernel_run', lambda *args, **kwargs: {'status': 'complete'})
+
+    def fake_push_kernel(**kwargs):
+        calls.append(('push', kwargs))
+        return f"{kwargs['username']}/{kwargs['run_id']}"
+
+    monkeypatch.setattr(worker_mod, 'push_kernel', fake_push_kernel)
+    monkeypatch.setenv('KAGGLE_USERNAME', 'worker-user')
+
+    rc = worker_mod.run_kaggle(argparse.Namespace(worker_job_id='wjob_1578f745788f4ec5'), FakeClient())
+
+    assert rc == 0
+    push = next(item for item in calls if item[0] == 'push')[1]
+    assert push['accelerator'] == 'nvidiaTeslaT4'
+
+
+def test_worker_runtime_files_include_notebook_renderer_and_template():
+    from ezscreen.team.github import _worker_runtime_files
+
+    files = _worker_runtime_files()
+
+    assert "ezscreen/backends/kaggle/runner.py" in files
+    assert "ezscreen/backends/kaggle/templates/vina_shard.ipynb.j2" in files
+    assert "jinja2>=3.1.4" in files["pyproject.toml"]
+    assert 'templates/*.j2' in files["pyproject.toml"]
+
+
 def test_acknowledge_upload_queues_run_once_when_worker_uploads_complete(tmp_path):
     store = TeamStore(tmp_path / "team.db")
     team = store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
@@ -755,6 +838,28 @@ def test_acknowledge_upload_queues_run_once_when_worker_uploads_complete(tmp_pat
 
     repeated = store.acknowledge_upload(user_id="u1", ticket_id=tickets[1]["ticket_id"])
     assert repeated == {"ok": True}
+
+
+def test_create_team_job_carries_accelerator_into_worker_payload(tmp_path):
+    store = TeamStore(tmp_path / "team.db")
+    store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
+    connected = store.connect_worker("u1", github_repo="alice/worker")
+
+    job = store.create_team_job(
+        user_id="u1",
+        run_id="ezs-team-accel",
+        payload={
+            "accelerator": "nvidiaTeslaT4",
+            "files": [
+                {"filename": "receptor.pdbqt", "size_bytes": 10, "role": "receptor"},
+                {"filename": "shard_000.smi", "size_bytes": 5, "role": "ligand_shard"},
+            ],
+        },
+    )
+
+    worker_job = store.list_worker_jobs(connected["team_token"])[0]
+    assert worker_job["worker_job_id"] == job["worker_jobs"][0]["worker_job_id"]
+    assert worker_job["payload"]["accelerator"] == "nvidiaTeslaT4"
 
 
 def test_team_http_server_control_plane_flow(tmp_path):
@@ -862,6 +967,40 @@ def test_team_http_server_control_plane_flow(tmp_path):
         server.server_close()
         thread.join(timeout=5)
 
+
+def test_merge_team_result_zips_namespaces_colliding_worker_ids(tmp_path):
+    import csv
+
+    from ezscreen.team.coordinator import merge_team_result_zips
+
+    def write_worker_zip(path: Path, score: str, name: str, smiles: str) -> None:
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr(
+                "scores.csv",
+                f"ligand,score,receptor_variant\nnb0_lig_00000,{score},default\n",
+            )
+            zf.writestr(
+                "index.csv",
+                f"ligand,name,smiles,conformer_qc\nnb0_lig_00000,{name},{smiles},\n",
+            )
+            zf.writestr(
+                "poses.sdf",
+                "nb0_lig_00000\n  ezscreen\n\n0  0  0  0  0  0            999 V2000\nM  END\n$$$$\n",
+            )
+
+    zip_a = tmp_path / "worker_a.zip"
+    zip_b = tmp_path / "worker_b.zip"
+    write_worker_zip(zip_a, "-7.1", "A", "CCO")
+    write_worker_zip(zip_b, "-6.8", "B", "CCN")
+
+    merged = merge_team_result_zips([zip_a, zip_b], tmp_path / "merged", engine="unidock")
+
+    with merged["scores_csv"].open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert len(rows) == 2
+    assert {row["name"] for row in rows} == {"A", "B"}
+    assert all(row["ligand"].startswith("worker_") for row in rows)
+
 def test_team_join_cli_uses_local_kaggle_for_worker_secrets(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
@@ -902,6 +1041,7 @@ def test_team_join_cli_uses_local_kaggle_for_worker_secrets(monkeypatch, tmp_pat
             "invite_1",
             "--user",
             "alice",
+            "--use-local-kaggle",
         ],
         env={"GITHUB_TOKEN": "gh_token"},
     )
@@ -950,8 +1090,15 @@ def test_team_connect_worker_cli_updates_repo_and_secrets(monkeypatch, tmp_path)
     connect_calls = []
     configure_calls = []
 
-    def fake_connect_worker(self, *, github_repo, workflow_file="team-worker.yml"):
-        connect_calls.append({"github_repo": github_repo, "workflow_file": workflow_file, "token": self.token})
+    def fake_connect_worker(self, *, github_repo, kaggle_username="", workflow_file="team-worker.yml"):
+        connect_calls.append(
+            {
+                "github_repo": github_repo,
+                "kaggle_username": kaggle_username,
+                "workflow_file": workflow_file,
+                "token": self.token,
+            }
+        )
         return {"member_id": "m_1", "github_repo": github_repo, "workflow_file": workflow_file, "team_token": "team-token"}
 
     def fake_configure_worker_repo(**kwargs):
@@ -966,13 +1113,19 @@ def test_team_connect_worker_cli_updates_repo_and_secrets(monkeypatch, tmp_path)
         [
             "team",
             "connect-worker",
+            "--use-local-kaggle",
         ],
         env={"GITHUB_TOKEN": "gh_token"},
     )
 
     assert result.exit_code == 0
     assert connect_calls == [
-        {"github_repo": "alice/ezscreen-team-worker", "workflow_file": "team-worker.yml", "token": "session-token"}
+        {
+            "github_repo": "alice/ezscreen-team-worker",
+            "kaggle_username": "local_user",
+            "workflow_file": "team-worker.yml",
+            "token": "session-token",
+        }
     ]
     assert configure_calls == [
         {
@@ -1321,6 +1474,13 @@ def test_dispatch_team_job_workers_uses_local_repo_tokens(monkeypatch):
     dispatches = []
 
     class FakeClient:
+        def dispatch_team_job(self, *, user_id, team_job_id, mode):
+            return {
+                'dispatched': [],
+                'skipped': [{'worker_job_id': 'w1', 'reason': 'app_not_configured'}],
+                'failed': [],
+            }
+
         def status(self, user_id):
             assert user_id == 'u1'
             return {
@@ -1341,6 +1501,7 @@ def test_dispatch_team_job_workers_uses_local_repo_tokens(monkeypatch):
         client=FakeClient(),
         user_id='u1',
         team_job={
+            'team_job_id': 'tjob_1',
             'worker_jobs': [
                 {'worker_job_id': 'w1', 'member_id': 'mem1'},
                 {'worker_job_id': 'w2', 'member_id': 'mem2'},
@@ -1358,4 +1519,158 @@ def test_dispatch_team_job_workers_uses_local_repo_tokens(monkeypatch):
     assert result['dispatched'][0]['worker_job_id'] == 'w1'
     assert result['skipped'][0]['worker_job_id'] == 'w2'
     assert result['skipped'][0]['reason'] == 'dispatch_token_missing'
+
+
+def test_dispatch_team_job_workers_prefers_server_dispatch(monkeypatch):
+    from ezscreen.team import coordinator as coordinator_mod
+
+    class FakeClient:
+        def dispatch_team_job(self, *, user_id, team_job_id, mode):
+            assert user_id == 'u1'
+            assert team_job_id == 'tjob_1'
+            assert mode == 'prepare_upload'
+            return {
+                'dispatched': [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'mode': 'prepare_upload'}],
+                'skipped': [],
+                'failed': [],
+            }
+
+    monkeypatch.setattr(coordinator_mod, 'load_github_dispatch_token', lambda repo: (_ for _ in ()).throw(AssertionError(repo)))
+    monkeypatch.setattr(
+        coordinator_mod,
+        'dispatch_worker_workflow',
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError(kwargs)),
+    )
+
+    result = coordinator_mod.dispatch_team_job_workers(
+        client=FakeClient(),
+        user_id='u1',
+        team_job={'team_job_id': 'tjob_1', 'worker_jobs': [{'worker_job_id': 'w1', 'member_id': 'mem1'}]},
+    )
+
+    assert result['dispatched'] == [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'mode': 'prepare_upload'}]
+
+
+def test_connect_worker_tracks_installation_id(tmp_path):
+    store = TeamStore(tmp_path / 'team.db')
+    store.create_team(owner_name='alice', owner_user_id='u1', team_name='Lab')
+
+    connected = store.connect_worker('u1', github_repo='alice/worker', github_installation_id=123456)
+
+    assert connected['github_installation_id'] == 123456
+    status = store.status('u1')
+    assert status['members'][0]['github_installation_id'] == 123456
+
+
+def test_team_job_dispatch_targets_include_installation_id(tmp_path):
+    store = TeamStore(tmp_path / 'team.db')
+    store.create_team(owner_name='alice', owner_user_id='u1', team_name='Lab')
+    connected = store.connect_worker('u1', github_repo='alice/worker', github_installation_id=987)
+    job = store.create_team_job(
+        user_id='u1',
+        run_id='ezs-dispatch-targets',
+        payload={'files': [{'filename': 'shard.smi', 'size_bytes': 1}]},
+    )
+
+    targets = store.team_job_dispatch_targets(user_id='u1', team_job_id=job['team_job_id'])
+
+    assert targets == [{
+        'worker_job_id': job['worker_jobs'][0]['worker_job_id'],
+        'member_id': connected['member_id'],
+        'status': 'needs_upload_tickets',
+        'github_repo': 'alice/worker',
+        'github_installation_id': 987,
+        'workflow_file': 'team-worker.yml',
+    }]
+
+
+def test_dispatch_worker_workflow_via_app_uses_installation_token(monkeypatch):
+    import ezscreen.team.github as github_mod
+
+    calls = []
+
+    monkeypatch.setattr(
+        github_mod,
+        'github_app_installation_token',
+        lambda **kwargs: calls.append(('token', kwargs)) or 'inst-token',
+    )
+    monkeypatch.setattr(
+        github_mod,
+        'dispatch_worker_workflow',
+        lambda **kwargs: calls.append(('dispatch', kwargs)),
+    )
+
+    github_mod.dispatch_worker_workflow_via_app(
+        repo='alice/worker',
+        app_id='123',
+        private_key_pem='-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n',
+        installation_id=456,
+        mode='prepare_upload',
+        worker_job_id='wjob_1',
+    )
+
+    assert calls[0] == (
+        'token',
+        {
+            'app_id': '123',
+            'private_key_pem': '-----BEGIN PRIVATE KEY-----\nkey\n-----END PRIVATE KEY-----\n',
+            'installation_id': 456,
+            'permissions': {'actions': 'write', 'contents': 'read', 'metadata': 'read'},
+        },
+    )
+    assert calls[1] == (
+        'dispatch',
+        {
+            'repo': 'alice/worker',
+            'token': 'inst-token',
+            'mode': 'prepare_upload',
+            'worker_job_id': 'wjob_1',
+            'workflow_file': 'team-worker.yml',
+        },
+    )
+
+
+def test_refresh_status_installations_fills_missing_ids():
+    from ezscreen.team.server import refresh_status_installations
+
+    persisted = []
+    status = {
+        'team': {'team_id': 'team_1'},
+        'members': [
+            {'member_id': 'mem1', 'github_repo': 'alice/worker', 'github_installation_id': None},
+            {'member_id': 'mem2', 'github_repo': 'bob/worker', 'github_installation_id': 22},
+            {'member_id': 'mem3', 'github_repo': '', 'github_installation_id': None},
+        ],
+    }
+
+    result = refresh_status_installations(
+        status=status,
+        app_config={'app_id': '123', 'private_key': 'pem', 'install_url': 'https://github.com/apps/x/installations/new'},
+        resolve_installation_id=lambda repo: {'alice/worker': 11}.get(repo),
+        persist_installation_id=lambda **kwargs: persisted.append(kwargs),
+    )
+
+    assert result['members'][0]['github_installation_id'] == 11
+    assert result['members'][1]['github_installation_id'] == 22
+    assert persisted == [{'member_id': 'mem1', 'github_installation_id': 11}]
+
+
+def test_refresh_status_installations_ignores_lookup_errors():
+    from ezscreen.team.server import refresh_status_installations
+
+    status = {
+        'team': {'team_id': 'team_1'},
+        'members': [
+            {'member_id': 'mem1', 'github_repo': 'alice/worker', 'github_installation_id': None},
+        ],
+    }
+
+    result = refresh_status_installations(
+        status=status,
+        app_config={'app_id': '123', 'private_key': 'pem', 'install_url': 'https://github.com/apps/x/installations/new'},
+        resolve_installation_id=lambda repo: (_ for _ in ()).throw(RuntimeError('missing dependency')),
+        persist_installation_id=lambda **kwargs: (_ for _ in ()).throw(AssertionError(kwargs)),
+    )
+
+    assert result['members'][0]['github_installation_id'] is None
 

@@ -35,7 +35,8 @@ class ResultsScreen(Screen):
     def __init__(self, run_id: str) -> None:
         super().__init__()
         self._run_id    = run_id
-        self._output    = Path.home() / ".ezscreen" / "runs" / run_id / "output"
+        self._run_dir   = Path.home() / ".ezscreen" / "runs" / run_id
+        self._output    = self._resolve_output_dir(self._run_dir)
         self._rows:  list[dict] = []
         self._headers: list[str] = []
         self._score_col: str = ""
@@ -46,6 +47,17 @@ class ResultsScreen(Screen):
         self._all_rows: list[dict] = []   # raw, every form
         self._collapsed: bool = False     # showing one row per source molecule?
         self._sorted_by_cnn: bool = False
+
+    @staticmethod
+    def _resolve_output_dir(run_dir: Path) -> Path:
+        root_scores = run_dir / "scores.csv"
+        nested_output = run_dir / "output"
+        nested_scores = nested_output / "scores.csv"
+        if root_scores.exists():
+            return run_dir
+        if nested_scores.exists():
+            return nested_output
+        return nested_output
 
     def compose(self) -> ComposeResult:
         yield Header()

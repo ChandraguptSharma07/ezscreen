@@ -38,6 +38,7 @@ dependencies = [
     "gemmi>=0.6.0",
     "py3Dmol>=2.0.0",
     "requests>=2.31.0",
+    "cryptography>=43.0.0",
     "textual>=0.86.0,<1.0.0",
     "matplotlib>=3.7.0",
     "openpyxl>=3.1.0",

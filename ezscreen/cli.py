@@ -276,9 +276,10 @@ def team_create(
     owner: str = typer.Option(..., "--owner", help="Owner display name"),
     team_name: str = typer.Option(..., "--name", help="Team name"),
     github_repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
+    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
     kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
     kaggle_key: str = typer.Option(None, "--kaggle-key", help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json"),
-    use_local_kaggle: bool = typer.Option(True, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
+    use_local_kaggle: bool = typer.Option(False, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
     github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
 ) -> None:
     """Create a team and optionally provision a dedicated private worker repo."""
@@ -321,6 +322,7 @@ def team_create(
         from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
         kaggle_creds = resolve_worker_kaggle_credentials(
+            team_account_name=team_account,
             kaggle_username=kaggle_username,
             kaggle_key=kaggle_key,
             use_local=use_local_kaggle,
@@ -345,6 +347,7 @@ def team_join(
     invite_code: str = typer.Option(..., "--invite", help="Team invite code"),
     user: str = typer.Option(..., "--user", help="Member display name"),
     repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
+    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
     kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
     kaggle_key: str = typer.Option(
         None,
@@ -352,7 +355,7 @@ def team_join(
         help="Worker Kaggle API key. Defaults to KAGGLE_KEY or local ezscreen kaggle.json.",
     ),
     use_local_kaggle: bool = typer.Option(
-        True,
+        False,
         "--use-local-kaggle/--no-use-local-kaggle",
         help="Read existing ezscreen Kaggle credentials if no key is provided.",
     ),
@@ -374,6 +377,7 @@ def team_join(
         raise typer.Exit(1)
 
     kaggle_creds = resolve_worker_kaggle_credentials(
+        team_account_name=team_account,
         kaggle_username=kaggle_username,
         kaggle_key=kaggle_key,
         use_local=use_local_kaggle,
@@ -433,8 +437,16 @@ def team_status() -> None:
     team = status["team"]
     console.print(f"[bold]{team['name']}[/bold]  {team['team_id']}")
     for member in status.get("members", []):
-        state_label = "paused" if member.get("paused") else "enabled"
-        console.print(f"  {member['display_name']}  {member.get('github_repo') or 'no repo'}  {state_label}")
+        if not (member.get("github_repo") or "").strip():
+            state_label = "disconnected"
+        elif not member.get("github_installation_id"):
+            state_label = "app pending"
+        else:
+            state_label = "paused" if member.get("paused") else "enabled"
+        console.print(
+            f"  {member['display_name']}  {member.get('github_repo') or 'no repo'}  "
+            f"{member.get('kaggle_username') or 'no kaggle user'}  {state_label}"
+        )
 
 
 @team_app.command("pause-worker")
@@ -460,9 +472,10 @@ def team_pause_worker(
 def team_connect_worker(
     repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
     server_url: str = typer.Option(None, "--server-url", help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url."),
+    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
     kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
     kaggle_key: str = typer.Option(None, "--kaggle-key", help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json"),
-    use_local_kaggle: bool = typer.Option(True, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
+    use_local_kaggle: bool = typer.Option(False, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
     github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
 ) -> None:
     """Attach a dedicated private GitHub worker repo to the current member and seed its secrets."""
@@ -482,6 +495,7 @@ def team_connect_worker(
         raise typer.Exit(1)
 
     kaggle_creds = resolve_worker_kaggle_credentials(
+        team_account_name=team_account,
         kaggle_username=kaggle_username,
         kaggle_key=kaggle_key,
         use_local=use_local_kaggle,
@@ -489,7 +503,7 @@ def team_connect_worker(
     repo_info = provision_managed_worker_repo(github_token=github_token, repo_name=repo or None)
     worker_repo = repo_info["repo"]
     client = TeamClient(server_url, token=session_token)
-    result = client.connect_worker(github_repo=worker_repo)
+    result = client.connect_worker(github_repo=worker_repo, kaggle_username=kaggle_creds.username)
     configure_worker_repo(
         repo=worker_repo,
         github_token=github_token,
@@ -504,6 +518,12 @@ def team_connect_worker(
     source = f" ({kaggle_creds.source})"
     action = "created" if repo_info.get("created") else "synced"
     console.print(f"[green]Worker connected[/green] {worker_repo}{source} [{action}]")
+    if not result.get("github_installation_id"):
+        install_url = str(result.get("app_install_url") or "").strip()
+        if install_url:
+            console.print(f"Install the ezscreen GitHub App for this repo: {install_url}")
+        else:
+            console.print("Install the ezscreen GitHub App on this repo to enable server-side dispatch.")
 
 
 @team_app.command("disconnect-worker")

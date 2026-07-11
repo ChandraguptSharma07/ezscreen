@@ -10,11 +10,36 @@ import urllib.parse
 import urllib.request
 from urllib.parse import parse_qs, urlparse
 
+from ezscreen.team.github import GitHubError, dispatch_worker_workflow_via_app, get_repo_installation
 from ezscreen.team.state import TeamStateError, TeamStore
 
 GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
 GITHUB_ACCESS_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
+
+
+def refresh_status_installations(
+    *,
+    status: dict[str, Any],
+    app_config: dict[str, str] | None,
+    resolve_installation_id,
+    persist_installation_id,
+) -> dict[str, Any]:
+    if not app_config or not status.get("team"):
+        return status
+    for member in status.get("members", []):
+        repo = str(member.get("github_repo") or "").strip()
+        if not repo or member.get("github_installation_id"):
+            continue
+        try:
+            installation_id = resolve_installation_id(repo)
+        except Exception:
+            continue
+        if not installation_id:
+            continue
+        persist_installation_id(member_id=str(member["member_id"]), github_installation_id=int(installation_id))
+        member["github_installation_id"] = int(installation_id)
+    return status
 
 
 class TeamHandler(BaseHTTPRequestHandler):
@@ -92,6 +117,98 @@ class TeamHandler(BaseHTTPRequestHandler):
         if public_url:
             return public_url.rstrip("/")
         return f"http://{self.server.server_address[0]}:{self.server.server_address[1]}"
+
+    def _github_app_config(self) -> dict[str, str] | None:
+        app_id = os.environ.get("EZSCREEN_GITHUB_APP_ID", "").strip()
+        private_key = os.environ.get("EZSCREEN_GITHUB_APP_PRIVATE_KEY", "")
+        private_key_path = os.environ.get("EZSCREEN_GITHUB_APP_PRIVATE_KEY_PATH", "").strip()
+        install_url = os.environ.get("EZSCREEN_GITHUB_APP_INSTALL_URL", "").strip()
+        if private_key_path and not private_key:
+            private_key = Path(private_key_path).read_text(encoding="utf-8")
+        private_key = private_key.replace("\\n", "\n").strip()
+        if not app_id or not private_key:
+            return None
+        return {"app_id": app_id, "private_key": private_key, "install_url": install_url}
+
+    def _repo_installation_id(self, repo: str) -> int | None:
+        config = self._github_app_config()
+        if not config:
+            return None
+        installation = get_repo_installation(
+            repo=repo,
+            app_id=config["app_id"],
+            private_key_pem=config["private_key"],
+        )
+        if not installation or not installation.get("id"):
+            return None
+        return int(installation["id"])
+
+    def _dispatch_team_job(self, *, user_id: str, team_job_id: str, mode: str) -> dict[str, Any]:
+        if mode not in {"prepare_upload", "run_kaggle", "collect"}:
+            raise TeamStateError("unsupported dispatch mode")
+        targets = self.store.team_job_dispatch_targets(user_id=user_id, team_job_id=team_job_id)
+        config = self._github_app_config()
+        if not config:
+            return {
+                "dispatched": [],
+                "skipped": [
+                    {"worker_job_id": item["worker_job_id"], "repo": item.get("github_repo") or "", "reason": "app_not_configured"}
+                    for item in targets
+                ],
+                "failed": [],
+                "mode": mode,
+                "dispatch_backend": "github_app",
+            }
+        dispatched: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        failed: list[dict[str, str]] = []
+        for item in targets:
+            repo = str(item.get("github_repo") or "").strip()
+            if not repo:
+                skipped.append({"worker_job_id": item["worker_job_id"], "reason": "repo_not_connected"})
+                continue
+            installation_id = item.get("github_installation_id")
+            if not installation_id:
+                try:
+                    installation_id = self._repo_installation_id(repo)
+                except GitHubError as exc:
+                    failed.append({"worker_job_id": item["worker_job_id"], "repo": repo, "reason": str(exc)})
+                    continue
+                if installation_id:
+                    self.store.set_worker_installation_by_member_id(
+                        member_id=str(item["member_id"]),
+                        github_installation_id=int(installation_id),
+                    )
+            if not installation_id:
+                skipped.append({"worker_job_id": item["worker_job_id"], "repo": repo, "reason": "app_installation_missing"})
+                continue
+            try:
+                dispatch_worker_workflow_via_app(
+                    repo=repo,
+                    app_id=config["app_id"],
+                    private_key_pem=config["private_key"],
+                    installation_id=int(installation_id),
+                    mode=mode,
+                    worker_job_id=str(item["worker_job_id"]),
+                    workflow_file=str(item.get("workflow_file") or "team-worker.yml"),
+                )
+                dispatched.append(
+                    {
+                        "worker_job_id": str(item["worker_job_id"]),
+                        "repo": repo,
+                        "mode": mode,
+                        "installation_id": str(installation_id),
+                    }
+                )
+            except GitHubError as exc:
+                failed.append({"worker_job_id": item["worker_job_id"], "repo": repo, "reason": str(exc)})
+        return {
+            "dispatched": dispatched,
+            "skipped": skipped,
+            "failed": failed,
+            "mode": mode,
+            "dispatch_backend": "github_app",
+        }
 
     def _github_form_post(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = urllib.parse.urlencode(payload).encode("utf-8")
@@ -181,7 +298,23 @@ class TeamHandler(BaseHTTPRequestHandler):
                     },
                 )
             if parsed.path == "/v1/team/status":
-                return self._send_json(HTTPStatus.OK, self.store.status(self._user_id_from_request(query=query)))
+                status = self.store.status(self._user_id_from_request(query=query))
+                status = refresh_status_installations(
+                    status=status,
+                    app_config=self._github_app_config(),
+                    resolve_installation_id=self._repo_installation_id,
+                    persist_installation_id=self.store.set_worker_installation_by_member_id,
+                )
+                return self._send_json(HTTPStatus.OK, status)
+            if parsed.path == "/v1/github/app":
+                config = self._github_app_config()
+                return self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "configured": bool(config),
+                        "install_url": (config or {}).get("install_url", ""),
+                    },
+                )
             if parsed.path == "/v1/worker/jobs":
                 return self._send_json(HTTPStatus.OK, {"jobs": self.store.list_worker_jobs(self._token())})
             if parsed.path == "/v1/worker/upload-tickets":
@@ -244,13 +377,27 @@ class TeamHandler(BaseHTTPRequestHandler):
                 )
             if parsed.path == "/v1/team/worker/connect":
                 user_id = self._user_id_from_request(payload)
+                github_repo = str(payload.get("github_repo", ""))
+                github_installation_id = None
+                install_error = ""
+                if github_repo.strip():
+                    try:
+                        github_installation_id = self._repo_installation_id(github_repo)
+                    except Exception as exc:
+                        install_error = str(exc)
                 return self._send_json(
                     HTTPStatus.OK,
-                    self.store.connect_worker(
+                    {
+                        **self.store.connect_worker(
                         user_id,
-                        github_repo=str(payload.get("github_repo", "")),
+                        github_repo=github_repo,
+                        github_installation_id=github_installation_id,
+                        kaggle_username=str(payload.get("kaggle_username", "")),
                         workflow_file=str(payload.get("workflow_file", "team-worker.yml")),
-                    ),
+                        ),
+                        "app_install_url": ((self._github_app_config() or {}).get("install_url", "")),
+                        "app_installation_error": install_error,
+                    },
                 )
             if parsed.path == "/v1/team/worker/disconnect":
                 return self._send_json(
@@ -288,6 +435,15 @@ class TeamHandler(BaseHTTPRequestHandler):
                     ticket_id=payload["ticket_id"],
                 )
                 return self._send_json(HTTPStatus.OK, result)
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "jobs" and parts[3] == "dispatch":
+                return self._send_json(
+                    HTTPStatus.OK,
+                    self._dispatch_team_job(
+                        user_id=self._user_id_from_request(payload),
+                        team_job_id=parts[2],
+                        mode=str(payload.get("mode", "")).strip(),
+                    ),
+                )
             return self._send_json(HTTPStatus.NOT_FOUND, {"error": "not_found"})
         except Exception as exc:
             return self._handle_error(exc)

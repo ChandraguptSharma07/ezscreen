@@ -69,6 +69,10 @@ def run_diffdock_l(
         raise RuntimeError(f"NIM returned HTTP {r.status_code}: {r.text[:200]}")
 
     result = r.json()
+    if isinstance(result, dict) and result.get("status") == "failed":
+        detail = result.get("details") or "DiffDock-L job failed"
+        raise RuntimeError(str(detail))
+
     out    = out_dir / "validated_poses.json"
     out.write_text(json.dumps(result, indent=2))
 
@@ -76,3 +80,4 @@ def run_diffdock_l(
     _log(f"[#3fb950]Done — {n_poses} pose(s) written to {out}[/#3fb950]")
 
     return {"poses_written": n_poses, "output_path": str(out)}
+

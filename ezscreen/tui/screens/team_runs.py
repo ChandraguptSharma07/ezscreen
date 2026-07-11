@@ -49,12 +49,19 @@ class TeamRunsScreen(Screen):
                 yield Static("", id="team-account-note", classes="form-status")
                 yield Label("GitHub setup token", classes="form-label")
                 yield Input(id="team-github-token", password=True, placeholder="stored only on this device for worker dispatch")
+                yield Label("Saved team account", classes="form-label")
+                yield Input(id="team-kaggle-account", placeholder="optional saved account name")
+                yield Label("Worker Kaggle username", classes="form-label")
+                yield Input(id="team-kaggle-username", placeholder="required unless using saved account")
+                yield Label("Worker Kaggle key", classes="form-label")
+                yield Input(id="team-kaggle-key", password=True, placeholder="required unless using saved account")
                 with Horizontal(classes="form-row", id="team-signin-row"):
                     yield Button("Sign in with GitHub", id="btn-team-signin", variant="primary")
                     yield Button("I signed in", id="btn-team-auth-poll")
                 with Vertical(id="team-worker-actions"):
                     with Horizontal(classes="form-row"):
                         yield Button("Connect Worker", id="btn-team-connect", variant="primary")
+                        yield Button("Install GitHub App", id="btn-team-install-app")
                         yield Button("Pause Worker", id="btn-team-pause")
                         yield Button("Resume Worker", id="btn-team-resume")
                     with Horizontal(classes="form-row"):
@@ -92,6 +99,7 @@ class TeamRunsScreen(Screen):
             "btn-team-signin": self.start_sign_in,
             "btn-team-auth-poll": self.finish_sign_in,
             "btn-team-connect": self.connect_worker,
+            "btn-team-install-app": self.install_github_app,
             "btn-team-pause": lambda: self.set_pause(True),
             "btn-team-resume": lambda: self.set_pause(False),
             "btn-team-disconnect": self.disconnect_worker,
@@ -129,6 +137,11 @@ class TeamRunsScreen(Screen):
         worker_actions.display = in_team
         github_row = self.query_one("#team-signin-row", Horizontal)
         github_row.display = not bool(load_local_state().get("session_token")) or not in_team
+
+    def _set_install_button_state(self, *, visible: bool, disabled: bool = False) -> None:
+        button = self.query_one("#btn-team-install-app", Button)
+        button.display = visible
+        button.disabled = disabled
 
     def _signed_in_identity(self) -> tuple[str | None, str]:
         state = load_local_state()
@@ -241,15 +254,20 @@ class TeamRunsScreen(Screen):
             return
         try:
             from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
-            from ezscreen.team.local_credentials import (
-                resolve_worker_kaggle_credentials,
-                save_github_dispatch_token,
-            )
+            from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials, save_github_dispatch_token
 
-            kaggle_creds = resolve_worker_kaggle_credentials(use_local=True)
+            team_account_name = self.query_one("#team-kaggle-account", Input).value.strip()
+            worker_kaggle_username = self.query_one("#team-kaggle-username", Input).value.strip()
+            worker_kaggle_key = self.query_one("#team-kaggle-key", Input).value.strip()
+            kaggle_creds = resolve_worker_kaggle_credentials(
+                team_account_name=team_account_name or None,
+                kaggle_username=worker_kaggle_username or None,
+                kaggle_key=worker_kaggle_key or None,
+                use_local=False,
+            )
             repo_info = provision_managed_worker_repo(github_token=github_token)
             worker_repo = repo_info["repo"]
-            result = self._client().connect_worker(github_repo=worker_repo)
+            result = self._client().connect_worker(github_repo=worker_repo, kaggle_username=kaggle_creds.username)
             configure_worker_repo(
                 repo=worker_repo,
                 github_token=github_token,
@@ -262,12 +280,35 @@ class TeamRunsScreen(Screen):
             state["github_repo"] = worker_repo
             save_local_state(state)
             self.query_one("#team-github-token", Input).value = ""
+            self.query_one("#team-kaggle-account", Input).value = ""
+            self.query_one("#team-kaggle-username", Input).value = ""
+            self.query_one("#team-kaggle-key", Input).value = ""
             action = "created" if repo_info.get("created") else "synced"
+            installation_id = result.get("github_installation_id")
+            install_note = ""
+            if not installation_id:
+                install_url = str(result.get("app_install_url") or "").strip()
+                if install_url:
+                    install_note = f" Install the ezscreen GitHub App for this repo: {install_url}"
+                else:
+                    install_note = " Install the ezscreen GitHub App on this repo to enable server-side dispatch."
             self._set_status(
                 f"[#3fb950]Worker connected via dedicated private repo {worker_repo} ({action}). "
-                "Its dispatch token is stored only on this device.[/#3fb950]"
+                f"Kaggle worker account: {kaggle_creds.username}. Its setup token stays local to this device.{install_note}[/#3fb950]"
             )
             self.refresh_status()
+        except Exception as exc:
+            self._set_status(f"[#f85149]{exc}[/#f85149]")
+
+    def install_github_app(self) -> None:
+        try:
+            app_status = self._client().github_app_status()
+            install_url = str(app_status.get("install_url") or "").strip()
+            if not install_url:
+                self._set_status("[#f85149]This team server does not expose a GitHub App install URL yet.[/#f85149]")
+                return
+            webbrowser.open(install_url)
+            self._set_status("[#79c0ff]Opened the ezscreen GitHub App install page in your browser.[/#79c0ff]")
         except Exception as exc:
             self._set_status(f"[#f85149]{exc}[/#f85149]")
 
@@ -315,33 +356,48 @@ class TeamRunsScreen(Screen):
         jobs = self.query_one("#team-jobs", DataTable)
         members.clear(columns=True)
         jobs.clear(columns=True)
-        members.add_columns("Name", "Repo", "State")
+        members.add_columns("Name", "Repo", "Kaggle", "State")
         jobs.add_columns("Run", "Status", "Created")
         state = load_local_state()
         if not state.get("server_url") or not state.get("user_id"):
             self._sync_team_mode(False)
-            members.add_row("-", "-", "not joined")
+            self._set_install_button_state(visible=False)
+            members.add_row("-", "-", "-", "not joined")
             return
         try:
             status = TeamClient(state["server_url"]).status(state["user_id"])
+            app_status = TeamClient(state["server_url"]).github_app_status()
         except Exception as exc:
             self._sync_team_mode(bool(state.get("team_id")))
-            members.add_row("-", "-", "offline")
+            self._set_install_button_state(visible=False)
+            members.add_row("-", "-", "-", "offline")
             self._set_status(f"[#f85149]{exc}[/#f85149]")
             return
         if not status.get("team"):
             self._sync_team_mode(False)
-            members.add_row("-", "-", "not joined")
+            self._set_install_button_state(visible=False)
+            members.add_row("-", "-", "-", "not joined")
             return
         self._sync_team_mode(True)
+        connected_without_app = any(
+            (member.get("github_repo") or "").strip() and not member.get("github_installation_id")
+            for member in status.get("members", [])
+        )
+        self._set_install_button_state(
+            visible=bool(app_status.get("install_url")) and connected_without_app,
+            disabled=not bool(app_status.get("configured")),
+        )
         for member in status.get("members", []):
             if not (member.get("github_repo") or "").strip():
                 state_label = "disconnected"
+            elif not member.get("github_installation_id"):
+                state_label = "app pending"
             else:
                 state_label = "paused" if member.get("paused") else "enabled"
             members.add_row(
                 member.get("display_name", ""),
                 member.get("github_repo") or "-",
+                member.get("kaggle_username") or "-",
                 state_label,
             )
         for job in status.get("jobs", []):

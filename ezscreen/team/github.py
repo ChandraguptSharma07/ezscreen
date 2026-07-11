@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -48,6 +49,33 @@ def _github_request(
     return json.loads(raw) if raw else {}
 
 
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _github_app_jwt(*, app_id: str, private_key_pem: str) -> str:
+    try:
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+    except Exception as exc:  # pragma: no cover - depends on runtime environment
+        raise GitHubError("cryptography is required for GitHub App authentication") from exc
+
+    header = {"alg": "RS256", "typ": "JWT"}
+    now = int(time.time())
+    payload = {
+        "iat": now - 60,
+        "exp": now + (9 * 60),
+        "iss": str(app_id),
+    }
+    signing_input = (
+        f"{_b64url(json.dumps(header, separators=(',', ':')).encode('utf-8'))}."
+        f"{_b64url(json.dumps(payload, separators=(',', ':')).encode('utf-8'))}"
+    )
+    key = serialization.load_pem_private_key(private_key_pem.encode("utf-8"), password=None)
+    signature = key.sign(signing_input.encode("ascii"), padding.PKCS1v15(), hashes.SHA256())
+    return f"{signing_input}.{_b64url(signature)}"
+
+
 def _github_request_optional(
     method: str,
     path: str,
@@ -61,6 +89,43 @@ def _github_request_optional(
         if "GitHub API failed: 404" in str(exc):
             return None
         raise
+
+
+def github_app_installation_token(
+    *,
+    app_id: str,
+    private_key_pem: str,
+    installation_id: int,
+    permissions: dict[str, str] | None = None,
+) -> str:
+    jwt_token = _github_app_jwt(app_id=str(app_id), private_key_pem=private_key_pem)
+    payload = {"permissions": permissions} if permissions else None
+    result = _github_request(
+        "POST",
+        f"/app/installations/{int(installation_id)}/access_tokens",
+        token=jwt_token,
+        payload=payload,
+    )
+    token = str(result.get("token", "")).strip()
+    if not token:
+        raise GitHubError("GitHub App did not return an installation access token")
+    return token
+
+
+def get_repo_installation(
+    *,
+    repo: str,
+    app_id: str,
+    private_key_pem: str,
+) -> dict[str, Any] | None:
+    owner, name = repo.split("/", 1)
+    jwt_token = _github_app_jwt(app_id=str(app_id), private_key_pem=private_key_pem)
+    result = _github_request_optional(
+        "GET",
+        f"/repos/{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(name, safe='')}/installation",
+        token=jwt_token,
+    )
+    return result if isinstance(result, dict) else None
 
 
 def encrypt_secret(public_key_b64: str, secret_value: str) -> str:
@@ -118,6 +183,8 @@ def _worker_runtime_files() -> dict[str, str]:
         "ezscreen/backends/kaggle/__init__.py": repo_root / "ezscreen" / "backends" / "kaggle" / "__init__.py",
         "ezscreen/backends/kaggle/kernel.py": repo_root / "ezscreen" / "backends" / "kaggle" / "kernel.py",
         "ezscreen/backends/kaggle/poller.py": repo_root / "ezscreen" / "backends" / "kaggle" / "poller.py",
+        "ezscreen/backends/kaggle/runner.py": repo_root / "ezscreen" / "backends" / "kaggle" / "runner.py",
+        "ezscreen/backends/kaggle/templates/vina_shard.ipynb.j2": repo_root / "ezscreen" / "backends" / "kaggle" / "templates" / "vina_shard.ipynb.j2",
         "ezscreen/team/__init__.py": repo_root / "ezscreen" / "team" / "__init__.py",
         "ezscreen/team/client.py": repo_root / "ezscreen" / "team" / "client.py",
         "ezscreen/team/kaggle_upload_ticket.py": repo_root / "ezscreen" / "team" / "kaggle_upload_ticket.py",
@@ -138,12 +205,16 @@ readme = \"README.md\"
 requires-python = \">=3.11\"
 dependencies = [
   \"kaggle>=1.7.4.5\",
+  \"jinja2>=3.1.4\",
   \"requests>=2.32.3\",
   \"rich>=13.7.0\",
 ]
 
 [tool.setuptools]
 packages = [\"ezscreen\", \"ezscreen.backends\", \"ezscreen.backends.kaggle\", \"ezscreen.team\"]
+
+[tool.setuptools.package-data]
+\"ezscreen.backends.kaggle\" = [\"templates/*.j2\"]
 """
     files["README.md"] = """# ezscreen Team Worker
 
@@ -263,6 +334,31 @@ def dispatch_worker_workflow(
                 "worker_job_id": worker_job_id,
             },
         },
+    )
+
+
+def dispatch_worker_workflow_via_app(
+    *,
+    repo: str,
+    app_id: str,
+    private_key_pem: str,
+    installation_id: int,
+    mode: str,
+    worker_job_id: str,
+    workflow_file: str = "team-worker.yml",
+) -> None:
+    token = github_app_installation_token(
+        app_id=app_id,
+        private_key_pem=private_key_pem,
+        installation_id=installation_id,
+        permissions={"actions": "write", "contents": "read", "metadata": "read"},
+    )
+    dispatch_worker_workflow(
+        repo=repo,
+        token=token,
+        mode=mode,
+        worker_job_id=worker_job_id,
+        workflow_file=workflow_file,
     )
 
 

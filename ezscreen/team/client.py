@@ -125,6 +125,12 @@ class TeamClient:
         query = urllib.parse.urlencode({"user_id": user_id})
         return self.request("GET", f"/v1/jobs/{team_job_id}/workers?{query}").get("workers", [])
 
+    def dispatch_team_job(self, *, user_id: str, team_job_id: str, mode: str) -> dict[str, Any]:
+        return self.request("POST", f"/v1/jobs/{team_job_id}/dispatch", {"user_id": user_id, "mode": mode})
+
+    def github_app_status(self) -> dict[str, Any]:
+        return self.request("GET", "/v1/github/app")
+
     def start_github_device_login(self) -> dict[str, Any]:
         return self.request("POST", "/v1/auth/github/device/start", {})
 
@@ -137,11 +143,17 @@ class TeamClient:
     def logout(self) -> dict[str, Any]:
         return self.request("POST", "/v1/auth/logout", {})
 
-    def connect_worker(self, *, github_repo: str, workflow_file: str = "team-worker.yml") -> dict[str, Any]:
+    def connect_worker(
+        self,
+        *,
+        github_repo: str,
+        kaggle_username: str = "",
+        workflow_file: str = "team-worker.yml",
+    ) -> dict[str, Any]:
         return self.request(
             "POST",
             "/v1/team/worker/connect",
-            {"github_repo": github_repo, "workflow_file": workflow_file},
+            {"github_repo": github_repo, "kaggle_username": kaggle_username, "workflow_file": workflow_file},
         )
 
     def disconnect_worker(self, *, user_id: str | None = None) -> dict[str, Any]:
