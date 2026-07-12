@@ -1468,60 +1468,7 @@ def test_list_team_job_workers_and_read_result_zip(tmp_path):
     assert store.read_result_zip(user_id='u1', team_job_id=job['team_job_id'], worker_job_id=worker_job_id) == payload
 
 
-def test_dispatch_team_job_workers_uses_local_repo_tokens(monkeypatch):
-    from ezscreen.team import coordinator as coordinator_mod
-
-    dispatches = []
-
-    class FakeClient:
-        def dispatch_team_job(self, *, user_id, team_job_id, mode):
-            return {
-                'dispatched': [],
-                'skipped': [{'worker_job_id': 'w1', 'reason': 'app_not_configured'}],
-                'failed': [],
-            }
-
-        def status(self, user_id):
-            assert user_id == 'u1'
-            return {
-                'members': [
-                    {'member_id': 'mem1', 'github_repo': 'alice/worker', 'workflow_file': 'team-worker.yml'},
-                    {'member_id': 'mem2', 'github_repo': 'bob/worker', 'workflow_file': 'team-worker.yml'},
-                ]
-            }
-
-    monkeypatch.setattr(coordinator_mod, 'load_github_dispatch_token', lambda repo: {'alice/worker': 'tok-a'}.get(repo, ''))
-    monkeypatch.setattr(
-        coordinator_mod,
-        'dispatch_worker_workflow',
-        lambda **kwargs: dispatches.append(kwargs),
-    )
-
-    result = coordinator_mod.dispatch_team_job_workers(
-        client=FakeClient(),
-        user_id='u1',
-        team_job={
-            'team_job_id': 'tjob_1',
-            'worker_jobs': [
-                {'worker_job_id': 'w1', 'member_id': 'mem1'},
-                {'worker_job_id': 'w2', 'member_id': 'mem2'},
-            ]
-        },
-    )
-
-    assert dispatches == [{
-        'repo': 'alice/worker',
-        'token': 'tok-a',
-        'mode': 'prepare_upload',
-        'worker_job_id': 'w1',
-        'workflow_file': 'team-worker.yml',
-    }]
-    assert result['dispatched'][0]['worker_job_id'] == 'w1'
-    assert result['skipped'][0]['worker_job_id'] == 'w2'
-    assert result['skipped'][0]['reason'] == 'dispatch_token_missing'
-
-
-def test_dispatch_team_job_workers_prefers_server_dispatch(monkeypatch):
+def test_dispatch_team_job_workers_uses_server_response():
     from ezscreen.team import coordinator as coordinator_mod
 
     class FakeClient:
@@ -1533,14 +1480,8 @@ def test_dispatch_team_job_workers_prefers_server_dispatch(monkeypatch):
                 'dispatched': [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'mode': 'prepare_upload'}],
                 'skipped': [],
                 'failed': [],
+                'dispatch_backend': 'github_app',
             }
-
-    monkeypatch.setattr(coordinator_mod, 'load_github_dispatch_token', lambda repo: (_ for _ in ()).throw(AssertionError(repo)))
-    monkeypatch.setattr(
-        coordinator_mod,
-        'dispatch_worker_workflow',
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError(kwargs)),
-    )
 
     result = coordinator_mod.dispatch_team_job_workers(
         client=FakeClient(),
@@ -1549,6 +1490,30 @@ def test_dispatch_team_job_workers_prefers_server_dispatch(monkeypatch):
     )
 
     assert result['dispatched'] == [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'mode': 'prepare_upload'}]
+
+
+def test_dispatch_team_job_runs_preserves_server_skip_reason():
+    from ezscreen.team import coordinator as coordinator_mod
+
+    class FakeClient:
+        def dispatch_team_job(self, *, user_id, team_job_id, mode):
+            assert user_id == 'u1'
+            assert team_job_id == 'tjob_1'
+            assert mode == 'run_kaggle'
+            return {
+                'dispatched': [],
+                'skipped': [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'reason': 'app_installation_missing'}],
+                'failed': [],
+                'dispatch_backend': 'github_app',
+            }
+
+    result = coordinator_mod.dispatch_team_job_runs(
+        client=FakeClient(),
+        user_id='u1',
+        team_job={'team_job_id': 'tjob_1', 'worker_jobs': [{'worker_job_id': 'w1', 'member_id': 'mem1'}]},
+    )
+
+    assert result['skipped'] == [{'worker_job_id': 'w1', 'repo': 'alice/worker', 'reason': 'app_installation_missing'}]
 
 
 def test_connect_worker_tracks_installation_id(tmp_path):

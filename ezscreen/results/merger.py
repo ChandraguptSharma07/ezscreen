@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 from typing import Any
 
+from ezscreen.results.run_layout import resolve_receptor_pdb, resolve_run_dir
 
 def _load_filtered(shard_dirs: list[Path]) -> list[dict]:
     """Return molecules filtered out during prep (too large for GPU), deduped by SMILES."""
@@ -95,24 +96,7 @@ def _add_efficiency_cols(
 
 def _find_receptor_pdb(output_dir: Path) -> Path | None:
     """Locate the prepared receptor PDB for a run, checking the known locations."""
-    work_dir = output_dir.parent
-    resume = work_dir / "resume.json"
-    if resume.exists():
-        try:
-            import json
-            info = json.loads(resume.read_text())
-            p = info.get("receptor_pdb")
-            if p and Path(p).exists():
-                return Path(p)
-        except Exception:
-            pass
-    for cand in (
-        work_dir / "receptor" / "receptor_prep.pdb",
-        output_dir / "receptor_prep.pdb",
-    ):
-        if cand.exists():
-            return cand
-    return None
+    return resolve_receptor_pdb(resolve_run_dir(output_dir))
 
 
 def _add_pose_validity_cols(
@@ -151,6 +135,18 @@ def _add_pose_validity_cols(
         return rows, fieldnames
 
 
+def _find_cnn_scores_csv(output_dir: Path) -> Path:
+    run_dir = resolve_run_dir(output_dir)
+    candidates = [
+        output_dir / "cnn_scores.csv",
+        run_dir / "gnina_output" / "cnn_scores.csv",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def _add_cnn_score_cols(
     rows: list[dict],
     fieldnames: list[str],
@@ -160,7 +156,7 @@ def _add_cnn_score_cols(
     """Left-join GNINA CNN scores from cnn_scores.csv. No-op if the file is absent."""
     if not id_col:
         return rows, fieldnames
-    cnn_path = output_dir / "cnn_scores.csv"
+    cnn_path = _find_cnn_scores_csv(output_dir)
     if not cnn_path.exists():
         return rows, fieldnames
     try:

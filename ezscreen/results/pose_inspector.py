@@ -3004,7 +3004,9 @@ function resetElementPalette() {{
 
 
 def generate_viewer(work_dir: Path) -> Path:
-    output_dir    = work_dir / "output"
+    from ezscreen.results.run_layout import resolve_output_dir, resolve_receptor_pdb
+
+    output_dir    = resolve_output_dir(work_dir)
     viewer_path   = output_dir / "interaction_viewer.html"
 
     interactions_json = output_dir / "interactions_top_n.json"
@@ -3013,19 +3015,7 @@ def generate_viewer(work_dir: Path) -> Path:
             "interactions_top_n.json not found — run PLIP analysis first"
         )
 
-    receptor_pdb: Path | None = None
-    resume_json = work_dir / "resume.json"
-    if resume_json.exists():
-        info = json.loads(resume_json.read_text())
-        if info.get("receptor_pdb"):
-            p = Path(info["receptor_pdb"])
-            if p.exists():
-                receptor_pdb = p
-
-    if receptor_pdb is None:
-        candidate = work_dir / "receptor" / "receptor_prep.pdb"
-        if candidate.exists():
-            receptor_pdb = candidate
+    receptor_pdb = resolve_receptor_pdb(work_dir)
 
     receptor_text = receptor_pdb.read_text() if receptor_pdb else ""
     compounds     = json.loads(interactions_json.read_text())

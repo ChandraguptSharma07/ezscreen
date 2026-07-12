@@ -127,6 +127,25 @@ def test_join_cnn_scores_preserves_rows_outside_the_batch(tmp_path):
     assert rows["l1"]["CNNaffinity"] == "4.5"   # untouched hit preserved, not blanked
 
 
+def test_join_cnn_scores_reads_gnina_output_fallback(tmp_path):
+    run_dir = tmp_path / "ezs-team"
+    run_dir.mkdir()
+    _write(run_dir / "scores.csv", ["ligand", "score", "name", "smiles"], [
+        {"ligand": "l0", "score": "-8.1", "name": "A", "smiles": "CCO"},
+        {"ligand": "l1", "score": "-7.0", "name": "B", "smiles": "CCN"},
+    ])
+    gnina_output = run_dir / "gnina_output"
+    gnina_output.mkdir()
+    _write(gnina_output / "cnn_scores.csv", ["lig_id", "CNNscore", "CNNaffinity"], [
+        {"lig_id": "l0", "CNNscore": "0.95", "CNNaffinity": "6.8"},
+    ])
+
+    assert join_cnn_scores(run_dir) is True
+    rows = {r["ligand"]: r for r in csv.DictReader((run_dir / "scores.csv").open())}
+    assert rows["l0"]["CNNaffinity"] == "6.8"
+    assert rows["l1"]["CNNaffinity"] == ""
+
+
 def test_merge_without_cnn_scores_has_no_cnn_cols(tmp_path):
     sd = tmp_path / "shard"
     sd.mkdir()

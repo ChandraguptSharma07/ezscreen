@@ -17,10 +17,6 @@ class WorkerKaggleCredentials:
     path: Path | None = None
 
 
-_GITHUB_TOKEN_NAMESPACE = "team_runner"
-_GITHUB_TOKEN_KEY = "github_dispatch_tokens"
-
-
 def resolve_worker_kaggle_credentials(
     *,
     team_account_name: str | None = None,
@@ -93,35 +89,3 @@ def local_kaggle_summary(creds: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception:
         return {"configured": False, "path": str(path)}
     return {"configured": True, "path": str(path), "username": data.get("username", "")}
-
-
-def load_github_dispatch_token(repo: str, *, creds: dict[str, Any] | None = None) -> str:
-    creds = creds or auth.load_credentials()
-    team_runner = creds.get(_GITHUB_TOKEN_NAMESPACE, {})
-    tokens = team_runner.get(_GITHUB_TOKEN_KEY, {})
-    return str(tokens.get(repo, "") or "")
-
-
-def save_github_dispatch_token(repo: str, token: str, *, creds: dict[str, Any] | None = None) -> None:
-    if not repo.strip():
-        raise ValueError("repo is required")
-    if not token.strip():
-        raise ValueError("token is required")
-    creds = creds or auth.load_credentials()
-    team_runner = dict(creds.get(_GITHUB_TOKEN_NAMESPACE, {}))
-    tokens = dict(team_runner.get(_GITHUB_TOKEN_KEY, {}))
-    tokens[repo] = token.strip()
-    team_runner[_GITHUB_TOKEN_KEY] = tokens
-    creds[_GITHUB_TOKEN_NAMESPACE] = team_runner
-    auth.save_credentials(creds)
-
-
-def remove_github_dispatch_token(repo: str, *, creds: dict[str, Any] | None = None) -> None:
-    creds = creds or auth.load_credentials()
-    team_runner = dict(creds.get(_GITHUB_TOKEN_NAMESPACE, {}))
-    tokens = dict(team_runner.get(_GITHUB_TOKEN_KEY, {}))
-    if repo in tokens:
-        tokens.pop(repo, None)
-        team_runner[_GITHUB_TOKEN_KEY] = tokens
-        creds[_GITHUB_TOKEN_NAMESPACE] = team_runner
-        auth.save_credentials(creds)

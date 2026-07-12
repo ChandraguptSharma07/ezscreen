@@ -12,6 +12,7 @@ from rich.console import Console
 from ezscreen import config
 from ezscreen.backends.kaggle.kernel import push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
+from ezscreen.results.run_layout import resolve_output_dir, resolve_receptor_pdb
 
 console = Console()
 _DATASET_POLL_INTERVAL = 10
@@ -128,25 +129,16 @@ def run_plip_analysis(run_id: str, work_dir: Path) -> dict[str, Any]:
 
     Returns dict with keys: status, interactions_path|None, error|None.
     """
-    output_dir = work_dir / "output"
+    output_dir = resolve_output_dir(work_dir)
     cfg = config.load()
     top_n = int(cfg.get("results", {}).get("interaction_top_n", 20))
 
-    # Locate receptor PDB
+    receptor_pdb = resolve_receptor_pdb(work_dir)
     resume_json = work_dir / "resume.json"
-    receptor_pdb: Path | None = None
     username = ""
     if resume_json.exists():
         info = json.loads(resume_json.read_text())
-        if info.get("receptor_pdb"):
-            receptor_pdb = Path(info["receptor_pdb"])
         username = info.get("username", "")
-
-    # Fallback: look for receptor_prep.pdb beside the PDBQT
-    if receptor_pdb is None or not receptor_pdb.exists():
-        candidate = work_dir / "receptor" / "receptor_prep.pdb"
-        if candidate.exists():
-            receptor_pdb = candidate
 
     if receptor_pdb is None or not receptor_pdb.exists():
         return {

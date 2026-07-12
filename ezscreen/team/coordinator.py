@@ -6,10 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from ezscreen.results.merger import merge_shard_results
-from ezscreen.team.client import TeamClient, TeamClientError
-from ezscreen.team.github import GitHubError, dispatch_worker_workflow
+from ezscreen.team.client import TeamClient
 from ezscreen.team.kaggle_upload_ticket import upload_file_to_signed_url
-from ezscreen.team.local_credentials import load_github_dispatch_token
 from ezscreen.team.state import extract_result_zip
 
 
@@ -84,51 +82,7 @@ def _dispatch_team_job_mode(
     team_job: dict[str, Any],
     mode: str,
 ) -> dict[str, list[dict[str, str]]]:
-    try:
-        server_result = client.dispatch_team_job(user_id=user_id, team_job_id=team_job["team_job_id"], mode=mode)
-        if not _should_fallback_to_local_dispatch(server_result):
-            return server_result
-    except TeamClientError:
-        pass
-
-    status = client.status(user_id)
-    members = {member["member_id"]: member for member in status.get("members", [])}
-    dispatched: list[dict[str, str]] = []
-    skipped: list[dict[str, str]] = []
-    failed: list[dict[str, str]] = []
-    for worker_job in team_job.get("worker_jobs", []):
-        member = members.get(worker_job["member_id"]) or {}
-        repo = str(member.get("github_repo") or "").strip()
-        workflow_file = str(member.get("workflow_file") or "team-worker.yml").strip() or "team-worker.yml"
-        if not repo:
-            skipped.append({"worker_job_id": worker_job["worker_job_id"], "reason": "repo_not_connected"})
-            continue
-        token = load_github_dispatch_token(repo)
-        if not token:
-            skipped.append({"worker_job_id": worker_job["worker_job_id"], "repo": repo, "reason": "dispatch_token_missing"})
-            continue
-        try:
-            dispatch_worker_workflow(
-                repo=repo,
-                token=token,
-                mode=mode,
-                worker_job_id=worker_job["worker_job_id"],
-                workflow_file=workflow_file,
-            )
-            dispatched.append({"worker_job_id": worker_job["worker_job_id"], "repo": repo, "mode": mode})
-        except GitHubError as exc:
-            failed.append({"worker_job_id": worker_job["worker_job_id"], "repo": repo, "reason": str(exc)})
-    return {"dispatched": dispatched, "skipped": skipped, "failed": failed}
-
-
-def _should_fallback_to_local_dispatch(result: dict[str, Any]) -> bool:
-    if result.get("dispatched") or result.get("failed"):
-        return False
-    skipped = list(result.get("skipped") or [])
-    if not skipped:
-        return False
-    reasons = {str(item.get("reason", "")) for item in skipped}
-    return reasons <= {"app_not_configured", "app_installation_missing"}
+    return client.dispatch_team_job(user_id=user_id, team_job_id=team_job["team_job_id"], mode=mode)
 
 
 def dispatch_team_job_workers(

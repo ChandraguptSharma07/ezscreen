@@ -48,7 +48,7 @@ class TeamRunsScreen(Screen):
                 yield Static("", id="team-auth-text")
                 yield Static("", id="team-account-note", classes="form-status")
                 yield Label("GitHub setup token", classes="form-label")
-                yield Input(id="team-github-token", password=True, placeholder="stored only on this device for worker dispatch")
+                yield Input(id="team-github-token", password=True, placeholder="used once to create repo and seed secrets")
                 yield Label("Saved team account", classes="form-label")
                 yield Input(id="team-kaggle-account", placeholder="optional saved account name")
                 yield Label("Worker Kaggle username", classes="form-label")
@@ -254,7 +254,7 @@ class TeamRunsScreen(Screen):
             return
         try:
             from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
-            from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials, save_github_dispatch_token
+            from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
             team_account_name = self.query_one("#team-kaggle-account", Input).value.strip()
             worker_kaggle_username = self.query_one("#team-kaggle-username", Input).value.strip()
@@ -276,7 +276,6 @@ class TeamRunsScreen(Screen):
                 team_token=result["team_token"],
                 server_url=default_server_url(),
             )
-            save_github_dispatch_token(worker_repo, github_token)
             state["github_repo"] = worker_repo
             save_local_state(state)
             self.query_one("#team-github-token", Input).value = ""
@@ -294,7 +293,7 @@ class TeamRunsScreen(Screen):
                     install_note = " Install the ezscreen GitHub App on this repo to enable server-side dispatch."
             self._set_status(
                 f"[#3fb950]Worker connected via dedicated private repo {worker_repo} ({action}). "
-                f"Kaggle worker account: {kaggle_creds.username}. Its setup token stays local to this device.{install_note}[/#3fb950]"
+                f"Kaggle worker account: {kaggle_creds.username}. The setup token was used only to provision the repo and seed secrets.{install_note}[/#3fb950]"
             )
             self.refresh_status()
         except Exception as exc:
@@ -328,12 +327,7 @@ class TeamRunsScreen(Screen):
     def disconnect_worker(self) -> None:
         state = load_local_state()
         try:
-            from ezscreen.team.local_credentials import remove_github_dispatch_token
-
-            repo = str(state.get("github_repo") or "")
             self._client().disconnect_worker(user_id=state.get("user_id"))
-            if repo:
-                remove_github_dispatch_token(repo)
             state["github_repo"] = ""
             save_local_state(state)
             self._set_status("[#e3b341]Worker disconnected. Team membership is unchanged; reconnect later to receive jobs again.[/#e3b341]")

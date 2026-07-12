@@ -13,6 +13,7 @@ from textual.coordinate import Coordinate
 from textual.screen import Screen
 from textual.widgets import Button, DataTable, Footer, Header, Input, Label, Static
 
+from ezscreen.results.run_layout import resolve_output_dir
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
 _SKIP_COLS = {"rmsd_lb", "rmsd_ub", "pb_valid", "pb_failed", "conformer_qc"}
@@ -50,14 +51,10 @@ class ResultsScreen(Screen):
 
     @staticmethod
     def _resolve_output_dir(run_dir: Path) -> Path:
-        root_scores = run_dir / "scores.csv"
-        nested_output = run_dir / "output"
-        nested_scores = nested_output / "scores.csv"
-        if root_scores.exists():
-            return run_dir
-        if nested_scores.exists():
-            return nested_output
-        return nested_output
+        return resolve_output_dir(run_dir)
+
+    def _work_dir(self) -> Path:
+        return self._run_dir
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -620,7 +617,7 @@ class ResultsScreen(Screen):
 
     def _handle_plip(self) -> None:
         interactions_json = self._output / "interactions_top_n.json"
-        work_dir = self._output.parent
+        work_dir = self._work_dir()
 
         # Check receptor PDB availability
         resume_json = work_dir / "resume.json"
@@ -705,7 +702,7 @@ class ResultsScreen(Screen):
         self.query_one("#btn-sort-cnn").display = has_cnn
 
     def _handle_cnn(self) -> None:
-        work_dir = self._output.parent
+        work_dir = self._work_dir()
 
         resume_json = work_dir / "resume.json"
         has_receptor_pdb = False

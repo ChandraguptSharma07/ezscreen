@@ -12,6 +12,7 @@ from rich.console import Console
 from ezscreen import config
 from ezscreen.backends.kaggle.kernel import push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
+from ezscreen.results.run_layout import resolve_output_dir, resolve_receptor_pdb
 
 console = Console()
 _DATASET_POLL_INTERVAL = 10
@@ -136,24 +137,17 @@ def run_gnina_rescore(
     next merge left-joins CNNscore/CNNaffinity. `top_n` overrides the configured
     default. Returns dict with keys: status, cnn_scores_path|None, error|None.
     """
-    output_dir = work_dir / "output"
+    output_dir = resolve_output_dir(work_dir)
     cfg = config.load()
     top_n = int(top_n) if top_n else int(cfg.get("results", {}).get("interaction_top_n", 20))
 
     # Locate receptor PDB (resume.json → receptor/receptor_prep.pdb fallback)
     resume_json = work_dir / "resume.json"
-    receptor_pdb: Path | None = None
+    receptor_pdb = resolve_receptor_pdb(work_dir)
     username = ""
     if resume_json.exists():
         info = json.loads(resume_json.read_text())
-        if info.get("receptor_pdb"):
-            receptor_pdb = Path(info["receptor_pdb"])
         username = info.get("username", "")
-
-    if receptor_pdb is None or not receptor_pdb.exists():
-        candidate = work_dir / "receptor" / "receptor_prep.pdb"
-        if candidate.exists():
-            receptor_pdb = candidate
 
     if receptor_pdb is None or not receptor_pdb.exists():
         return {

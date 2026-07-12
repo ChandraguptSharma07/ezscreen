@@ -20,3 +20,15 @@ def test_results_screen_uses_legacy_output_dir_when_present(tmp_path: Path) -> N
     (output_dir / "scores.csv").write_text("ligand,score\nL1,-7.0\n", encoding="utf-8")
 
     assert ResultsScreen._resolve_output_dir(run_dir) == output_dir
+
+
+def test_results_screen_work_dir_stays_at_run_root(tmp_path: Path) -> None:
+    run_dir = tmp_path / "ezs-team"
+    run_dir.mkdir()
+    (run_dir / "scores.csv").write_text("ligand,score\nL1,-7.0\n", encoding="utf-8")
+
+    screen = ResultsScreen("ezs-team")
+    screen._run_dir = run_dir
+    screen._output = run_dir
+
+    assert screen._work_dir() == run_dir

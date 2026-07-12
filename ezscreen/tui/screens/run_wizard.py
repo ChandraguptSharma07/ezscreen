@@ -1962,13 +1962,13 @@ class RunWizardScreen(Screen):
                     )
                 if prepare_dispatch["skipped"]:
                     log(
-                        "[#e3b341]Some workers have no local GitHub dispatch token on this device; "
-                        "their scheduled workflow will pick the job up automatically.[/#e3b341]"
+                        "[#e3b341]Some workers could not be dispatched by the team server yet; "
+                        "check GitHub App setup for those repos.[/#e3b341]"
                     )
                 if prepare_dispatch["failed"]:
                     log(
                         f"[#e3b341]Immediate GitHub dispatch failed for {len(prepare_dispatch['failed'])} worker(s); "
-                        "scheduled polling remains available.[/#e3b341]"
+                        "check the team server GitHub App configuration.[/#e3b341]"
                     )
                 try:
                     upload_job_files(
@@ -1995,12 +1995,13 @@ class RunWizardScreen(Screen):
                     )
                 if run_dispatch["skipped"]:
                     log(
-                        "[#e3b341]Some workers are relying on scheduled GitHub Actions polling for the run phase.[/#e3b341]"
+                        "[#e3b341]Some workers could not be dispatched for the run phase; "
+                        "check GitHub App setup for those repos.[/#e3b341]"
                     )
                 if run_dispatch["failed"]:
                     log(
                         f"[#e3b341]Immediate GitHub run dispatch failed for {len(run_dispatch['failed'])} worker(s); "
-                        "scheduled polling remains available.[/#e3b341]"
+                        "check the team server GitHub App configuration.[/#e3b341]"
                     )
                 team_result = wait_for_team_job(
                     client=client,
