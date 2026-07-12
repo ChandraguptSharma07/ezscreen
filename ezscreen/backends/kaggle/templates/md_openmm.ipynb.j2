@@ -1,0 +1,71 @@
+{
+    "cells":  [
+                  {
+                      "cell_type":  "markdown",
+                      "metadata":  {
+
+                                   },
+                      "source":  [
+                                     "# ezscreen OpenMM MD\nRemote protein-ligand MD setup and short simulation."
+                                 ]
+                  },
+                  {
+                      "cell_type":  "code",
+                      "execution_count":  null,
+                      "metadata":  {
+
+                                   },
+                      "outputs":  [
+
+                                  ],
+                      "source":  [
+                                     "import json, os, shutil, subprocess, sys, traceback\nfrom pathlib import Path\nRUN_ID = << run_id_source >>\nLIGAND_ID = << ligand_id_source >>\nPRESET = << preset_source >>\nPOSE_SOURCE = << pose_source_source >>\nSTEPS = << steps >>\nTIMESTEP_FS = << timestep_fs >>\nREPORT_INTERVAL = max(1, << report_interval >>)\nTEMPERATURE_K = << temperature_k >>\nPADDING_NM = << padding_nm >>\nPARAMETERIZATION_MODE = 'restrained_ligand_geometry'\nOUT = Path('/kaggle/working/md_output')\nOUT.mkdir(exist_ok=True)\ndef fail(cell, exc):\n    data = {'cell': cell, 'message': str(exc), 'traceback': traceback.format_exc()}\n    Path('/kaggle/working/error.json').write_text(json.dumps(data, indent=2))\n    raise exc\nprint({'run_id': RUN_ID, 'ligand_id': LIGAND_ID, 'preset': PRESET, 'steps': STEPS, 'mode': PARAMETERIZATION_MODE})\n"
+                                 ]
+                  },
+                  {
+                      "cell_type":  "code",
+                      "execution_count":  null,
+                      "metadata":  {
+
+                                   },
+                      "outputs":  [
+
+                                  ],
+                      "source":  [
+                                     "try:\n    packages = ['openmm', 'rdkit', 'pdbfixer']\n    missing = []\n    for mod in packages:\n        try:\n            __import__(mod)\n        except Exception:\n            missing.append(mod)\n    if missing:\n        cmd = [sys.executable, '-m', 'pip', 'install', '-q'] + missing\n        print('Installing MD dependencies:', ' '.join(cmd))\n        subprocess.check_call(cmd)\nexcept Exception as exc:\n    fail('install', exc)\n"
+                                 ]
+                  },
+                  {
+                      "cell_type":  "code",
+                      "execution_count":  null,
+                      "metadata":  {
+
+                                   },
+                      "outputs":  [
+
+                                  ],
+                      "source":  [
+                                     "try:\n    import math\n    import numpy as np\n    import openmm as mm\n    from openmm import LangevinMiddleIntegrator, Platform, Vec3, unit\n    from openmm.app import DCDReporter, Element, ForceField, HBonds, Modeller, PME, PDBFile, Simulation, StateDataReporter, Topology\n    from rdkit import Chem\n    from pdbfixer import PDBFixer\n    from rdkit.Chem import AllChem\n    DATA = Path('/kaggle/input')\n    receptor = next(DATA.rglob('receptor_prep.pdb'))\n    poses = next(DATA.rglob('poses.sdf'))\n    selected = None\n    for mol in Chem.SDMolSupplier(str(poses), removeHs=False):\n        if mol is None:\n            continue\n        name = mol.GetProp('_Name') if mol.HasProp('_Name') else ''\n        lig_prop = mol.GetProp('ligand') if mol.HasProp('ligand') else ''\n        if LIGAND_ID in (name, lig_prop):\n            selected = mol\n            break\n    if selected is None:\n        raise RuntimeError(f'ligand pose not found in poses.sdf: {LIGAND_ID}')\n    selected = Chem.AddHs(selected, addCoords=True)\n    if selected.GetNumConformers() == 0:\n        AllChem.EmbedMolecule(selected, randomSeed=17)\n    try:\n        AllChem.UFFOptimizeMolecule(selected, maxIters=50)\n    except Exception:\n        pass\n    ligand_sdf = OUT / 'ligand_pose.sdf'\n    writer = Chem.SDWriter(str(ligand_sdf))\n    writer.write(selected)\n    writer.close()\n    def ligand_topology_positions(mol):\n        top = Topology()\n        chain = top.addChain('L')\n        residue = top.addResidue('LIG', chain)\n        atom_map = {}\n        for atom in mol.GetAtoms():\n            elem = Element.getByAtomicNumber(atom.GetAtomicNum())\n            name = f'{atom.GetSymbol()}{atom.GetIdx() + 1}'\n            atom_map[atom.GetIdx()] = top.addAtom(name, elem, residue)\n        for bond in mol.GetBonds():\n            top.addBond(atom_map[bond.GetBeginAtomIdx()], atom_map[bond.GetEndAtomIdx()])\n        conf = mol.GetConformer()\n        pos = []\n        for idx in range(mol.GetNumAtoms()):\n            p = conf.GetAtomPosition(idx)\n            pos.append(Vec3(p.x * 0.1, p.y * 0.1, p.z * 0.1))\n        return top, unit.Quantity(pos, unit.nanometer)\n    def xyz_nm(positions):\n        return np.array([[p.x, p.y, p.z] for p in positions.value_in_unit(unit.nanometer)], dtype=float)\n    lig_top, lig_pos = ligand_topology_positions(selected)\n    lig_xyz = xyz_nm(lig_pos)\n    def split_chainbreaks(topology, positions):\n        pos_nm = positions.value_in_unit(unit.nanometer)\n        new_top = Topology()\n        atom_map = {}\n        split_count = 0\n        standard = {'ALA','ARG','ASN','ASP','CYS','GLN','GLU','GLY','HIS','HID','HIE','HIP','ILE','LEU','LYS','MET','PHE','PRO','SER','THR','TRP','TYR','VAL'}\n        def atom_by_name(residue, name):\n            for atom in residue.atoms():\n                if atom.name == name:\n                    return atom\n            return None\n        def is_break(prev_res, res):\n            if prev_res.name not in standard or res.name not in standard:\n                return True\n            c_atom = atom_by_name(prev_res, 'C')\n            n_atom = atom_by_name(res, 'N')\n            if c_atom is None or n_atom is None:\n                return True\n            c = pos_nm[c_atom.index]; n = pos_nm[n_atom.index]\n            return float(np.linalg.norm(np.array([c.x-n.x, c.y-n.y, c.z-n.z]))) > 0.19\n        for chain in topology.chains():\n            new_chain = new_top.addChain(chain.id)\n            prev_res = None\n            for residue in chain.residues():\n                if prev_res is not None and is_break(prev_res, residue):\n                    split_count += 1\n                    new_chain = new_top.addChain()\n                new_res = new_top.addResidue(residue.name, new_chain, residue.id)\n                for atom in residue.atoms():\n                    atom_map[atom] = new_top.addAtom(atom.name, atom.element, new_res)\n                prev_res = residue\n        for a, b in topology.bonds():\n            if atom_map[a].residue.chain is atom_map[b].residue.chain or atom_map[a].residue is atom_map[b].residue:\n                new_top.addBond(atom_map[a], atom_map[b])\n        box = topology.getPeriodicBoxVectors()\n        if box is not None:\n            new_top.setPeriodicBoxVectors(box)\n        return new_top, positions, split_count\n    fixer = PDBFixer(filename=str(receptor))\n    fixer.findMissingResidues()\n    fixer.missingResidues = {}\n    fixer.findNonstandardResidues()\n    fixer.replaceNonstandardResidues()\n    fixer.findMissingAtoms()\n    fixer.addMissingAtoms()\n    fixer.addMissingHydrogens(7.4)\n    fixed_top, fixed_pos, chain_splits = split_chainbreaks(fixer.topology, fixer.positions)\n    forcefield = ForceField('amber14-all.xml', 'amber14/tip3pfb.xml')\n    modeller = Modeller(fixed_top, fixed_pos)\n    modeller.addSolvent(forcefield, model='tip3p', padding=PADDING_NM * unit.nanometer)\n    prot_xyz = xyz_nm(modeller.positions)\n    delete_waters = []\n    water_names = {\"HOH\", \"WAT\", \"SOL\"}\n    for residue in modeller.topology.residues():\n        if residue.name not in water_names:\n            continue\n        idxs = [atom.index for atom in residue.atoms()]\n        if not idxs:\n            continue\n        d2 = ((prot_xyz[idxs, None, :] - lig_xyz[None, :, :]) ** 2).sum(axis=2)\n        if float(d2.min()) < 0.09:\n            delete_waters.append(residue)\n    if delete_waters:\n        modeller.delete(delete_waters)\n    system = forcefield.createSystem(modeller.topology, nonbondedMethod=PME, nonbondedCutoff=1.0*unit.nanometer, constraints=HBonds, ignoreExternalBonds=True)\n    combined = Modeller(modeller.topology, modeller.positions)\n    combined.add(lig_top, lig_pos)\n    PDBFile.writeFile(combined.topology, combined.positions, open(OUT / 'complex_initial.pdb', 'w'))\n    PDBFile.writeFile(combined.topology, combined.positions, open(OUT / 'solvated.pdb', 'w'))\n    offset = system.getNumParticles()\n    nb_force = None\n    for force in system.getForces():\n        if isinstance(force, mm.NonbondedForce):\n            nb_force = force\n            break\n    if nb_force is None:\n        raise RuntimeError('protein system has no NonbondedForce')\n    bond_force = mm.HarmonicBondForce()\n    angle_force = mm.HarmonicAngleForce()\n    restraint = mm.CustomExternalForce('0.5*k*((x-x0)^2+(y-y0)^2+(z-z0)^2)')\n    restraint.addGlobalParameter('k', 25.0)\n    restraint.addPerParticleParameter('x0')\n    restraint.addPerParticleParameter('y0')\n    restraint.addPerParticleParameter('z0')\n    lj = {1: (0.25, 0.065), 6: (0.34, 0.36), 7: (0.325, 0.70), 8: (0.296, 0.88), 9: (0.312, 0.25), 15: (0.374, 0.84), 16: (0.356, 1.05), 17: (0.347, 1.11), 35: (0.397, 1.25), 53: (0.45, 1.40)}\n    lig_pos_nm = lig_pos.value_in_unit(unit.nanometer)\n    for atom in selected.GetAtoms():\n        sigma, epsilon = lj.get(atom.GetAtomicNum(), (0.35, 0.50))\n        system.addParticle(atom.GetMass() * unit.dalton)\n        nb_force.addParticle(0.0, sigma * unit.nanometer, epsilon * unit.kilojoule_per_mole)\n        p = lig_pos_nm[atom.GetIdx()]\n        restraint.addParticle(offset + atom.GetIdx(), [p.x, p.y, p.z])\n    def dist(i, j):\n        a = lig_xyz[i]; b = lig_xyz[j]\n        return float(np.linalg.norm(a - b))\n    adjacency = {i: [] for i in range(selected.GetNumAtoms())}\n    for bond in selected.GetBonds():\n        i = bond.GetBeginAtomIdx(); j = bond.GetEndAtomIdx()\n        adjacency[i].append(j); adjacency[j].append(i)\n        bond_force.addBond(offset + i, offset + j, dist(i, j) * unit.nanometer, 200000.0 * unit.kilojoule_per_mole / unit.nanometer**2)\n        nb_force.addException(offset + i, offset + j, 0.0, 1.0 * unit.nanometer, 0.0 * unit.kilojoule_per_mole, replace=True)\n    def angle(i, j, k):\n        v1 = lig_xyz[i] - lig_xyz[j]; v2 = lig_xyz[k] - lig_xyz[j]\n        denom = max(np.linalg.norm(v1) * np.linalg.norm(v2), 1e-8)\n        return math.acos(float(np.clip(np.dot(v1, v2) / denom, -1.0, 1.0)))\n    for j, neigh in adjacency.items():\n        for a in range(len(neigh)):\n            for b in range(a + 1, len(neigh)):\n                i = neigh[a]; k = neigh[b]\n                angle_force.addAngle(offset + i, offset + j, offset + k, angle(i, j, k) * unit.radian, 250.0 * unit.kilojoule_per_mole / unit.radian**2)\n    system.addForce(bond_force)\n    system.addForce(angle_force)\n    system.addForce(restraint)\n    integrator = LangevinMiddleIntegrator(TEMPERATURE_K*unit.kelvin, 1.0/unit.picosecond, TIMESTEP_FS*unit.femtoseconds)\n    platform_name = 'CUDA'\n    try:\n        platform = Platform.getPlatformByName(platform_name)\n    except Exception:\n        platform_name = 'CPU'\n        platform = Platform.getPlatformByName(platform_name)\n    simulation = Simulation(combined.topology, system, integrator, platform)\n    simulation.context.setPositions(combined.positions)\n    simulation.minimizeEnergy(maxIterations=1000)\n    PDBFile.writeFile(simulation.topology, simulation.context.getState(getPositions=True).getPositions(), open(OUT / 'minimized.pdb', 'w'))\n    if STEPS > 0:\n        simulation.context.setVelocitiesToTemperature(TEMPERATURE_K * unit.kelvin)\n        simulation.reporters.append(DCDReporter(str(OUT / 'trajectory.dcd'), REPORT_INTERVAL))\n        simulation.reporters.append(StateDataReporter(str(OUT / 'state.csv'), REPORT_INTERVAL, step=True, time=True, potentialEnergy=True, kineticEnergy=True, totalEnergy=True, temperature=True, progress=True, remainingTime=True, speed=True, totalSteps=STEPS, separator=','))\n        simulation.step(STEPS)\n    PDBFile.writeFile(simulation.topology, simulation.context.getState(getPositions=True).getPositions(), open(OUT / 'final.pdb', 'w'))\n    state = simulation.context.getState(getEnergy=True)\n    summary = {\n        'status': 'complete',\n        'run_id': RUN_ID,\n        'ligand_id': LIGAND_ID,\n        'preset': PRESET,\n        'steps': STEPS,\n        'timestep_fs': TIMESTEP_FS,\n        'simulated_ps': STEPS * TIMESTEP_FS / 1000.0,\n        'platform': platform_name,\n        'pose_source': POSE_SOURCE,\n        'parameterization_mode': PARAMETERIZATION_MODE,\n        'ligand_charge_model': 'zero_charge_lj_only',\n        'ligand_restraint_k_kj_mol_nm2': 25.0,\n        'deleted_overlap_waters': len(delete_waters),\n        'protein_chain_splits': chain_splits,\n        'potential_energy_kj_mol': state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole),\n        'kinetic_energy_kj_mol': state.getKineticEnergy().value_in_unit(unit.kilojoule_per_mole),\n    }\n    (OUT / 'md_summary.json').write_text(json.dumps(summary, indent=2))\n    print(json.dumps(summary, indent=2))\nexcept Exception as exc:\n    fail('md', exc)\n"
+                                 ]
+                  }
+              ],
+    "metadata":  {
+                     "kernelspec":  {
+                                        "display_name":  "Python 3",
+                                        "language":  "python",
+                                        "name":  "python3"
+                                    },
+                     "language_info":  {
+                                           "name":  "python",
+                                           "pygments_lexer":  "ipython3"
+                                       }
+                 },
+    "nbformat":  4,
+    "nbformat_minor":  5
+}
+
+
+
+
+
+

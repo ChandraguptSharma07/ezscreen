@@ -506,8 +506,9 @@ async def test_md_simulation_screen_has_browser_controls() -> None:
 
         assert app.screen.query_one("#md-runs", DataTable)
         assert app.screen.query_one("#md-progress", ProgressBar)
-        assert app.screen.query_one("#md-account", Select)
+        assert app.screen.query_one("#md-leaderboard", DataTable)
         assert app.screen.query_one("#md-run-filter", Input)
+        assert app.screen.query_one("#md-hit-filter", Input)
 
 
 async def test_team_runs_screen_prioritizes_worker_actions_when_already_in_team(monkeypatch, tmp_path) -> None:
@@ -550,3 +551,4 @@ async def test_team_runs_screen_prioritizes_worker_actions_when_already_in_team(
         assert screen.query_one("#team-worker-actions").display is True
         assert screen.query_one("#team-setup-section").display is False
         assert screen.query_one("#btn-team-connect", Button)
+
