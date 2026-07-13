@@ -1910,6 +1910,7 @@ class RunWizardScreen(Screen):
                     dispatch_team_job_workers,
                     download_team_result_zips,
                     merge_team_result_zips,
+                    stage_team_job_receptor_files,
                     start_team_job,
                     upload_job_files,
                     wait_for_team_job,
@@ -1919,10 +1920,20 @@ class RunWizardScreen(Screen):
                 if not state.get("server_url") or not state.get("user_id"):
                     raise RuntimeError("Team runner state is missing. Open Team Runs first.")
                 _gpu_type = ctx.get("gpu_type", "nvidiaTeslaP100")
+                team_receptor_files, team_receptor_variants = stage_team_job_receptor_files(
+                    work_dir=work_dir,
+                    receptor_pdbqt=Path(receptor_pdbqt),
+                    receptor_pdbqts=[Path(p) for p in receptor_pdbqt_paths],
+                    receptor_variant_modes=receptor_variant_modes,
+                    receptor_pdb=Path(receptor_pdb) if receptor_pdb else None,
+                )
                 notebook_src = kaggle_runner.render_vina_notebook(
                     run_id=run_id,
                     shard_filenames=[p.name for p in shard_paths],
-                    receptor_filename=Path(receptor_pdbqt).name,
+                    receptor_filename=team_receptor_variants[0]["filename"],
+                    receptor_variant=team_receptor_variants[0]["name"],
+                    receptor_variants=team_receptor_variants,
+                    receptor_pdb_filename="receptor_fixed.pdb",
                     box_center=box["center"],
                     box_size=box["size"],
                     search_mode=ctx["search_params"].get("search_mode", "balance"),
@@ -1943,7 +1954,8 @@ class RunWizardScreen(Screen):
                     client=client,
                     user_id=state["user_id"],
                     run_id=run_id,
-                    receptor_pdbqt=Path(receptor_pdbqt),
+                    receptor_pdbqt=team_receptor_files[0],
+                    receptor_files=team_receptor_files,
                     shard_paths=[Path(p) for p in shard_paths],
                     notebook_path=notebook_path,
                     engine=ctx.get("engine", "unidock"),
@@ -1975,7 +1987,7 @@ class RunWizardScreen(Screen):
                         client=client,
                         user_id=state["user_id"],
                         team_job_id=team_job["team_job_id"],
-                        file_paths=[Path(receptor_pdbqt), notebook_path, *[Path(p) for p in shard_paths]],
+                        file_paths=[*team_receptor_files, notebook_path, *[Path(p) for p in shard_paths]],
                         expected_ticket_count=sum(len(worker_job.get("files", [])) for worker_job in team_job.get("worker_jobs", [])),
                         poll_timeout_s=int(cfg.get("run", {}).get("team_upload_ticket_timeout_s", 360)),
                     )
