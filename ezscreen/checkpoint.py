@@ -11,8 +11,9 @@ from ezscreen.errors import CheckpointError
 
 DB_DIR: Path = Path.home() / ".ezscreen"
 DB_PATH: Path = DB_DIR / "checkpoints.db"
+SCHEMA_VERSION = 3
 
-_SCHEMA = """
+_RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS runs (
     run_id              TEXT PRIMARY KEY,
     created_at          TEXT NOT NULL,
@@ -20,8 +21,10 @@ CREATE TABLE IF NOT EXISTS runs (
     config_json         TEXT,
     total_compounds     INTEGER DEFAULT 0,
     completed_compounds INTEGER DEFAULT 0
-);
+)
+"""
 
+_SHARDS_TABLE = """
 CREATE TABLE IF NOT EXISTS shards (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id        TEXT    NOT NULL REFERENCES runs(run_id),
@@ -32,8 +35,10 @@ CREATE TABLE IF NOT EXISTS shards (
     error_message TEXT,
     updated_at    TEXT,
     UNIQUE(run_id, shard_index)
-);
+)
+"""
 
+_ANNOTATIONS_TABLE = """
 CREATE TABLE IF NOT EXISTS annotations (
     run_id      TEXT NOT NULL,
     compound_id TEXT NOT NULL,
@@ -41,8 +46,10 @@ CREATE TABLE IF NOT EXISTS annotations (
     note        TEXT DEFAULT '',
     updated_at  TEXT,
     PRIMARY KEY (run_id, compound_id)
-);
+)
+"""
 
+_MD_RUNS_TABLE = """
 CREATE TABLE IF NOT EXISTS md_runs (
     md_run_id      TEXT PRIMARY KEY,
     run_id         TEXT NOT NULL REFERENCES runs(run_id),
@@ -56,8 +63,35 @@ CREATE TABLE IF NOT EXISTS md_runs (
     output_dir     TEXT,
     summary_json   TEXT,
     error_message  TEXT
-);
+)
 """
+
+_SCHEMA_COLUMNS: dict[str, dict[str, str]] = {
+    "runs": {
+        "status": "TEXT NOT NULL DEFAULT 'running'",
+        "config_json": "TEXT",
+        "total_compounds": "INTEGER DEFAULT 0",
+        "completed_compounds": "INTEGER DEFAULT 0",
+    },
+    "shards": {
+        "status": "TEXT NOT NULL DEFAULT 'pending'",
+        "retry_count": "INTEGER DEFAULT 0",
+        "compounds": "INTEGER DEFAULT 0",
+        "error_message": "TEXT",
+        "updated_at": "TEXT",
+    },
+    "annotations": {
+        "flag": "TEXT DEFAULT ''",
+        "note": "TEXT DEFAULT ''",
+        "updated_at": "TEXT",
+    },
+    "md_runs": {
+        "completed_at": "TEXT",
+        "output_dir": "TEXT",
+        "summary_json": "TEXT",
+        "error_message": "TEXT",
+    },
+}
 
 
 @contextmanager
@@ -87,13 +121,53 @@ class _PathEncoder(json.JSONEncoder):
         return super().default(o)
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {str(row[1]) for row in rows}
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = _table_columns(conn, table)
+    for name, ddl in columns.items():
+        if name in existing:
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+
+def _migration_1(conn: sqlite3.Connection) -> None:
+    conn.execute(_RUNS_TABLE)
+    conn.execute(_SHARDS_TABLE)
+    _ensure_columns(conn, "runs", _SCHEMA_COLUMNS["runs"])
+    _ensure_columns(conn, "shards", _SCHEMA_COLUMNS["shards"])
+
+
+def _migration_2(conn: sqlite3.Connection) -> None:
+    conn.execute(_ANNOTATIONS_TABLE)
+    _ensure_columns(conn, "annotations", _SCHEMA_COLUMNS["annotations"])
+
+
+def _migration_3(conn: sqlite3.Connection) -> None:
+    conn.execute(_MD_RUNS_TABLE)
+    _ensure_columns(conn, "md_runs", _SCHEMA_COLUMNS["md_runs"])
+
+
+_MIGRATIONS = {
+    1: _migration_1,
+    2: _migration_2,
+    3: _migration_3,
+}
+
+
 # ---------------------------------------------------------------------------
 # Schema init
 # ---------------------------------------------------------------------------
 
 def init_db() -> None:
     with _connection() as conn:
-        conn.executescript(_SCHEMA)
+        version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+        for next_version in range(version + 1, SCHEMA_VERSION + 1):
+            _MIGRATIONS[next_version](conn)
+            conn.execute(f"PRAGMA user_version = {next_version}")
 
 
 # ---------------------------------------------------------------------------

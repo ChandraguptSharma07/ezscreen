@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
+
 import pytest
 
 import ezscreen.checkpoint as cp
@@ -231,3 +234,87 @@ def test_mark_md_run_failed_records_error(tmp_path):
     assert row["status"] == "failed"
     assert row["error_message"] == "kernel failed"
     assert row["output_dir"] == str(out_dir)
+
+
+def test_init_db_migrates_legacy_schema_and_preserves_rows():
+    cp.DB_PATH.unlink()
+    with closing(sqlite3.connect(cp.DB_PATH)) as conn:
+        conn.executescript(
+            """
+            PRAGMA user_version = 0;
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE shards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                shard_index INTEGER NOT NULL,
+                UNIQUE(run_id, shard_index)
+            );
+            INSERT INTO runs (run_id, created_at) VALUES ('legacy-run', '2026-01-01T00:00:00+00:00');
+            INSERT INTO shards (run_id, shard_index) VALUES ('legacy-run', 0);
+            """
+        )
+
+    cp.init_db()
+
+    run = cp.get_run('legacy-run')
+    assert run is not None
+    assert run['status'] == 'running'
+    assert run['total_compounds'] == 0
+    assert run['completed_compounds'] == 0
+    assert cp.get_incomplete_shards('legacy-run')[0]['status'] == 'pending'
+
+    with closing(sqlite3.connect(cp.DB_PATH)) as conn:
+        version = conn.execute('PRAGMA user_version').fetchone()[0]
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+    assert version == cp.SCHEMA_VERSION
+    assert {'runs', 'shards', 'annotations', 'md_runs'} <= tables
+
+
+def test_init_db_upgrades_from_annotations_only_schema():
+    cp.DB_PATH.unlink()
+    with closing(sqlite3.connect(cp.DB_PATH)) as conn:
+        conn.executescript(
+            """
+            PRAGMA user_version = 2;
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                config_json TEXT,
+                total_compounds INTEGER DEFAULT 0,
+                completed_compounds INTEGER DEFAULT 0
+            );
+            CREATE TABLE shards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                run_id TEXT NOT NULL,
+                shard_index INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                retry_count INTEGER DEFAULT 0,
+                compounds INTEGER DEFAULT 0,
+                error_message TEXT,
+                updated_at TEXT,
+                UNIQUE(run_id, shard_index)
+            );
+            CREATE TABLE annotations (
+                run_id TEXT NOT NULL,
+                compound_id TEXT NOT NULL,
+                flag TEXT DEFAULT '',
+                note TEXT DEFAULT '',
+                updated_at TEXT,
+                PRIMARY KEY (run_id, compound_id)
+            );
+            """
+        )
+
+    cp.init_db()
+
+    with closing(sqlite3.connect(cp.DB_PATH)) as conn:
+        version = conn.execute('PRAGMA user_version').fetchone()[0]
+        md_runs_cols = {row[1] for row in conn.execute('PRAGMA table_info(md_runs)')}
+
+    assert version == cp.SCHEMA_VERSION
+    assert {'md_run_id', 'run_id', 'ligand_id', 'preset', 'pose_source', 'accelerator', 'status', 'created_at'} <= md_runs_cols
