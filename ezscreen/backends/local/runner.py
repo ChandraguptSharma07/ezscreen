@@ -5,6 +5,7 @@ import json
 import re
 import subprocess
 import tempfile
+import zlib
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -21,6 +22,11 @@ from ezscreen.backends.base import DockingBackend
 from ezscreen.backends.local.vina_binary import get_vina_binary
 
 console = Console()
+
+
+def _stable_vina_seed(run_id: str, ligand_name: str) -> int:
+    token = f"{run_id}:{ligand_name}".encode("utf-8", errors="ignore")
+    return zlib.crc32(token) & 0x7FFFFFFF
 
 
 def _split_pdbqt_shard(shard_path: Path, out_dir: Path) -> list[tuple[str, Path]]:
@@ -97,6 +103,7 @@ def _run_vina(
     num_modes: int,
     cpu_cores: int = 0,
     ligand_name: str = "",
+    seed: int | None = None,
 ) -> str | None:
     cmd = [
         str(vina),
@@ -113,6 +120,8 @@ def _run_vina(
         "--num_modes",      str(num_modes),
         "--cpu", str(cpu_cores),
     ]
+    if seed is not None:
+        cmd += ["--seed", str(seed)]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode == 0 and out_path.exists():
@@ -136,6 +145,7 @@ def run_local_screening(
     work_dir: Path,
     exhaustiveness: int | None = None,
     num_modes: int = 3,
+    seed: int | None = None,
 ) -> dict[str, Any]:
     from ezscreen import config as _cfg
     _lc           = _cfg.load().get("local", {})
@@ -184,10 +194,11 @@ def run_local_screening(
                 for name, lig_pdbqt in ligands:
                     safe_out   = re.sub(r"[^\w\-]", "_", name)
                     out_pdbqt  = tmp / f"{safe_out}_out.pdbqt"
+                    lig_seed = seed if seed is not None else _stable_vina_seed(run_id, name)
                     pdbqt_text = _run_vina(
                         vina, receptor_pdbqt, lig_pdbqt, out_pdbqt,
                         box_center, box_size, exhaustiveness, num_modes,
-                        cpu_cores=_cpu_cores, ligand_name=name,
+                        cpu_cores=_cpu_cores, ligand_name=name, seed=lig_seed,
                     )
                     progress.advance(task)
 
@@ -276,4 +287,5 @@ class LocalVinaBackend(DockingBackend):
             work_dir=Path(config["work_dir"]),
             exhaustiveness=config.get("exhaustiveness"),
             num_modes=int(config.get("num_modes", 3)),
+            seed=config.get("seed"),
         )
