@@ -237,3 +237,10 @@ def get_annotations(run_id: str) -> dict[str, dict[str, str]]:
             (run_id,),
         ).fetchall()
     return {r["compound_id"]: {"flag": r["flag"] or "", "note": r["note"] or ""} for r in rows}
+def mark_run_partial(run_id: str) -> None:
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE runs SET status = 'partial' WHERE run_id = ?", (run_id,)
+        )
+
+

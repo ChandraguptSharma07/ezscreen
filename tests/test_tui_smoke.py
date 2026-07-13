@@ -552,3 +552,17 @@ async def test_team_runs_screen_prioritizes_worker_actions_when_already_in_team(
         assert screen.query_one("#team-setup-section").display is False
         assert screen.query_one("#btn-team-connect", Button)
 
+def test_checkpoint_partial_status_survives_for_results_runs(monkeypatch, tmp_path) -> None:
+    from ezscreen import checkpoint
+
+    db_file = tmp_path / "checkpoints.db"
+    monkeypatch.setattr(checkpoint, "DB_DIR", tmp_path)
+    monkeypatch.setattr(checkpoint, "DB_PATH", db_file)
+    checkpoint.init_db()
+    checkpoint.create_run("ezs-partial", {}, 10)
+    checkpoint.mark_run_partial("ezs-partial")
+
+    row = checkpoint.get_run("ezs-partial")
+    assert row is not None
+    assert row["status"] == "partial"
+

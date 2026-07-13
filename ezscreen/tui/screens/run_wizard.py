@@ -2275,7 +2275,7 @@ class RunWizardScreen(Screen):
                         f"[#3fb950]\u2713 Done!  Results \u2192 {result['output_dir']}[/#3fb950]"
                     )
                 else:
-                    checkpoint.mark_run_complete(run_id)
+                    checkpoint.mark_run_partial(run_id)
                     log(
                         f"[#e3b341]\u26a0 Partial results â€” some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
                     )

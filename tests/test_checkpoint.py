@@ -166,3 +166,9 @@ def test_mark_run_complete_marks_non_failed_shards_done():
 
     assert cp.get_run("run-variants")["completed_compounds"] == 100
     assert cp.get_incomplete_shards("run-variants") == []
+def test_mark_run_partial():
+    cp.create_run("run-003p", {}, 50)
+    cp.mark_run_partial("run-003p")
+    assert cp.get_run("run-003p")["status"] == "partial"
+
+
