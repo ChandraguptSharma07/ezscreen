@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import shutil
 import subprocess
+import tarfile
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -239,9 +240,17 @@ def _p2rank_exe() -> Path | None:
     return Path(found) if found else None
 
 
+def _safe_extract_tar(tf: tarfile.TarFile, destination: Path) -> None:
+    destination = destination.resolve()
+    for member in tf.getmembers():
+        target = (destination / member.name).resolve()
+        if target != destination and destination not in target.parents:
+            raise ValueError(f"Unsafe tar member path: {member.name}")
+    tf.extractall(destination)
+
+
 def download_p2rank(progress_cb=None) -> Path:
     """Download and unpack P2Rank into ~/.ezscreen/tools/p2rank/. Returns exe path."""
-    import tarfile
 
     P2RANK_DIR.mkdir(parents=True, exist_ok=True)
     archive = P2RANK_DIR.parent / "p2rank.tar.gz"
@@ -255,7 +264,7 @@ def download_p2rank(progress_cb=None) -> Path:
 
     console.print("[dim]Unpacking P2Rank...[/dim]")
     with tarfile.open(archive) as tf:
-        tf.extractall(P2RANK_DIR.parent)
+        _safe_extract_tar(tf, P2RANK_DIR.parent)
 
     # The tarball unpacks to p2rank_2.5/ — move contents into p2rank/
     extracted = P2RANK_DIR.parent / "p2rank_2.5"

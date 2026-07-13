@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import io
+import tarfile
 from pathlib import Path
 
 import pytest
 
 from ezscreen.pocket.detect import (
     _box_from_coords,
+    _safe_extract_tar,
     box_from_cocrystal,
     box_from_residues,
     find_cocrystal_ligands,
@@ -224,3 +227,37 @@ def test_blind_box_covers_whole_protein(tmp_path):
     box_tight = box_from_residues(pdb, [10, 20, 30], ["A"], padding=0.0)
     box_padded = box_from_residues(pdb, [10, 20, 30], ["A"], padding=10.0)
     assert box_padded["volume_angstrom3"] > box_tight["volume_angstrom3"]
+
+
+# ---------------------------------------------------------------------------
+# P2Rank archive extraction hardening
+# ---------------------------------------------------------------------------
+
+
+def test_safe_extract_tar_rejects_path_traversal(tmp_path):
+    archive = tmp_path / "bad.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        info = tarfile.TarInfo("../escape.txt")
+        payload = b"owned"
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
+
+    with tarfile.open(archive) as tf:
+        with pytest.raises(ValueError, match="Unsafe tar member path"):
+            _safe_extract_tar(tf, tmp_path / "extract")
+
+
+def test_safe_extract_tar_extracts_safe_members(tmp_path):
+    archive = tmp_path / "ok.tar.gz"
+    with tarfile.open(archive, "w:gz") as tf:
+        info = tarfile.TarInfo("p2rank_2.5/prank")
+        payload = b"#!/bin/sh\n"
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
+
+    dest = tmp_path / "extract"
+    dest.mkdir()
+    with tarfile.open(archive) as tf:
+        _safe_extract_tar(tf, dest)
+
+    assert (dest / "p2rank_2.5" / "prank").read_bytes() == b"#!/bin/sh\n"
