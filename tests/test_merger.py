@@ -242,6 +242,28 @@ def test_merge_skips_receptor_variant_partial_failures_in_unscored_reasons(tmp_p
     assert result["unscored_reason_counts"]["score_ceiling"] == 1
 
 
+def test_merge_unions_later_shard_only_columns(tmp_path):
+    sd0 = tmp_path / "s0"
+    sd1 = tmp_path / "s1"
+    sd0.mkdir()
+    sd1.mkdir()
+    _write(sd0 / "scores.csv", ["ligand", "score"], [
+        {"ligand": "l0", "score": "-8.1"},
+    ])
+    _write(sd1 / "scores.csv", ["ligand", "score", "note"], [
+        {"ligand": "l1", "score": "-7.0", "note": "late_col"},
+    ])
+
+    out = tmp_path / "output"
+    merge_shard_results([sd0, sd1], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    by_ligand = {row["ligand"]: row for row in rows}
+    assert "note" in rows[0]
+    assert by_ligand["l0"]["note"] == ""
+    assert by_ligand["l1"]["note"] == "late_col"
+
+
 def test_merge_adds_engine_column_and_meta(tmp_path):
     sd = tmp_path / "shard"
     sd.mkdir()

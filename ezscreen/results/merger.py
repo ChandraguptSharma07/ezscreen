@@ -6,6 +6,7 @@ from typing import Any
 
 from ezscreen.results.run_layout import resolve_receptor_pdb, resolve_run_dir
 
+
 def _load_filtered(shard_dirs: list[Path]) -> list[dict]:
     """Return molecules filtered out during prep (too large for GPU), deduped by SMILES."""
     rows: list[dict] = []
@@ -478,6 +479,11 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
 def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | None = None) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    def _append_missing_fields(dst: list[str], src: list[str] | None) -> None:
+        for name in src or []:
+            if name not in dst:
+                dst.append(name)
+
     all_rows: list[dict] = []
     fieldnames: list[str] = []
     index = _load_index(shard_dirs)
@@ -488,8 +494,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
             continue
         with sf.open() as f:
             reader = csv.DictReader(f)
-            if not fieldnames and reader.fieldnames:
-                fieldnames = list(reader.fieldnames)
+            _append_missing_fields(fieldnames, list(reader.fieldnames or []))
             all_rows.extend(reader)
 
     result_engine = _infer_engine(shard_dirs, all_rows, engine)
@@ -508,8 +513,10 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
                     row["name"]   = index[lig_id]["name"]
                     row["smiles"] = index[lig_id]["smiles"]
                 row["conformer_qc"] = index[lig_id].get("conformer_qc", "")
-        if all_rows and "smiles" in all_rows[0] and "name" not in fieldnames:
-            fieldnames += ["name", "smiles"]
+        if any((row.get("smiles") or row.get("name")) for row in all_rows):
+            for col in ("name", "smiles"):
+                if col not in fieldnames:
+                    fieldnames.append(col)
         if any(r.get("conformer_qc") for r in all_rows) and "conformer_qc" not in fieldnames:
             fieldnames += ["conformer_qc"]
 
