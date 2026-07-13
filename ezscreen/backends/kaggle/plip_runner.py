@@ -3,7 +3,6 @@ from __future__ import annotations
 import csv
 import json
 import shutil
-import time
 from pathlib import Path
 from typing import Any
 
@@ -12,30 +11,10 @@ from rich.console import Console
 from ezscreen import config
 from ezscreen.backends.kaggle.kernel import push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
+from ezscreen.backends.kaggle.runner import _wait_for_dataset, _wait_for_dataset_sync
 from ezscreen.results.run_layout import resolve_output_dir, resolve_receptor_pdb
 
 console = Console()
-_DATASET_POLL_INTERVAL = 10
-_DATASET_TIMEOUT = 300
-
-
-def _wait_for_dataset(dataset_ref: str) -> None:
-    import kaggle
-    kaggle.api.authenticate()
-    elapsed = 0
-    console.print("  [dim]Waiting for PLIP dataset to be ready...[/dim]", end="")
-    while elapsed < _DATASET_TIMEOUT:
-        try:
-            if kaggle.api.dataset_status(dataset_ref) == "ready":
-                console.print(f" ready ({elapsed}s)")
-                return
-        except Exception:
-            pass
-        time.sleep(_DATASET_POLL_INTERVAL)
-        elapsed += _DATASET_POLL_INTERVAL
-        console.print(".", end="")
-    console.print(f" [yellow]timed out after {elapsed}s — proceeding[/yellow]")
-
 
 def _upload_plip_dataset(
     run_id: str,
@@ -233,8 +212,7 @@ def run_plip_analysis(run_id: str, work_dir: Path) -> dict[str, Any]:
     console.print(f"  [dim]PLIP dataset: {dataset_ref}[/dim]")
 
     _wait_for_dataset(dataset_ref)
-    console.print("  [dim]Waiting 90s for dataset files to sync...[/dim]")
-    time.sleep(90)
+    _wait_for_dataset_sync(dataset_ref, label="PLIP dataset files")
 
     # Render and push notebook
     template_dir = Path(__file__).parent / "templates"

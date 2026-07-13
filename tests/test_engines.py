@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 from ezscreen.backends import engines
 
 
@@ -368,3 +371,71 @@ def test_local_backend_adapter_calls_legacy_runner(tmp_path, monkeypatch):
     assert calls[0]["shard_paths"] == [Path(tmp_path / "shard_0000.pdbqt")]
 
 
+
+
+def test_wait_for_dataset_sync_requires_stable_ready_streak(monkeypatch):
+    from ezscreen.backends.kaggle import runner
+
+    calls: list[int] = []
+    statuses = iter(["ready", "updating", "ready", "ready", "ready"])
+
+    class FakeApi:
+        def authenticate(self):
+            return None
+
+        def dataset_status(self, _dataset_ref):
+            return next(statuses)
+
+    monkeypatch.setitem(sys.modules, "kaggle", types.SimpleNamespace(api=FakeApi()))
+    monkeypatch.setattr(runner, "_DATASET_SYNC_POLL_INTERVAL", 1)
+    monkeypatch.setattr(runner, "_DATASET_SYNC_TIMEOUT", 10)
+    monkeypatch.setattr(runner, "_DATASET_SYNC_READY_STREAK", 3)
+    monkeypatch.setattr(runner.time, "sleep", lambda seconds: calls.append(seconds))
+
+    runner._wait_for_dataset_sync("user/dataset")
+
+    assert calls == [1, 1, 1, 1]
+
+
+def test_run_screening_job_waits_for_sync_probe_before_submit(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from ezscreen.backends.kaggle import runner
+
+    receptor = tmp_path / "receptor.pdbqt"
+    receptor.write_text("RECEPTOR\n")
+    (tmp_path / "receptor_prep.pdb").write_text("ATOM\nEND\n")
+    shard = tmp_path / "shard_0000.smi"
+    shard.write_text("CCO ligand\n")
+    notebook = tmp_path / "run.ipynb"
+    notebook.write_text("{}")
+    work_dir = tmp_path / "run"
+
+    steps: list[str] = []
+
+    monkeypatch.setattr(runner, "upload_run_dataset", lambda **_kwargs: "user/ezs-run")
+    monkeypatch.setattr(runner, "_wait_for_dataset", lambda _ref: steps.append("ready"))
+    monkeypatch.setattr(runner, "_wait_for_dataset_sync", lambda _ref, **_kwargs: steps.append("sync"))
+    monkeypatch.setattr(runner, "push_kernel", lambda **_kwargs: steps.append("push") or "user/kernel")
+    monkeypatch.setattr(
+        runner,
+        "poll_until_done",
+        lambda **_kwargs: {"status": "complete", "error_type": None},
+    )
+    monkeypatch.setattr(
+        runner,
+        "_download_output",
+        lambda _kernel_ref, job_work_dir, **_kwargs: Path(job_work_dir) / "output",
+    )
+
+    result = runner.run_screening_job(
+        run_id="ezs-run",
+        receptor_pdbqt=receptor,
+        shard_paths=[shard],
+        notebook_path=notebook,
+        username="user",
+        work_dir=work_dir,
+    )
+
+    assert result["status"] == "complete"
+    assert steps == ["ready", "sync", "push"]

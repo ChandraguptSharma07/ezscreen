@@ -19,6 +19,9 @@ from ezscreen.backends.kaggle.poller import poll_until_done
 console = Console()
 _DATASET_POLL_INTERVAL = 10   # seconds
 _DATASET_TIMEOUT = 300        # 5 minutes
+_DATASET_SYNC_POLL_INTERVAL = 10
+_DATASET_SYNC_TIMEOUT = 90
+_DATASET_SYNC_READY_STREAK = 7
 _MAX_PARALLEL_KERNELS = 2
 _KAGGLE_API_LOCK = threading.Lock()  # serialises env-var switching + authenticate()
 
@@ -118,6 +121,43 @@ def _wait_for_dataset(dataset_ref: str) -> None:
         elapsed += _DATASET_POLL_INTERVAL
         console.print(".", end="")
     console.print(f" [yellow]timed out after {elapsed}s — proceeding anyway[/yellow]")
+
+
+def _wait_for_dataset_sync(
+    dataset_refs: str | Sequence[str],
+    *,
+    label: str = "dataset files",
+) -> None:
+    """Wait for repeated ready states before pushing a kernel.
+
+    Kaggle often reports dataset metadata as ready before the uploaded files are
+    consistently visible to compute nodes. We treat a sustained sequence of
+    `ready` responses as the best lightweight proxy we have before submission.
+    """
+    refs = [dataset_refs] if isinstance(dataset_refs, str) else [ref for ref in dataset_refs if ref]
+    if not refs:
+        return
+    import kaggle
+
+    kaggle.api.authenticate()
+    elapsed = 0
+    ready_streak = 0
+    console.print(f"  [dim]Waiting for {label} to sync to compute nodes...[/dim]", end="")
+    while elapsed < _DATASET_SYNC_TIMEOUT:
+        try:
+            if all(kaggle.api.dataset_status(ref) == "ready" for ref in refs):
+                ready_streak += 1
+                if ready_streak >= _DATASET_SYNC_READY_STREAK:
+                    console.print(f" ready ({elapsed}s)")
+                    return
+            else:
+                ready_streak = 0
+        except Exception:
+            ready_streak = 0
+        time.sleep(_DATASET_SYNC_POLL_INTERVAL)
+        elapsed += _DATASET_SYNC_POLL_INTERVAL
+        console.print(".", end="")
+    console.print(f" [yellow]timed out after {elapsed}s - proceeding anyway[/yellow]")
 
 
 def _load_index(output_dir: Path) -> dict[str, dict]:
@@ -545,12 +585,10 @@ def run_screening_job(
     )
     console.print(f"  [dim]Dataset: {dataset_ref}[/dim]")
 
-    # dataset_status() returns "ready" as soon as metadata is saved, but files
-    # take ~60s to propagate to compute nodes.  Pushing the kernel too early
-    # causes Cell 4's path assertions to fail with FileNotFoundError.
+    # dataset_status() flips to "ready" before compute nodes consistently see
+    # the uploaded files. Keep probing readiness before submitting the kernel.
     _wait_for_dataset(dataset_ref)
-    console.print("  [dim]Waiting 90s for dataset files to sync to compute nodes...[/dim]")
-    time.sleep(90)
+    _wait_for_dataset_sync(dataset_ref)
 
     console.print("  [dim]Submitting notebook to Kaggle...[/dim]")
     kernel_ref = push_kernel(
@@ -1031,9 +1069,12 @@ def run_multi_account_screening(
         spec["dataset_ref"] = dataset_ref
         console.print(f"  [dim]Dataset ready: {dataset_ref}[/dim]")
 
-    # Single propagation wait after all uploads
-    console.print("  [dim]Waiting 90s for all datasets to sync to compute nodes...[/dim]")
-    time.sleep(90)
+    # Keep probing for a stable ready state across all uploaded datasets before
+    # the sequential kernel submissions start.
+    _wait_for_dataset_sync(
+        [str(spec["dataset_ref"]) for spec in account_specs],
+        label="all dataset files",
+    )
 
     # Render and submit each notebook sequentially (env-var safety)
     try:
