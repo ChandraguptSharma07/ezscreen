@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import html
 import io
 import json
 from pathlib import Path
@@ -138,6 +139,12 @@ def _detect_score_col(headers: list[str]) -> str:
     return headers[-1]
 
 
+def _escape(value: object, default: str = "---") -> str:
+    if value in (None, ""):
+        return default
+    return html.escape(str(value), quote=True)
+
+
 def _compute_props(smiles_list: list[str]) -> list[dict]:
     try:
         from rdkit import Chem
@@ -234,13 +241,15 @@ def _struct_cards_html(rows: list[dict], score_col: str, n: int = 10) -> str:
         name  = row.get("name", f"#{i}")
         score = row.get(score_col, "—")
         svg   = _mol_svg(smi) if smi else ""
+        safe_name = _escape(name)
+        safe_score = _escape(score)
         struct_html = svg if svg else "<div style='height:120px;line-height:120px;color:#aaa'>no structure</div>"
         cards.append(
             f'<div class="struct-card">'
             f'<div class="rank">#{i}</div>'
             f'{struct_html}'
-            f'<div>{name}</div>'
-            f'<div class="score">{score}</div>'
+            f'<div>{safe_name}</div>'
+            f'<div class="score">{safe_score}</div>'
             f'</div>'
         )
     return "\n".join(cards)
@@ -255,7 +264,7 @@ def _metadata_table_html(run_id: str, n_total: int, top_score: str, metadata: di
     for k, v in metadata.items():
         rows.append((k.replace("_", " ").title(), str(v)))
 
-    trs = "\n".join(f"<tr><th>{k}</th><td>{v}</td></tr>" for k, v in rows)
+    trs = "\n".join(f"<tr><th>{_escape(k)}</th><td>{_escape(v)}</td></tr>" for k, v in rows)
     return f"<table>{trs}</table>"
 
 
@@ -359,7 +368,7 @@ def _pose_validity_section_html(rows: list[dict]) -> str:
 
     invalid_html = ""
     if invalid_ids:
-        items = ", ".join(invalid_ids[:50])
+        items = ", ".join(_escape(item) for item in invalid_ids[:50])
         more = f" &nbsp;(+{len(invalid_ids) - 50} more)" if len(invalid_ids) > 50 else ""
         invalid_html = (
             f'<p class="note"><b>Invalid compounds:</b> {items}{more}</p>'
@@ -392,14 +401,14 @@ def _annotations_section_html(rows: list[dict], annotations: dict[str, dict]) ->
         hex_ = _FLAG_HEX.get(flag)
         swatch = (
             f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
-            f'background:{hex_}"></span> {flag}'
+            f'background:{hex_}"></span> {_escape(flag)}'
             if hex_ else "—"
         )
         name  = row.get("name") or row.get("ligand", "—")
         score = row.get(score_col, "—")
-        note  = (ann.get("note") or "").replace("<", "&lt;").replace(">", "&gt;")
+        note = _escape(ann.get("note"))
         trs.append(
-            f"<tr><td>{i}</td><td>{name}</td><td>{score}</td>"
+            f"<tr><td>{i}</td><td>{_escape(name)}</td><td>{_escape(score)}</td>"
             f"<td>{swatch}</td><td>{note}</td></tr>"
         )
 
@@ -437,10 +446,10 @@ def _interactions_heatmap_html(
         "PiCation":    "#ff9800",
     }
 
-    header = "<tr><th>Compound</th>" + "".join(f"<th>{r}</th>" for r in residues[:30]) + "</tr>"
+    header = "<tr><th>Compound</th>" + "".join(f"<th>{_escape(r)}</th>" for r in residues[:30]) + "</tr>"
     rows_html = []
     for name, contacts in list(interactions.items())[:20]:
-        cells = [f"<td><b>{name}</b></td>"]
+        cells = [f"<td><b>{_escape(name)}</b></td>"]
         for res in residues[:30]:
             imap = contacts.get(res, {})
             if imap:
@@ -448,8 +457,8 @@ def _interactions_heatmap_html(
                 colour = _ITYPE_COLOURS.get(dominant, "#8b949e")
                 title = ", ".join(f"{k}:{v}" for k, v in imap.items())
                 cells.append(
-                    f'<td style="background:{colour};color:#fff;text-align:center" title="{title}">'
-                    f'{dominant[:3]}</td>'
+                    f'<td style="background:{colour};color:#fff;text-align:center" title="{_escape(title)}">'
+                    f'{_escape(dominant[:3])}</td>'
                 )
             else:
                 cells.append("<td></td>")
@@ -457,7 +466,7 @@ def _interactions_heatmap_html(
 
     legend = "".join(
         f'<span style="background:{c};color:#fff;padding:2px 8px;margin:2px;border-radius:4px;'
-        f'font-size:0.8em">{t}</span>'
+        f'font-size:0.8em">{_escape(t)}</span>'
         for t, c in _ITYPE_COLOURS.items()
     )
 
@@ -493,7 +502,7 @@ def _interaction_cluster_section_html(entries: list[dict]) -> str:
         score = e.get("score", "")
         ncontacts = len(e.get("interactions", []) or [])
         body_rows.append(
-            f"<tr><td>{cid}</td><td>{name}</td><td>{score}</td>"
+            f"<tr><td>{cid}</td><td>{_escape(name)}</td><td>{_escape(score)}</td>"
             f"<td>{ncontacts}</td><td>{size}</td></tr>"
         )
     return f"{summary}<table>{header}\n{''.join(body_rows)}</table>"
@@ -548,7 +557,7 @@ def _cnn_section_html(
     label = score_label or "Score"
     header = f"<tr><th>#</th><th>Compound</th><th>{label}</th><th>CNNscore</th><th>CNNaffinity</th></tr>"
     body = "\n".join(
-        f"<tr><td>{i}</td><td>{n}</td><td>{s}</td><td>{cs}</td><td>{ca}</td></tr>"
+        f"<tr><td>{i}</td><td>{_escape(n)}</td><td>{_escape(s)}</td><td>{_escape(cs)}</td><td>{_escape(ca)}</td></tr>"
         for i, (n, s, cs, _f, ca) in enumerate(table_rows[:15], 1)
     )
     img = (
@@ -563,7 +572,7 @@ def _consensus_section_html(rows: list[dict]) -> str:
         return ""
     engine_cols = [h for h in rows[0] if h.endswith("_rank") and h != "consensus_rank"]
     header = "<tr><th>Consensus</th><th>Compound</th><th>Engines</th>"
-    header += "".join(f"<th>{h.replace('_rank', '')} rank</th>" for h in engine_cols)
+    header += "".join(f"<th>{_escape(h.replace('_rank', ''))} rank</th>" for h in engine_cols)
     header += "<th>Norm rank</th></tr>"
     body = []
     for row in rows[:25]:
@@ -575,7 +584,7 @@ def _consensus_section_html(rows: list[dict]) -> str:
         ]
         cells.extend(row.get(h, "") for h in engine_cols)
         cells.append(row.get("consensus_norm_rank", ""))
-        body.append("<tr>" + "".join(f"<td>{c}</td>" for c in cells) + "</tr>")
+        body.append("<tr>" + "".join(f"<td>{_escape(c)}</td>" for c in cells) + "</tr>")
     return "<table>" + header + "\n" + "\n".join(body) + "</table>"
 
 def write_results_report(

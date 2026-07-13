@@ -363,3 +363,33 @@ def test_results_report_includes_consensus_section(tmp_path):
     assert "Consensus Ranking" in html
     assert "unidock rank" in html
 
+
+def test_results_report_escapes_imported_html_values(tmp_path):
+    from ezscreen.results.report_html import write_results_report
+
+    out = tmp_path / "output"
+    out.mkdir()
+    _write(out / "scores.csv", ["ligand", "name", "smiles", "score"], [{
+        "ligand": "lig<script>",
+        "name": "<img src=x onerror=alert(1)>",
+        "smiles": "CCO",
+        "score": "-7.5",
+    }])
+    (out / "results_meta.json").write_text(json.dumps({"score_type": "vina"}))
+
+    html = write_results_report(
+        out / "scores.csv",
+        out / "report.html",
+        run_id='run"><script>alert(1)</script>',
+        metadata={"target": "ABL<1>", "owner": "<b>lab</b>"},
+        cluster=False,
+        annotations={"lig<script>": {"flag": "red", "note": "<script>alert(1)</script>"}},
+    ).read_text(encoding="utf-8")
+
+    assert '&lt;img src=x onerror=alert(1)&gt;' in html
+    assert 'run&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt;' in html
+    assert 'ABL&lt;1&gt;' in html
+    assert '&lt;b&gt;lab&lt;/b&gt;' in html
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+    assert '<img src=x onerror=alert(1)>' not in html
+
