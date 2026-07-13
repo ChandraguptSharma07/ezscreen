@@ -17,6 +17,15 @@ from ezscreen.backends.kaggle.kernel import delete_kernel, push_kernel
 from ezscreen.backends.kaggle.poller import poll_until_done
 
 console = Console()
+
+
+def _safe_extract_zip(zf, destination: Path) -> None:
+    destination = destination.resolve()
+    for info in zf.infolist():
+        target = (destination / info.filename).resolve()
+        if target != destination and destination not in target.parents:
+            raise ValueError(f"Unsafe zip member path: {info.filename}")
+    zf.extractall(destination)
 _DATASET_POLL_INTERVAL = 10   # seconds
 _DATASET_TIMEOUT = 300        # 5 minutes
 _DATASET_SYNC_POLL_INTERVAL = 10
@@ -527,7 +536,7 @@ def _download_output(
     if zip_path.exists():
         import zipfile
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(out)
+            _safe_extract_zip(zf, out)
         zip_path.unlink()
 
     # Copy index.csv and filtered_gpu_size.csv so the merger can resolve
