@@ -9,7 +9,18 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import Button, DataTable, Footer, Header, Input, Label, ProgressBar, RichLog, Select, Static
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Input,
+    Label,
+    ProgressBar,
+    RichLog,
+    Select,
+    Static,
+)
 
 from ezscreen.results.run_layout import resolve_output_dir
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
@@ -47,6 +58,7 @@ class MDSimulationScreen(Screen):
                 yield Label("MD job", classes="form-section")
                 yield Static("", id="md-account-summary", classes="form-status")
                 yield Static("Run: -\nLigand: top-ranked hit", id="md-selection", classes="form-status")
+                yield Static("", id="md-jobs-summary", classes="form-status")
 
                 yield Label("Pose source", classes="form-label")
                 yield Select(
@@ -77,8 +89,10 @@ class MDSimulationScreen(Screen):
                     value="nvidiaTeslaT4",
                 )
 
-                with Horizontal(classes="form-row form-actions"):
+                with Horizontal(classes="form-row form-actions", id="md-action-row"):
                     yield Button("Run MD", id="btn-md-run", variant="primary")
+                    yield Button("View MD Results", id="btn-md-results", variant="default")
+                    yield Button("All MD Results", id="btn-md-results-all", variant="default")
 
                 yield Static("", id="md-status", classes="form-status")
                 yield Label("Progress", classes="form-section")
@@ -114,6 +128,10 @@ class MDSimulationScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-md-run":
             self._start()
+        elif event.button.id == "btn-md-results":
+            self._open_md_results()
+        elif event.button.id == "btn-md-results-all":
+            self._open_all_md_results()
 
     def _refresh_account_summary(self) -> None:
         from ezscreen import auth
@@ -215,6 +233,7 @@ class MDSimulationScreen(Screen):
         self.app.nav.selected_run_id = run_id
         self._selected_ligand_id = None
         self._update_selection_summary()
+        self._refresh_md_job_summary()
         self._focus_run(run_id)
         self.query_one("#md-hit-summary", Static).update(f"Loading leaderboard for {run_id}...")
         self.query_one("#md-status", Static).update("")
@@ -246,10 +265,7 @@ class MDSimulationScreen(Screen):
         needle = self.query_one("#md-hit-filter", Input).value.strip().lower()
         rows = self._all_hits
         if needle:
-            rows = [
-                row for row in rows
-                if any(needle in str(value).lower() for value in row.values())
-            ]
+            rows = [row for row in rows if any(needle in str(value).lower() for value in row.values())]
         self._visible_hits = rows
         self._populate_hits_table(rows)
 
@@ -307,9 +323,7 @@ class MDSimulationScreen(Screen):
     def _update_selection_summary(self) -> None:
         run_label = self._selected_run_id or "-"
         ligand_label = self._selected_ligand_id or "top-ranked hit"
-        self.query_one("#md-selection", Static).update(
-            f"Run: {run_label}\nLigand: {ligand_label}"
-        )
+        self.query_one("#md-selection", Static).update(f"Run: {run_label}\nLigand: {ligand_label}")
 
     def _populate_hits_error(self, msg: str) -> None:
         self._all_hits = []
@@ -326,6 +340,24 @@ class MDSimulationScreen(Screen):
         bar = self.query_one("#md-progress", ProgressBar)
         bar.update(progress=max(0, min(100, pct * 100)))
         self.query_one("#md-progress-text", Static).update(msg)
+
+    def _refresh_md_job_summary(self) -> None:
+        from ezscreen import checkpoint
+
+        try:
+            checkpoint.init_db()
+            rows = checkpoint.list_md_runs(self._selected_run_id)
+        except Exception:
+            rows = []
+        if not rows:
+            self.query_one("#md-jobs-summary", Static).update("No MD jobs recorded for this run yet.")
+            return
+        complete = sum(1 for row in rows if row.get("status") == "complete")
+        running = sum(1 for row in rows if row.get("status") == "running")
+        failed = sum(1 for row in rows if row.get("status") == "failed")
+        self.query_one("#md-jobs-summary", Static).update(
+            f"MD jobs for this run: {len(rows)} total | {complete} complete | {running} running | {failed} failed"
+        )
 
     def _start(self) -> None:
         run_id = self._selected_run_id
@@ -347,19 +379,9 @@ class MDSimulationScreen(Screen):
         self._set_progress("Preparing MD job", 0.0)
         self._set_status("[#e3b341]Submitting to Kaggle...[/#e3b341]")
         self._log("[#79c0ff]Preparing OpenMM MD job...[/#79c0ff]")
-        self.run_worker(
-            lambda: self._do_run(run_id, ligand_id, preset, pose_source, accelerator),
-            thread=True,
-        )
+        self.run_worker(lambda: self._do_run(run_id, ligand_id, preset, pose_source, accelerator), thread=True)
 
-    def _do_run(
-        self,
-        run_id: str,
-        ligand_id: str,
-        preset: str,
-        pose_source: str,
-        accelerator: str,
-    ) -> None:
+    def _do_run(self, run_id: str, ligand_id: str, preset: str, pose_source: str, accelerator: str) -> None:
         try:
             from ezscreen.backends.kaggle.md_runner import run_md_simulation
 
@@ -381,15 +403,28 @@ class MDSimulationScreen(Screen):
             self._set_status("[#3fb950]Done[/#3fb950]")
             self._set_progress("MD complete", 1.0)
             self._log(f"[#3fb950]Output -> {out_dir}[/#3fb950]")
+            self._refresh_md_job_summary()
+            self._open_md_results(result.get("md_run_id"))
         else:
             self._error(str(result.get("error") or result.get("status") or "unknown error"))
             return
         self.query_one("#btn-md-run", Button).disabled = False
 
+    def _open_md_results(self, md_run_id: str | None = None) -> None:
+        from ezscreen.tui.screens.md_results import MDResultsScreen
+
+        self.app.push_screen(MDResultsScreen(self._selected_run_id, md_run_id))
+
+    def _open_all_md_results(self) -> None:
+        from ezscreen.tui.screens.md_results import MDResultsScreen
+
+        self.app.push_screen(MDResultsScreen(None))
+
     def _error(self, msg: str) -> None:
         self._set_status(f"[#f85149]Error: {msg}[/#f85149]")
         self._set_progress("MD failed", 0.0)
         self._log(f"[#f85149]{msg}[/#f85149]")
+        self._refresh_md_job_summary()
         self.query_one("#btn-md-run", Button).disabled = False
 
     def _log(self, msg: str) -> None:

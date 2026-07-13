@@ -21,6 +21,7 @@ from ezscreen.tui.app import EzscreenApp
 from ezscreen.tui.screens._placeholder import PlaceholderScreen
 from ezscreen.tui.screens.auth_setup import AuthScreen
 from ezscreen.tui.screens.home import HomeScreen
+from ezscreen.tui.screens.md_results import MDResultsScreen
 from ezscreen.tui.screens.md_simulation import MDSimulationScreen
 from ezscreen.tui.screens.run_wizard import RunWizardScreen
 from ezscreen.tui.screens.team_runs import TeamRunsScreen
@@ -552,6 +553,44 @@ async def test_team_runs_screen_prioritizes_worker_actions_when_already_in_team(
         assert screen.query_one("#team-setup-section").display is False
         assert screen.query_one("#btn-team-connect", Button)
 
+
+
+async def test_md_results_screen_lists_jobs(monkeypatch, tmp_path) -> None:
+    from ezscreen import checkpoint
+
+    db_file = tmp_path / "checkpoints.db"
+    monkeypatch.setattr(checkpoint, "DB_DIR", tmp_path)
+    monkeypatch.setattr(checkpoint, "DB_PATH", db_file)
+    checkpoint.init_db()
+    checkpoint.create_run("ezs-md", {}, 10)
+    out_dir = tmp_path / "md-out"
+    out_dir.mkdir()
+    (out_dir / "md_summary.json").write_text('{"platform": "CUDA", "simulated_ps": 10.0}')
+    (out_dir / "md_metrics.json").write_text('{"frames": 2, "temperature": {"first": 298.0, "last": 300.0, "min": 298.0, "max": 300.0}}')
+    checkpoint.create_md_run(
+        md_run_id="ezs-md-md-lig1",
+        run_id="ezs-md",
+        ligand_id="lig1",
+        preset="smoke",
+        pose_source="unidock",
+        accelerator="nvidiaTeslaT4",
+        output_dir=out_dir,
+    )
+    checkpoint.mark_md_run_complete("ezs-md-md-lig1", out_dir, summary={"platform": "CUDA"})
+
+    app = EzscreenApp()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(MDResultsScreen("ezs-md"))
+        await pilot.pause()
+
+        assert app.screen.query_one("#md-results-table", DataTable)
+        assert app.screen.query_one("#md-results-card", Static)
+        assert app.screen.query_one("#btn-md-report", Button)
+
+
+
+
 def test_checkpoint_partial_status_survives_for_results_runs(monkeypatch, tmp_path) -> None:
     from ezscreen import checkpoint
 
@@ -566,3 +605,16 @@ def test_checkpoint_partial_status_survives_for_results_runs(monkeypatch, tmp_pa
     assert row is not None
     assert row["status"] == "partial"
 
+
+def test_md_results_action_targets_generate_local_viewers(tmp_path) -> None:
+    out_dir = tmp_path / "md-out"
+    out_dir.mkdir()
+    (out_dir / "minimized.pdb").write_text("ATOM      1  N   GLY A   1      11.104  13.207   9.947  1.00 20.00           N\nEND\n", encoding="utf-8")
+    (out_dir / "final.pdb").write_text("ATOM      1  N   GLY A   1      12.104  14.207   8.947  1.00 20.00           N\nEND\n", encoding="utf-8")
+    (out_dir / "md_summary.json").write_text('{"run_id": "ezs-md", "ligand_id": "lig1"}', encoding="utf-8")
+    (out_dir / "md_metrics.json").write_text('{"frames": 2}', encoding="utf-8")
+    (out_dir / "md_report.html").write_text('<html></html>', encoding="utf-8")
+
+    assert MDResultsScreen._resolve_action_target("btn-md-min", out_dir).name == "minimized_viewer.html"
+    assert MDResultsScreen._resolve_action_target("btn-md-final", out_dir).name == "final_viewer.html"
+    assert MDResultsScreen._resolve_action_target("btn-md-traj", out_dir).name == "trajectory_viewer.html"
