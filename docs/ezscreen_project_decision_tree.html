@@ -337,9 +337,9 @@
     <div class="hero">
       <div class="hero-copy">
         <p class="eyebrow">ezscreen project map</p>
-        <h1>The actual tree of the whole project.</h1>
+        <h1>The current tree of the implemented workflow.</h1>
         <p class="subtitle">
-          This is the full decision tree we discussed before the GitHub Action-specific path: where a user can enter,
+          This is the current decision tree for the implemented workflow: where a user can enter,
           how a run branches through receptor, pocket, ligands, filtering, engine, backend, and how results become reports.
         </p>
       </div>
@@ -373,7 +373,7 @@
             <div class="node root" id="root-node">
               <span class="tag">Root</span>
               <h3>ezscreen</h3>
-              <p>GPU-accelerated virtual screening app with CLI, TUI, Kaggle backend, local backend, validation, analysis, and reporting.</p>
+              <p>Virtual-screening workflow with CLI, TUI, Kaggle and local backends, follow-up checks, analysis, and reporting artifacts.</p>
               <div class="chips">
                 <span class="chip">Typer</span>
                 <span class="chip">Textual</span>
@@ -386,7 +386,7 @@
                 <div class="node user" id="entry-tree">
                   <span class="tag">Entry</span>
                   <h3>User entry surfaces</h3>
-                  <p>How a researcher or system enters the project.</p>
+                  <p>How a researcher or automation path enters the current workflow.</p>
                 </div>
                 <ul>
                   <li>
@@ -543,7 +543,7 @@
                 <div class="node root" id="post-run">
                   <span class="tag">Post-run</span>
                   <h3>Results and analysis</h3>
-                  <p>Once docking returns, ezscreen turns raw shard outputs into usable science outputs.</p>
+                  <p>Once docking returns, ezscreen turns raw shard outputs into review artifacts that still require scientific interpretation.</p>
                 </div>
                 <ul>
                   <li>
@@ -573,7 +573,7 @@
                     <div class="node tool">
                       <span class="tag">Clustering</span>
                       <h3>Cluster and benchmark hits</h3>
-                      <p>Scaffold clustering, interaction-profile clustering, decoys, ROC, EF, redock confidence.</p>
+                      <p>Scaffold clustering plus implemented benchmarking helpers; some evaluation paths remain planned rather than fully validated.</p>
                       <div class="chips"><span class="chip">RDKit Butina</span><span class="chip">AUC-ROC</span><span class="chip">EF1%</span></div>
                     </div>
                   </li>
@@ -581,7 +581,7 @@
                     <div class="node auto">
                       <span class="tag">Outputs</span>
                       <h3>Generate final deliverables</h3>
-                      <p>Results viewer, HTML report, Methods paragraph, Excel export, SDF export, annotations, and shareable artifacts.</p>
+                      <p>Results viewer, HTML report, Methods paragraph, Excel export, SDF export, annotations, and shareable review artifacts.</p>
                       <div class="chips"><span class="chip">Mol*</span><span class="chip">RDKit SVG</span><span class="chip">openpyxl</span></div>
                     </div>
                   </li>

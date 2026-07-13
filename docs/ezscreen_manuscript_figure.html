@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ezscreen Systems Figure</title>
+<style>
+  :root {
+    --bg: #071018;
+    --bg2: #0b1621;
+    --panel: rgba(13, 24, 36, 0.92);
+    --panel-2: rgba(17, 31, 46, 0.96);
+    --ink: #edf4fb;
+    --muted: #8ea3b6;
+    --line: rgba(111, 176, 255, 0.22);
+    --line-2: rgba(37, 216, 171, 0.22);
+    --blue: #57a7ff;
+    --green: #25d8ab;
+    --orange: #ffac61;
+    --violet: #8ea7ff;
+    --shadow: 0 24px 60px rgba(0, 0, 0, 0.34);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    color: var(--ink);
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 12% 12%, rgba(37, 216, 171, 0.11), transparent 18%),
+      radial-gradient(circle at 88% 14%, rgba(87, 167, 255, 0.12), transparent 20%),
+      radial-gradient(circle at 50% 100%, rgba(255, 172, 97, 0.07), transparent 24%),
+      linear-gradient(180deg, var(--bg) 0%, var(--bg2) 100%);
+    font: 15px/1.45 "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .page {
+    max-width: 1500px;
+    margin: 0 auto;
+    padding: 28px 24px 44px;
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    gap: 22px;
+    align-items: end;
+    margin-bottom: 24px;
+  }
+
+  .hero-copy {
+    padding-bottom: 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.10);
+  }
+
+  .eyebrow {
+    margin: 0 0 8px;
+    color: var(--blue);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(34px, 4.4vw, 60px);
+    line-height: 0.94;
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin: 14px 0 0;
+    max-width: 860px;
+    color: var(--muted);
+    font-size: 18px;
+  }
+
+  .meta {
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: var(--shadow);
+    border-radius: 16px;
+    padding: 18px;
+  }
+
+  .meta h2,
+  .band h2 {
+    margin: 0 0 12px;
+    font-size: 17px;
+  }
+
+  .meta p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .legend {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+  }
+
+  .legend-row {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    gap: 10px;
+    align-items: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .dot {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+  }
+
+  .dot.blue { background: var(--blue); }
+  .dot.green { background: var(--green); }
+  .dot.orange { background: var(--orange); }
+  .dot.violet { background: var(--violet); }
+
+  .band {
+    margin-top: 20px;
+    padding: 18px;
+    border-radius: 18px;
+    background: var(--panel);
+    border: 1px solid rgba(255,255,255,0.07);
+    box-shadow: var(--shadow);
+  }
+
+  .band-intro {
+    margin: 0 0 16px;
+    color: var(--muted);
+  }
+
+  .pipeline {
+    display: grid;
+    grid-template-columns: 1.05fr 1.1fr 1.15fr 0.95fr;
+    gap: 18px;
+    align-items: stretch;
+  }
+
+  .lane {
+    position: relative;
+    display: grid;
+    gap: 12px;
+  }
+
+  .lane::after {
+    content: "";
+    position: absolute;
+    top: calc(50% - 1px);
+    right: -10px;
+    width: 12px;
+    height: 2px;
+    background: var(--line);
+  }
+
+  .pipeline .lane:last-child::after {
+    display: none;
+  }
+
+  .card {
+    border-radius: 16px;
+    padding: 14px 14px 12px;
+    min-height: 124px;
+    background: var(--panel-2);
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .card.inputs { border-color: rgba(87, 167, 255, 0.28); background: linear-gradient(180deg, rgba(87, 167, 255, 0.14), rgba(87, 167, 255, 0.06)); }
+  .card.prep { border-color: rgba(255, 172, 97, 0.28); background: linear-gradient(180deg, rgba(255, 172, 97, 0.15), rgba(255, 172, 97, 0.06)); }
+  .card.compute { border-color: rgba(37, 216, 171, 0.30); background: linear-gradient(180deg, rgba(37, 216, 171, 0.15), rgba(37, 216, 171, 0.06)); }
+  .card.outputs { border-color: rgba(142, 167, 255, 0.28); background: linear-gradient(180deg, rgba(142, 167, 255, 0.14), rgba(142, 167, 255, 0.06)); }
+
+  .tag {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    line-height: 1.14;
+  }
+
+  .card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+  }
+
+  .chip {
+    padding: 4px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.07);
+    background: rgba(255,255,255,0.05);
+    font-size: 12px;
+    color: #d8e4f0;
+    white-space: nowrap;
+  }
+
+  .subgrid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .small {
+    min-height: 110px;
+  }
+
+  .novelty {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .callout {
+    padding: 16px;
+    border-radius: 16px;
+    background: #0d1722;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+
+  .callout h3 {
+    margin: 0 0 8px;
+    font-size: 17px;
+  }
+
+  .callout p {
+    margin: 0;
+    color: var(--muted);
+  }
+
+  .callout.green { border-color: rgba(37, 216, 171, 0.28); }
+  .callout.blue { border-color: rgba(87, 167, 255, 0.28); }
+  .callout.orange { border-color: rgba(255, 172, 97, 0.28); }
+
+  .footer {
+    margin-top: 18px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  @media (max-width: 1240px) {
+    .hero,
+    .pipeline,
+    .subgrid,
+    .novelty {
+      grid-template-columns: 1fr;
+    }
+
+    .lane::after {
+      top: auto;
+      right: auto;
+      left: calc(50% - 1px);
+      bottom: -8px;
+      width: 2px;
+      height: 10px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">manuscript-oriented systems figure</p>
+        <h1>ezscreen turns free cloud GPUs into a guided screening workflow.</h1>
+        <p class="subtitle">
+          This version is not a software tree. It is a paper-facing systems diagram that highlights the method:
+          scientific inputs, automated preparation, Kaggle-backed execution, checkpointed orchestration, and
+          reporting and review outputs.
+        </p>
+      </div>
+      <div class="meta">
+        <h2>Figure intent</h2>
+        <p>Show the conceptual architecture and current contribution scope in one page, without drowning the reader in command-level detail.</p>
+        <div class="legend">
+          <div class="legend-row"><span class="dot blue"></span><span>Scientific inputs and user-facing entry</span></div>
+          <div class="legend-row"><span class="dot orange"></span><span>Preparation, filtering, and methodological choices</span></div>
+          <div class="legend-row"><span class="dot green"></span><span>Execution backend, orchestration, and cloud compute</span></div>
+          <div class="legend-row"><span class="dot violet"></span><span>Validation, interpretation, and final deliverables</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="band">
+      <h2>End-to-End Architecture</h2>
+      <p class="band-intro">
+        A researcher provides a target and ligand library. ezscreen then performs receptor preparation, pocket selection,
+        ligand preparation, optional filtering, GPU docking on Kaggle, checkpointed result recovery, and post-docking
+        interpretation in one continuous pipeline.
+      </p>
+
+      <div class="pipeline">
+        <div class="lane">
+          <div class="card inputs">
+            <span class="tag">Inputs</span>
+            <h3>Researcher provides target and chemical library</h3>
+            <p>Entry can begin with a PDB structure, an AlphaFold model, a PDB code, and a ligand set from files, fetched libraries, or sketched molecules.</p>
+            <div class="chips">
+              <span class="chip">PDB / RCSB</span>
+              <span class="chip">AlphaFold</span>
+              <span class="chip">SMILES / SDF / Mol2</span>
+              <span class="chip">ZINC / ChEMBL</span>
+            </div>
+          </div>
+          <div class="card inputs small">
+            <span class="tag">Interface layer</span>
+            <h3>Accessible local interface</h3>
+            <p>CLI and TUI lower the operational barrier while preserving run settings for later citation and reproducibility; they do not remove the need for docking judgment.</p>
+            <div class="chips">
+              <span class="chip">Typer</span>
+              <span class="chip">Questionary</span>
+              <span class="chip">Textual</span>
+              <span class="chip">Rich</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="card prep">
+            <span class="tag">Preparation</span>
+            <h3>Automated receptor and ligand normalization</h3>
+            <p>The target is cleaned, chains selected, protonation handled, and ligands are normalized, optionally enumerated, embedded in 3D, minimized, and quality checked.</p>
+            <div class="chips">
+              <span class="chip">pdbfixer</span>
+              <span class="chip">Meeko</span>
+              <span class="chip">RDKit</span>
+              <span class="chip">Gypsum-DL</span>
+              <span class="chip">OpenBabel</span>
+            </div>
+          </div>
+          <div class="subgrid">
+            <div class="card prep small">
+              <span class="tag">Pocketing</span>
+              <h3>Binding site definition</h3>
+              <p>Co-crystal, residues, predicted pockets, or blind search.</p>
+              <div class="chips">
+                <span class="chip">P2Rank</span>
+                <span class="chip">box validation</span>
+              </div>
+            </div>
+            <div class="card prep small">
+              <span class="tag">Filtering</span>
+              <h3>Pre-docking triage</h3>
+              <p>Optional rule-based ADMET and size filters remove unsuitable molecules before GPU docking.</p>
+              <div class="chips">
+                <span class="chip">Ro5</span>
+                <span class="chip">PAINS</span>
+                <span class="chip">Brenk</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="card compute">
+            <span class="tag">Execution backend</span>
+            <h3>GPU docking runs on Kaggle notebooks instead of local HPC</h3>
+            <p>ezscreen renders notebooks, uploads datasets, submits kernels, polls status, and recovers outputs, while local CPU backends remain available for fallback and comparison.</p>
+            <div class="chips">
+              <span class="chip">Kaggle API</span>
+              <span class="chip">Jinja2 notebooks</span>
+              <span class="chip">UniDock</span>
+              <span class="chip">AutoDock Vina</span>
+            </div>
+          </div>
+          <div class="subgrid">
+            <div class="card compute small">
+              <span class="tag">Orchestration</span>
+              <h3>Ligand sharding</h3>
+              <p>Libraries are split into shards for scalable submission and recovery.</p>
+              <div class="chips">
+                <span class="chip">shard_raw</span>
+                <span class="chip">dataset upload</span>
+              </div>
+            </div>
+            <div class="card compute small">
+              <span class="tag">Reliability</span>
+              <h3>Checkpoint and resume</h3>
+              <p>Run and shard state are tracked so failed work can be retried without starting over.</p>
+              <div class="chips">
+                <span class="chip">SQLite</span>
+                <span class="chip">resume.json</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="lane">
+          <div class="card outputs">
+            <span class="tag">Post-docking outputs</span>
+            <h3>Validation, interpretation, and reporting</h3>
+            <p>Shard outputs are merged, ranked, validated, annotated, visualized, and exported into both interactive and manuscript-ready outputs.</p>
+            <div class="chips">
+              <span class="chip">PoseBusters</span>
+              <span class="chip">PLIP / ProLIF</span>
+              <span class="chip">Mol*</span>
+              <span class="chip">HTML / Excel / SDF</span>
+            </div>
+          </div>
+          <div class="subgrid">
+            <div class="card outputs small">
+              <span class="tag">Viewers</span>
+              <h3>Interactive inspection</h3>
+              <p>3D pose viewing, interaction overlays, and report navigation.</p>
+            </div>
+            <div class="card outputs small">
+              <span class="tag">Paper assets</span>
+              <h3>Methods and figures</h3>
+              <p>Methods paragraph, tables, exports, and presentation-ready summaries.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="band">
+      <h2>Why This Is Distinct</h2>
+      <div class="novelty">
+        <div class="callout green">
+          <h3>Free cloud GPU as the default compute layer</h3>
+          <p>The key architectural decision is that docking runs on Kaggle GPU notebooks, so the tool removes the local GPU or institutional HPC requirement for the end user.</p>
+        </div>
+        <div class="callout blue">
+          <h3>Full pipeline, not just remote docking</h3>
+          <p>ezscreen does not merely submit jobs. It handles receptor preparation, ligand preparation, pocketing, triage, orchestration, resume, validation, and final interpretation in one system.</p>
+        </div>
+        <div class="callout orange">
+          <h3>Reporting artifacts built into the workflow</h3>
+          <p>The workflow ends in figures, tables, interaction views, and methods text that support review and manuscript drafting, but they are not a substitute for external validation.</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="footer">Artifact: <code>docs/ezscreen_manuscript_figure.html</code>. Open directly in a browser.</p>
+  </div>
+</body>
+</html>
