@@ -42,6 +42,21 @@ CREATE TABLE IF NOT EXISTS annotations (
     updated_at  TEXT,
     PRIMARY KEY (run_id, compound_id)
 );
+
+CREATE TABLE IF NOT EXISTS md_runs (
+    md_run_id      TEXT PRIMARY KEY,
+    run_id         TEXT NOT NULL REFERENCES runs(run_id),
+    ligand_id      TEXT NOT NULL,
+    preset         TEXT NOT NULL,
+    pose_source    TEXT NOT NULL,
+    accelerator    TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'running',
+    created_at     TEXT NOT NULL,
+    completed_at   TEXT,
+    output_dir     TEXT,
+    summary_json   TEXT,
+    error_message  TEXT
+);
 """
 
 
@@ -141,6 +156,13 @@ def mark_run_failed(run_id: str) -> None:
         )
 
 
+def mark_run_partial(run_id: str) -> None:
+    with _connection() as conn:
+        conn.execute(
+            "UPDATE runs SET status = 'partial' WHERE run_id = ?", (run_id,)
+        )
+
+
 def increment_completed(run_id: str, count: int) -> None:
     with _connection() as conn:
         conn.execute(
@@ -214,7 +236,107 @@ def get_failed_shards(run_id: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Hit annotations — flags + notes
+# MD runs
+# ---------------------------------------------------------------------------
+
+def create_md_run(
+    md_run_id: str,
+    run_id: str,
+    ligand_id: str,
+    preset: str,
+    pose_source: str,
+    accelerator: str,
+    output_dir: Path | str | None = None,
+) -> None:
+    with _connection() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO md_runs (
+                md_run_id, run_id, ligand_id, preset, pose_source, accelerator,
+                status, created_at, completed_at, output_dir, summary_json, error_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL)
+            """,
+            (
+                md_run_id,
+                run_id,
+                ligand_id,
+                preset,
+                pose_source,
+                accelerator,
+                "running",
+                _now(),
+                str(output_dir) if output_dir else None,
+            ),
+        )
+
+
+def get_md_run(md_run_id: str) -> dict[str, Any] | None:
+    with _connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM md_runs WHERE md_run_id = ?",
+            (md_run_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_md_runs(run_id: str | None = None) -> list[dict[str, Any]]:
+    query = "SELECT * FROM md_runs"
+    params: tuple[Any, ...] = ()
+    if run_id:
+        query += " WHERE run_id = ?"
+        params = (run_id,)
+    query += " ORDER BY created_at DESC"
+    with _connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def mark_md_run_complete(
+    md_run_id: str,
+    output_dir: Path | str,
+    summary: dict[str, Any] | None = None,
+) -> None:
+    with _connection() as conn:
+        conn.execute(
+            """
+            UPDATE md_runs
+            SET status = 'complete',
+                completed_at = ?,
+                output_dir = ?,
+                summary_json = ?,
+                error_message = NULL
+            WHERE md_run_id = ?
+            """,
+            (
+                _now(),
+                str(output_dir),
+                json.dumps(summary, cls=_PathEncoder) if summary is not None else None,
+                md_run_id,
+            ),
+        )
+
+
+def mark_md_run_failed(
+    md_run_id: str,
+    error_message: str,
+    output_dir: Path | str | None = None,
+) -> None:
+    with _connection() as conn:
+        conn.execute(
+            """
+            UPDATE md_runs
+            SET status = 'failed',
+                completed_at = ?,
+                output_dir = COALESCE(?, output_dir),
+                error_message = ?
+            WHERE md_run_id = ?
+            """,
+            (_now(), str(output_dir) if output_dir else None, error_message, md_run_id),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Hit annotations - flags + notes
 # ---------------------------------------------------------------------------
 
 def set_annotation(run_id: str, compound_id: str, flag: str = "", note: str = "") -> None:
@@ -237,10 +359,3 @@ def get_annotations(run_id: str) -> dict[str, dict[str, str]]:
             (run_id,),
         ).fetchall()
     return {r["compound_id"]: {"flag": r["flag"] or "", "note": r["note"] or ""} for r in rows}
-def mark_run_partial(run_id: str) -> None:
-    with _connection() as conn:
-        conn.execute(
-            "UPDATE runs SET status = 'partial' WHERE run_id = ?", (run_id,)
-        )
-
-

@@ -75,6 +75,12 @@ def test_mark_run_failed():
     assert cp.get_run("run-004")["status"] == "failed"
 
 
+def test_mark_run_partial():
+    cp.create_run("run-003p", {}, 50)
+    cp.mark_run_partial("run-003p")
+    assert cp.get_run("run-003p")["status"] == "partial"
+
+
 # ---------------------------------------------------------------------------
 # shard CRUD
 # ---------------------------------------------------------------------------
@@ -166,9 +172,62 @@ def test_mark_run_complete_marks_non_failed_shards_done():
 
     assert cp.get_run("run-variants")["completed_compounds"] == 100
     assert cp.get_incomplete_shards("run-variants") == []
-def test_mark_run_partial():
-    cp.create_run("run-003p", {}, 50)
-    cp.mark_run_partial("run-003p")
-    assert cp.get_run("run-003p")["status"] == "partial"
+
+def test_create_and_list_md_runs():
+    cp.create_run("run-md-parent", {}, 10)
+    cp.create_md_run(
+        md_run_id="run-md-parent-md-lig1",
+        run_id="run-md-parent",
+        ligand_id="lig1",
+        preset="smoke",
+        pose_source="unidock",
+        accelerator="nvidiaTeslaT4",
+    )
+
+    rows = cp.list_md_runs("run-md-parent")
+    assert len(rows) == 1
+    assert rows[0]["md_run_id"] == "run-md-parent-md-lig1"
+    assert rows[0]["status"] == "running"
 
 
+def test_mark_md_run_complete_persists_summary_and_output(tmp_path):
+    cp.create_run("run-md-parent2", {}, 10)
+    out_dir = tmp_path / "md-out"
+    summary = {"platform": "CUDA", "simulated_ps": 10.0}
+    cp.create_md_run(
+        md_run_id="run-md-parent2-md-lig2",
+        run_id="run-md-parent2",
+        ligand_id="lig2",
+        preset="quick",
+        pose_source="gnina",
+        accelerator="nvidiaTeslaT4",
+        output_dir=out_dir,
+    )
+    cp.mark_md_run_complete("run-md-parent2-md-lig2", out_dir, summary=summary)
+
+    row = cp.get_md_run("run-md-parent2-md-lig2")
+    assert row is not None
+    assert row["status"] == "complete"
+    assert row["output_dir"] == str(out_dir)
+    import json
+    assert json.loads(row["summary_json"])["platform"] == "CUDA"
+
+
+def test_mark_md_run_failed_records_error(tmp_path):
+    cp.create_run("run-md-parent3", {}, 10)
+    out_dir = tmp_path / "md-failed"
+    cp.create_md_run(
+        md_run_id="run-md-parent3-md-lig3",
+        run_id="run-md-parent3",
+        ligand_id="lig3",
+        preset="standard",
+        pose_source="unidock",
+        accelerator="nvidiaTeslaP100",
+    )
+    cp.mark_md_run_failed("run-md-parent3-md-lig3", "kernel failed", out_dir)
+
+    row = cp.get_md_run("run-md-parent3-md-lig3")
+    assert row is not None
+    assert row["status"] == "failed"
+    assert row["error_message"] == "kernel failed"
+    assert row["output_dir"] == str(out_dir)
