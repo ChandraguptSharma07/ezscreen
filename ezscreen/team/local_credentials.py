@@ -30,17 +30,16 @@ def resolve_worker_kaggle_credentials(
     env_username = os.environ.get("KAGGLE_USERNAME")
     env_key = os.environ.get("KAGGLE_KEY")
 
-    explicit_key = kaggle_key or env_key
-    explicit_username = kaggle_username or env_username
-    if explicit_key:
+    if kaggle_key:
+        explicit_username = kaggle_username or env_username
         if not explicit_username:
             raise KaggleAuthError(
-                "Kaggle username is required when using --kaggle-key or KAGGLE_KEY."
+                "Kaggle username is required when using --kaggle-key."
             )
         return WorkerKaggleCredentials(
             username=explicit_username,
-            key=explicit_key,
-            source="explicit" if kaggle_key else "environment",
+            key=kaggle_key,
+            source="explicit",
         )
 
     if team_account_name:
@@ -60,22 +59,34 @@ def resolve_worker_kaggle_credentials(
             path=kaggle_json,
         )
 
-    if not use_local:
-        raise KaggleAuthError(
-            "Choose a saved team account or provide a Kaggle username and key for this worker."
+    if use_local:
+        kaggle_json = auth.get_kaggle_json_path(creds)
+        if kaggle_json is None:
+            raise KaggleAuthError("No local kaggle_json_path is saved in ezscreen credentials.")
+        data = auth.validate_kaggle_json(kaggle_json)
+        username = kaggle_username or data["username"]
+        return WorkerKaggleCredentials(
+            username=username,
+            key=data["key"],
+            source="local ezscreen kaggle.json",
+            path=kaggle_json,
         )
 
-    kaggle_json = auth.get_kaggle_json_path(creds)
-    if kaggle_json is None:
-        raise KaggleAuthError("No local kaggle_json_path is saved in ezscreen credentials.")
-    data = auth.validate_kaggle_json(kaggle_json)
-    username = kaggle_username or data["username"]
-    return WorkerKaggleCredentials(
-        username=username,
-        key=data["key"],
-        source="local ezscreen kaggle.json",
-        path=kaggle_json,
+    if env_key:
+        if not env_username:
+            raise KaggleAuthError(
+                "Kaggle username is required when using KAGGLE_KEY."
+            )
+        return WorkerKaggleCredentials(
+            username=env_username,
+            key=env_key,
+            source="environment",
+        )
+
+    raise KaggleAuthError(
+        "Choose a saved team account, use local Kaggle credentials, or provide a Kaggle username and key for this worker."
     )
+
 
 
 def local_kaggle_summary(creds: dict[str, Any] | None = None) -> dict[str, Any]:

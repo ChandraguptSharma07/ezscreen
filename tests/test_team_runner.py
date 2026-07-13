@@ -1661,3 +1661,38 @@ def test_cli_help_hides_legacy_tui_subcommand():
 
 
 
+def test_resolve_worker_kaggle_credentials_prefers_local_over_env(tmp_path, monkeypatch):
+    from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
+
+    kaggle_json = tmp_path / "kaggle.json"
+    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    monkeypatch.setenv("KAGGLE_USERNAME", "env_user")
+    monkeypatch.setenv("KAGGLE_KEY", "env_key")
+
+    resolved = resolve_worker_kaggle_credentials(
+        use_local=True,
+        creds={"kaggle_json_path": str(kaggle_json)},
+    )
+
+    assert resolved.username == "local_user"
+    assert resolved.key == "local_key"
+    assert resolved.source == "local ezscreen kaggle.json"
+
+
+def test_resolve_worker_kaggle_credentials_prefers_team_account_over_env(monkeypatch, tmp_path):
+    from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
+
+    kaggle_json = tmp_path / "team-kaggle.json"
+    kaggle_json.write_text('{"username": "team_user", "key": "team_key"}', encoding="utf-8")
+    monkeypatch.setenv("KAGGLE_USERNAME", "env_user")
+    monkeypatch.setenv("KAGGLE_KEY", "env_key")
+    monkeypatch.setattr(
+        "ezscreen.auth.list_team_accounts",
+        lambda _creds: [{"name": "Worker A", "username": "team_user", "kaggle_json_path": str(kaggle_json)}],
+    )
+
+    resolved = resolve_worker_kaggle_credentials(team_account_name="Worker A", creds={})
+
+    assert resolved.username == "team_user"
+    assert resolved.key == "team_key"
+    assert resolved.source == "saved team account: Worker A"
