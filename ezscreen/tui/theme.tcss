@@ -164,16 +164,32 @@ DataTable > .datatable--header-cursor {
 }
 
 #md-browser {
-    width: 1fr;
+    width: 34;
+    min-width: 30;
     padding: 1 1;
     border-right: tall $border;
 }
 
-#md-form {
-    width: 46;
+#md-detail {
+    width: 1fr;
     padding: 1 1;
     overflow-y: auto;
     scrollbar-size: 1 1;
+}
+
+#md-leaderboard {
+    height: 16;
+    min-height: 10;
+    margin-bottom: 1;
+}
+
+#md-action-row {
+    height: auto;
+}
+
+#md-action-row > Button {
+    width: 1fr;
+    min-width: 18;
 }
 
 #md-progress {
@@ -181,8 +197,51 @@ DataTable > .datatable--header-cursor {
 }
 
 #md-log {
-    height: 1fr;
+    height: 12;
     min-height: 8;
+}
+
+#md-results-main {
+    height: 1fr;
+}
+
+#md-results-list {
+    width: 64;
+    min-width: 52;
+    padding: 1 1;
+    border-right: tall $border;
+}
+
+#md-results-detail {
+    width: 1fr;
+    padding: 1 1;
+    overflow-y: auto;
+    scrollbar-size: 1 1;
+}
+
+#md-results-table {
+    height: 1fr;
+}
+
+#md-results-actions {
+    height: auto;
+}
+
+.md-results-action-row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.md-results-action-row > Button {
+    width: 1fr;
+    height: 3;
+    margin-right: 1;
+}
+
+#btn-md-folder,
+#btn-md-final,
+#btn-md-traj {
+    margin-right: 0;
 }
 
 #hits-panel {
@@ -535,7 +594,3 @@ HelpScreen {
     height: 1fr;
     color: $muted;
 }
-
-
-
-
