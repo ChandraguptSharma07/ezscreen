@@ -1647,3 +1647,17 @@ def test_refresh_status_installations_ignores_lookup_errors():
 
     assert result['members'][0]['github_installation_id'] is None
 
+def test_cli_help_hides_legacy_tui_subcommand():
+    from typer.testing import CliRunner
+
+    from ezscreen.cli import app
+
+    result = CliRunner().invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "auth" in result.output
+    assert "status" in result.output
+    assert "tui       Open the full-screen interactive TUI." not in result.output
+
+
+
