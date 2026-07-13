@@ -95,7 +95,7 @@ def push_kernel(
 def delete_kernel(run_id: str, username: str) -> None:
     """Delete run kernel. Used by ezscreen clean."""
     api = _api()
-    slug = f"ezs-{run_id}"
+    slug = run_id
     try:
         api.kernel_delete(username, slug)
     except Exception:
