@@ -23,6 +23,15 @@ _DATASET_TIMEOUT = 10 * 60
 _KERNEL_RETRY_LIMIT = 2
 
 
+def _safe_extract_zip(zf: zipfile.ZipFile, destination: Path) -> None:
+    destination = destination.resolve()
+    for info in zf.infolist():
+        target = (destination / info.filename).resolve()
+        if target != destination and destination not in target.parents:
+            raise ValueError(f"Unsafe zip member path: {info.filename}")
+    zf.extractall(destination)
+
+
 def _api():
     import kaggle
 
@@ -107,7 +116,7 @@ def _download_dataset_file(dataset_ref: str, filename: str, dest_dir: Path) -> P
     zipped = dest_dir / f"{filename}.zip"
     if zipped.exists():
         with zipfile.ZipFile(zipped) as zf:
-            zf.extractall(dest_dir)
+            _safe_extract_zip(zf, dest_dir)
         if direct.exists():
             return direct
         for candidate in dest_dir.rglob(filename):
