@@ -138,7 +138,7 @@ def _step_alphafold_warn(ctx: dict) -> dict | object:
     if choice is None or choice == "← Back":
         return BACK
     if "Abort" in choice:
-        console.print("[dim]Aborted. Re-run ezscreen run to start fresh.[/dim]")
+        console.print("[dim]Aborted. Launch ezscreen to start fresh.[/dim]")
         raise SystemExit(0)
 
     ctx["af_warning_accepted"] = True

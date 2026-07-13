@@ -52,7 +52,7 @@ def invoke(results_dir: Path, top_n: int = 25) -> None:
     if "smiles" not in headers:
         console.print(
             "  [dim]Compound names and SMILES not available — "
-            "index.csv is only present on the machine that ran ezscreen run.[/dim]"
+            "index.csv is only present on the machine that prepared the run locally.[/dim]"
         )
 
     # 3D HTML viewer — only if poses.sdf has actual content

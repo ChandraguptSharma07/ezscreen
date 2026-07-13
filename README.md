@@ -74,7 +74,6 @@ See `examples/1hsg_quickstart.md` for a full end-to-end walkthrough against HIV-
 | Command | Description |
 |---|---|
 | `ezscreen` | Launch full-screen TUI (default when no subcommand given) |
-| `ezscreen tui` | Alias for the above |
 | `ezscreen auth` | Configure Kaggle and NIM credentials |
 | `ezscreen status` | List all runs with status (auto-refreshes) |
 | `ezscreen view <run_id>` | Show results table and open 3D viewer |

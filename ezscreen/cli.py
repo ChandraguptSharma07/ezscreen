@@ -36,12 +36,6 @@ def main_callback(ctx: typer.Context) -> None:
         launch_tui()
 
 
-@app.command()
-def tui() -> None:
-    """Open the full-screen interactive TUI."""
-    from ezscreen.tui import launch_tui
-    launch_tui()
-
 
 @app.command()
 def auth(
@@ -122,7 +116,7 @@ def resume(
 
     if run["status"] == "failed":
         console.print(
-            f"[red]Run {run_id} failed â€” start a fresh run with: ezscreen run[/red]"
+            f"[red]Run {run_id} failed â€” start a fresh run with: ezscreen[/red]"
         )
         raise typer.Exit(1)
 
@@ -142,7 +136,7 @@ def resume(
         "[dim]Re-submit uses the same run.py flow with resume context.[/dim]"
     )
     console.print(
-        "[yellow]Full resume is planned for v1.1 â€” run ezscreen run to start fresh.[/yellow]"  # noqa: E501
+        "[yellow]Full resume is planned for v1.1 â€” launch ezscreen to start fresh.[/yellow]"  # noqa: E501
     )
 
 
@@ -217,7 +211,12 @@ def team_login(
     import time
     import webbrowser
 
-    from ezscreen.team.client import TeamClient, default_server_url, load_local_state, save_local_state
+    from ezscreen.team.client import (
+        TeamClient,
+        default_server_url,
+        load_local_state,
+        save_local_state,
+    )
 
     server_url = server_url or default_server_url()
     client = TeamClient(server_url)
@@ -256,7 +255,12 @@ def team_login(
 @team_app.command("logout")
 def team_logout() -> None:
     """Sign out of the local ezscreen account session."""
-    from ezscreen.team.client import TeamClient, clear_local_session, default_server_url, load_local_state
+    from ezscreen.team.client import (
+        TeamClient,
+        clear_local_session,
+        default_server_url,
+        load_local_state,
+    )
 
     state = load_local_state()
     session_token = state.get("session_token")
@@ -283,7 +287,12 @@ def team_create(
     github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
 ) -> None:
     """Create a team and optionally provision a dedicated private worker repo."""
-    from ezscreen.team.client import TeamClient, default_server_url, load_local_state, save_local_state
+    from ezscreen.team.client import (
+        TeamClient,
+        default_server_url,
+        load_local_state,
+        save_local_state,
+    )
 
     server_url = server_url or default_server_url()
     state = load_local_state()
@@ -366,8 +375,16 @@ def team_join(
     ),
 ) -> None:
     """Join a team and provision a dedicated private worker repo."""
-    from ezscreen.team.client import TeamClient, default_server_url, load_local_state, save_local_state
-    from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
+    from ezscreen.team.client import (
+        TeamClient,
+        default_server_url,
+        load_local_state,
+        save_local_state,
+    )
+    from ezscreen.team.github import (
+        configure_worker_repo,
+        provision_managed_worker_repo,
+    )
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     server_url = server_url or default_server_url()
@@ -479,8 +496,16 @@ def team_connect_worker(
     github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
 ) -> None:
     """Attach a dedicated private GitHub worker repo to the current member and seed its secrets."""
-    from ezscreen.team.client import TeamClient, default_server_url, load_local_state, save_local_state
-    from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
+    from ezscreen.team.client import (
+        TeamClient,
+        default_server_url,
+        load_local_state,
+        save_local_state,
+    )
+    from ezscreen.team.github import (
+        configure_worker_repo,
+        provision_managed_worker_repo,
+    )
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     state = load_local_state()

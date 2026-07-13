@@ -68,7 +68,7 @@ def invoke(live: bool = False) -> None:
     runs = checkpoint.list_runs()
 
     if not runs:
-        console.print("[dim]No runs yet — start one with [bold]ezscreen run[/bold][/dim]")
+        console.print("[dim]No runs yet — launch [bold]ezscreen[/bold] to start one[/dim]")
         return
 
     if not live:
@@ -95,3 +95,4 @@ def invoke(live: bool = False) -> None:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
+
