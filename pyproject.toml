@@ -78,6 +78,9 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["ezscreen"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"ezscreen/tui/theme.tcss" = "ezscreen/tui/theme.tcss"
+
 [tool.black]
 line-length = 88
 target-version = ["py311"]

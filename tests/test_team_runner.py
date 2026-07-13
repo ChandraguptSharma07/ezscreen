@@ -802,6 +802,14 @@ def test_worker_runtime_files_include_notebook_renderer_and_template():
     assert "ezscreen/backends/kaggle/templates/vina_shard.ipynb.j2" in files
     assert "jinja2>=3.1.4" in files["pyproject.toml"]
     assert 'templates/*.j2' in files["pyproject.toml"]
+    assert '\"ezscreen.tui\" = [\"theme.tcss\"]' in files["pyproject.toml"]
+
+
+def test_pyproject_includes_runtime_package_data_contract():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+
+    assert "[tool.hatch.build.targets.wheel.force-include]" in pyproject
+    assert '"ezscreen/tui/theme.tcss" = "ezscreen/tui/theme.tcss"' in pyproject
 
 
 def test_acknowledge_upload_queues_run_once_when_worker_uploads_complete(tmp_path):

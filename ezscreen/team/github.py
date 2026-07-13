@@ -2,14 +2,12 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
-
 
 
 class GitHubError(RuntimeError):
@@ -215,6 +213,7 @@ packages = [\"ezscreen\", \"ezscreen.backends\", \"ezscreen.backends.kaggle\", \
 
 [tool.setuptools.package-data]
 \"ezscreen.backends.kaggle\" = [\"templates/*.j2\"]
+\"ezscreen.tui\" = [\"theme.tcss\"]
 """
     files["README.md"] = """# ezscreen Team Worker
 
