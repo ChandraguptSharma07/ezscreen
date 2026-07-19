@@ -33,6 +33,7 @@ def main() -> None:
     parser.add_argument('--panel-smi', type=Path, default=AUDIT / 'audit_panel' / 'audit_panel.smi')
     parser.add_argument('--panel-label-csv', type=Path, default=AUDIT / 'audit_panel' / 'audit_panel.csv')
     parser.add_argument('--pose-receptor-pdb', type=Path, default=AUDIT / 'inputs' / 'receptor_prep.pdb')
+    parser.add_argument('--prep-on-kaggle', action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 
     from scripts import submit_panel_kaggle, submit_redocking_kaggle
@@ -41,6 +42,13 @@ def main() -> None:
     submit_redocking_kaggle.BOX_SIZE = args.box_size
     submit_panel_kaggle.BOX_CENTER = args.box_center
     submit_panel_kaggle.BOX_SIZE = args.box_size
+    submit_redocking_kaggle.RECEPTOR_PDBQT = args.receptor_pdbqt
+    submit_redocking_kaggle.REDOCK_LIGAND_PDBQT = args.redock_ligand_pdbqt
+    submit_panel_kaggle.RECEPTOR_PDBQT = args.receptor_pdbqt
+    submit_panel_kaggle.PANEL_SMI = args.panel_smi
+    submit_panel_kaggle.PANEL_LABEL_CSV = args.panel_label_csv
+    submit_panel_kaggle.POSE_RECEPTOR_PDB = args.pose_receptor_pdb
+    submit_panel_kaggle.PREP_ON_KAGGLE = args.prep_on_kaggle
 
     redock = submit_redocking_kaggle.submit(args.ablation_id, args.search_mode, args.accelerator)
     panel = submit_panel_kaggle.submit(args.ablation_id, args.search_mode, args.accelerator)
@@ -54,6 +62,7 @@ def main() -> None:
         'panel_smi': str(args.panel_smi),
         'panel_label_csv': str(args.panel_label_csv),
         'pose_receptor_pdb': str(args.pose_receptor_pdb),
+        'prep_on_kaggle': args.prep_on_kaggle,
         'redock': redock,
         'panel': panel,
     }

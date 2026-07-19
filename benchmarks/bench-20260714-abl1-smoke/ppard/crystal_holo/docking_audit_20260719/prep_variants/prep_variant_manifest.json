@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-07-19T14:55:53.942081+00:00",
+  "updated_at": "2026-07-19T16:55:30.775158+00:00",
   "purpose": "PPARD prep/protonation/charge audit variants; same box/search settings as current baseline.",
   "ligand_variants": [
     {
@@ -17,6 +17,17 @@
       "redock_ligand_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\cocrystal_2znp_uncharge.pdbqt",
       "original_formal_charge": -1,
       "variant_formal_charge": 0
+    },
+    {
+      "variant_id": "ligprep_local_mmff200",
+      "kind": "ligand_conformer_prep",
+      "panel_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_local_mmff200.csv",
+      "panel_index_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_local_mmff200_index.csv",
+      "panel_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_local_mmff200.pdbqt",
+      "input_rows": 50,
+      "prepared_rows": 50,
+      "failed_rows": 0,
+      "failed_csv": ""
     }
   ],
   "receptor_variants": [

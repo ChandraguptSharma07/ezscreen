@@ -24,6 +24,7 @@ RECEPTOR_PDBQT = AUDIT / "inputs" / "receptor_fixed.pdbqt"
 PANEL_SMI = AUDIT / "audit_panel" / "audit_panel.smi"
 PANEL_LABEL_CSV = AUDIT / "audit_panel" / "audit_panel.csv"
 POSE_RECEPTOR_PDB = AUDIT / "inputs" / "receptor_prep.pdb"
+PREP_ON_KAGGLE = True
 
 
 def _now() -> str:
@@ -59,20 +60,25 @@ def _float(row: dict[str, str], key: str, default: float = 0.0) -> float:
     return value if math.isfinite(value) else default
 
 
-def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], int]:
+def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], dict[str, int], dict[str, dict[str, str]], int]:
     labels: dict[str, int] = {}
     meta: dict[str, dict[str, str]] = {}
+    labels_by_ligand: dict[str, int] = {}
+    meta_by_ligand: dict[str, dict[str, str]] = {}
     active_total = 0
     with PANEL_LABEL_CSV.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
-            c = _canonical(row.get("smiles", ""))
-            if not c:
-                continue
             label = int(row.get("label", "0") or 0)
-            labels[c] = label
-            meta[c] = dict(row)
+            c = _canonical(row.get("smiles", ""))
+            if c:
+                labels[c] = label
+                meta[c] = dict(row)
+            ligand = row.get("ligand", "")
+            if ligand:
+                labels_by_ligand[ligand] = label
+                meta_by_ligand[ligand] = dict(row)
             active_total += label
-    return labels, meta, active_total
+    return labels, meta, labels_by_ligand, meta_by_ligand, active_total
 
 
 def _receptor_coords(path: Path) -> list[tuple[float, float, float]]:
@@ -240,16 +246,20 @@ def _update_metric_row(summary: dict[str, Any]) -> None:
 
 
 def _evaluate_panel(output_dir: Path, ablation_id: str, runtime: float) -> dict[str, Any]:
-    labels, meta, active_total = _load_panel_labels()
+    labels, meta, labels_by_ligand, meta_by_ligand, active_total = _load_panel_labels()
     with (output_dir / "scores.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
         c = _canonical(row.get("smiles", ""))
-        row["label"] = str(labels[c]) if c in labels else ""
-        if c in meta:
-            row["audit_id"] = meta[c].get("audit_id", "")
-            row["audit_reason"] = meta[c].get("audit_reason", "")
-            row["name"] = meta[c].get("name", row.get("name", ""))
+        lig = row.get("ligand", "")
+        row_meta = meta.get(c) if c in meta else meta_by_ligand.get(lig)
+        row_label = labels.get(c) if c in labels else labels_by_ligand.get(lig)
+        row["label"] = "" if row_label is None else str(row_label)
+        if row_meta:
+            row["audit_id"] = row_meta.get("audit_id", "")
+            row["audit_reason"] = row_meta.get("audit_reason", "")
+            row["name"] = row_meta.get("name", row.get("name", ""))
+            row["smiles"] = row.get("smiles") or row_meta.get("smiles", "")
     evaluated = [r for r in rows if r.get("label") in {"0", "1"}]
     out_csv = AUDIT / "panel_runs" / f"scores_labeled_{ablation_id}.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -283,7 +293,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
             box_size=BOX_SIZE,
             search_mode=search_mode,
             ph=7.4,
-            prep_on_kaggle=True,
+            prep_on_kaggle=PREP_ON_KAGGLE,
             accelerator=accelerator,
             results_cfg={"poses_returned": 1000000, "prolif_rescore_enabled": False},
             engine="unidock",
@@ -327,6 +337,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
 
 
 def main() -> None:
+    global RECEPTOR_PDBQT, PANEL_SMI, PANEL_LABEL_CSV, POSE_RECEPTOR_PDB, PREP_ON_KAGGLE
     parser = argparse.ArgumentParser()
     parser.add_argument("--ablation-id", default="current_box_balance")
     parser.add_argument("--search-mode", default="balance", choices=["fast", "balance", "detail"])
@@ -335,9 +346,14 @@ def main() -> None:
     parser.add_argument("--panel-smi", type=Path, default=PANEL_SMI)
     parser.add_argument("--panel-label-csv", type=Path, default=PANEL_LABEL_CSV)
     parser.add_argument("--pose-receptor-pdb", type=Path, default=POSE_RECEPTOR_PDB)
+    parser.add_argument("--prep-on-kaggle", action=argparse.BooleanOptionalAction, default=PREP_ON_KAGGLE)
     args = parser.parse_args()
+    RECEPTOR_PDBQT = args.receptor_pdbqt
+    PANEL_SMI = args.panel_smi
+    PANEL_LABEL_CSV = args.panel_label_csv
+    POSE_RECEPTOR_PDB = args.pose_receptor_pdb
+    PREP_ON_KAGGLE = args.prep_on_kaggle
     print(json.dumps(submit(args.ablation_id, args.search_mode, args.accelerator), indent=2))
-
 
 if __name__ == "__main__":
     main()

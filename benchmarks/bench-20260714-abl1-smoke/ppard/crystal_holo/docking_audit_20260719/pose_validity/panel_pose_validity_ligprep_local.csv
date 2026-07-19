@@ -1,0 +1,21 @@
+rank,label,ligand,name,score,pose_min_heavy_atom_distance,contact_count_4a,contact_count_6a,clashes_lt_2a,smiles
+1,0,local_mmff_lig_00015,C44320267,-13.061,3.028,108,921,0,O=C(N[C@H](Cc1cc2ccccc2c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+2,0,local_mmff_lig_00020,C27101776,-12.914,3.003,111,875,0,O=C([O-])c1cccc(/C=C2\Oc3cc(OC(c4ccc(F)cc4)c4ccc(F)cc4)ccc3C2=O)c1
+3,0,local_mmff_lig_00030,C44321324,-12.576,2.955,119,931,0,O=C(N[C@H](Cc1c2ccccc2c(Cl)c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+4,0,local_mmff_lig_00018,C27101274,-12.48,3.062,105,884,0,O=C([O-])c1ccccc1/C=C1\Oc2cc(OC(c3ccc(F)cc3)c3ccc(F)cc3)ccc2C1=O
+5,0,local_mmff_lig_00027,C08448904,-12.439,3.127,121,878,0,CCc1ccc2oc(-c3cccc(/N=C/c4cc(Cc5ccccc5)cc(Br)c4[O-])c3)nc2c1
+6,0,local_mmff_lig_00022,C01947809,-12.332,3.056,92,801,0,O=c1oc2ccccc2cc1-c1cccc(/N=C/c2cc(Cc3ccccc3)cc([N+](=O)[O-])c2[O-])c1
+7,0,local_mmff_lig_00017,C02386123,-12.064,3.021,105,899,0,O=C(N[C@@H](Cc1ccc2ccc3cccc4ccc1c2c34)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+8,0,local_mmff_lig_00033,C39556994,-11.854,2.908,94,797,0,C[C@@H](c1ccccc1)N1C(=O)/C(=C\c2cn(Cc3ccc(F)cc3)c3ccccc23)N=C1[S-]
+9,0,local_mmff_lig_00031,C06446085,-11.767,3.14,95,827,0,O=C(Nc1cc(Oc2ccc(F)cc2)cc(Oc2cccnc2)c1)C(c1ccccc1)c1ccccc1
+10,0,local_mmff_lig_00023,C39557082,-11.677,2.631,80,851,0,O=C1/C(=C\c2cn(Cc3cccc(C(F)(F)F)c3)c3ccccc23)N=C([S-])N1C1CCCCC1
+11,0,local_mmff_lig_00026,C14476291,-11.5,3.063,107,855,0,O=S(=O)(NC1CCCCC1)c1ccc2c(c1)[C@H]1C=CC[C@H]1[C@H](c1ccccc1OCc1ccccc1)N2
+12,1,local_mmff_lig_00001,379341 CHEMBL225936,-11.483,3.212,96,822,0,O=C(O)Cc1ccc(CNc2cccc(-c3c(Cc4ccccc4)cnc4c(Cl)cccc34)c2)cc1
+13,0,local_mmff_lig_00019,C59198440,-11.448,2.803,95,852,0,Cc1ccc(Cn2cc(/C=C3/C(=O)N(c4cccc(Br)c4)C(=O)N=C3[O-])c3ccccc32)cc1
+14,0,local_mmff_lig_00016,C02052218,-11.34,2.899,94,776,0,O=C(NC(=S)Nc1ccc2oc(-c3ccc4ccccc4c3)nc2c1)C(c1ccccc1)c1ccccc1
+15,0,local_mmff_lig_00029,C09087453,-11.313,2.882,123,860,0,O=C1N=C([O-])N(c2cccc(C(F)(F)F)c2)C(=O)/C1=C\c1cn(Cc2ccccc2)c2ccccc12
+16,1,local_mmff_lig_00004,397306 CHEMBL393766,-11.029,3.056,94,867,0,O=C(O)Cc1coc2cc(OCc3ccccc3COc3ccc(C(F)(F)F)cc3)ccc12
+17,0,local_mmff_lig_00032,C44321452,-10.992,3.048,90,772,0,Cc1ccc2ccccc2c1C[C@H](NC(=O)OCC1c2ccccc2-c2ccccc21)C(=O)[O-]
+18,0,local_mmff_lig_00024,C01947815,-10.89,2.805,91,793,0,O=[N+]([O-])c1cc(Cc2ccccc2)cc(/C=N/c2cccc(-c3nc4cc(Cl)ccc4o3)c2)c1[O-]
+19,1,local_mmff_lig_00003,400255 CHEMBL237710,-10.863,2.776,142,1010,0,Cc1cc(Oc2cccc(CNC(=O)c3ccc(C(F)(F)F)cc3Oc3ccccc3)c2)ccc1OC(C)(C)C(=O)O
+20,0,local_mmff_lig_00028,C09292959,-10.83,2.323,123,968,0,C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@H]3c3cccc(Oc4ccccc4)c3)ccc2O1

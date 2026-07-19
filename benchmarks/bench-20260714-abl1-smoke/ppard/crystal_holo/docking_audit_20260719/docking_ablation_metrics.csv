@@ -11,3 +11,4 @@ ligand_uncharge_current_receptor,ok,1.141,True,0.0,0.0,0.3162,15/15,1,19,0,386.6
 recprep_obabel,ok,1.362,True,0.0,0.0,0.3238,15/15,2,18,0,358.395,Redocking RMSD plus 50-ligand panel baseline.
 recfixed_obabel,ok,1.617,True,0.0,0.0,0.2857,15/15,3,17,0,387.79,Redocking RMSD plus 50-ligand panel baseline.
 recraw_obabel,ok,1.157,True,0.0,0.0,0.2895,15/15,2,18,0,424.12,Redocking RMSD plus 50-ligand panel baseline.
+ligprep_local,ok,1.181,True,0.0,0.0,0.3295,15/15,3,17,0,356.48,Redocking RMSD plus 50-ligand panel baseline.
