@@ -1,0 +1,36 @@
+﻿{
+    "status":  "ok",
+    "updated_at":  "2026-07-19T18:45:37.869992+00:00",
+    "ablation_id":  "ligprep_uncharge",
+    "output_dir":  "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_ligprep_uncharge_r2",
+    "scores_rows":  1,
+    "redocking_rmsd":  1.135,
+    "redocking_reliable":  true,
+    "reference_ligand":  "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
+    "redocked_pose_sdf":  "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_ligprep_uncharge_r2\\poses.sdf",
+    "crystal_centroid":  [
+                             15.381,
+                             2.563,
+                             38.046
+                         ],
+    "redocked_centroid":  [
+                              15.292,
+                              3.151,
+                              38.34
+                          ],
+    "centroid_delta":  [
+                           -0.089,
+                           0.589,
+                           0.294
+                       ],
+    "pose_validity":  {
+                          "min_heavy_atom_distance":  3.078,
+                          "contacts_4a":  90,
+                          "contacts_6a":  832,
+                          "clashes_lt_2a":  0
+                      },
+    "runtime_seconds":  360.276,
+    "notes":  "Heavy-atom symmetry RMSD via RDKit CalcRMS, no alignment. Redocking rerun used ligprep_uncharge_r2 after audit shard filename fix.",
+    "rerun_ablation_id":  "ligprep_uncharge_r2"
+}
+

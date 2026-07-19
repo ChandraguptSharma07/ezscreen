@@ -1,0 +1,65 @@
+{
+  "ablation_id": "ligprep_uncharge",
+  "search_mode": "balance",
+  "box_center": [
+    15.656,
+    2.308,
+    39.483
+  ],
+  "box_size": [
+    21.337,
+    22.566,
+    22.752
+  ],
+  "receptor_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_fixed.pdbqt",
+  "redock_ligand_pdbqt": "benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\cocrystal_2znp_uncharge.pdbqt",
+  "panel_smi": "benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_local_uncharge_mmff200.pdbqt",
+  "panel_label_csv": "benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_local_uncharge_mmff200.csv",
+  "pose_receptor_pdb": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_prep.pdb",
+  "prep_on_kaggle": false,
+  "redock": {
+    "status": "failed",
+    "ablation_id": "ligprep_uncharge",
+    "run_id": "ezs-ppard-redock-ligprep-uncharge",
+    "username": "chandraguptsharma",
+    "kaggle_key_path": "C:\\Users\\Chandragupt\\.kaggle\\kaggle.json",
+    "work_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\kaggle_ligprep_uncharge",
+    "runtime_seconds": 327.049,
+    "result": {
+      "status": "failed",
+      "output_dir": null,
+      "error_type": "unknown"
+    }
+  },
+  "panel": {
+    "status": "complete",
+    "ablation_id": "ligprep_uncharge",
+    "run_id": "ezs-ppard-panel-ligprep-uncharge",
+    "username": "chandraguptsharma",
+    "kaggle_key_path": "C:\\Users\\Chandragupt\\.kaggle\\kaggle.json",
+    "work_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\kaggle_ligprep_uncharge",
+    "runtime_seconds": 373.303,
+    "result": {
+      "status": "complete",
+      "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\kaggle_ligprep_uncharge\\output",
+      "error_type": null
+    },
+    "panel_evaluation": {
+      "status": "ok",
+      "updated_at": "2026-07-19T18:38:14.878387+00:00",
+      "ablation_id": "ligprep_uncharge",
+      "ef1": 0.0,
+      "ef5": 0.0,
+      "auc_roc": 0.3067,
+      "active_survival": "15/15",
+      "top20_actives": 2,
+      "top20_decoys": 18,
+      "runtime_seconds": 373.303,
+      "top20_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\top20_ligprep_uncharge.csv",
+      "pose_validity_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\pose_validity\\panel_pose_validity_ligprep_uncharge.csv",
+      "pose_rows": 20,
+      "clash_like_rows_min_heavy_distance_lt_2a": 0,
+      "scores_labeled_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\scores_labeled_ligprep_uncharge.csv"
+    }
+  }
+}

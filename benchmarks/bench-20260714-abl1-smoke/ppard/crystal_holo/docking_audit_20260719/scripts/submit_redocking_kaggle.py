@@ -46,7 +46,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
     notebook.write_text(
         render_vina_notebook(
             run_id=run_id,
-            shard_filenames=["cocrystal_2znp.pdbqt"],
+            shard_filenames=[REDOCK_LIGAND_PDBQT.name],
             notebook_index=0,
             total_notebooks=1,
             box_center=BOX_CENTER,

@@ -283,13 +283,119 @@ def _write_local_mmff_panel() -> dict[str, Any]:
         "failed_rows": len(failed),
         "failed_csv": str(fail_csv) if failed else "",
     }
+def _write_local_uncharge_mmff_panel() -> dict[str, Any]:
+    from rdkit import Chem
+    from rdkit.Chem import AllChem
+    from rdkit.Chem.MolStandardize import rdMolStandardize
+
+    src = PANEL / "audit_panel.csv"
+    out_dir = VARIANTS / "ligands"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_csv = out_dir / "audit_panel_local_uncharge_mmff200.csv"
+    out_index = out_dir / "audit_panel_local_uncharge_mmff200_index.csv"
+    out_pdbqt = out_dir / "audit_panel_local_uncharge_mmff200.pdbqt"
+
+    with src.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+        base_fields = list(rows[0].keys()) if rows else []
+
+    extra_fields = [
+        "original_ligand",
+        "original_smiles",
+        "original_formal_charge",
+        "variant_formal_charge",
+        "smiles_changed",
+        "input_smiles",
+        "conformer_qc",
+        "prep_note",
+        "mmff_status",
+    ]
+    fieldnames = list(dict.fromkeys(base_fields + extra_fields))
+    index_fields = ["ligand", "name", "smiles", "input_smiles", "conformer_qc", "prep_note", "mmff_status"]
+    written = 0
+    changed = 0
+    failed = []
+    csv_rows = []
+    index_rows = []
+    pdbqt_blocks = []
+    uncharger = rdMolStandardize.Uncharger()
+
+    for idx, row in enumerate(rows):
+        original_smiles = row.get("smiles", "")
+        lig_id = f"local_uncharge_lig_{idx:05d}"
+        try:
+            mol = Chem.MolFromSmiles(original_smiles)
+            if mol is None:
+                raise RuntimeError("invalid_smiles")
+            before = _formal_charge(mol)
+            variant = uncharger.uncharge(mol)
+            after = _formal_charge(variant)
+            variant_smiles = Chem.MolToSmiles(variant, isomericSmiles=True)
+            changed_flag = _canonical(original_smiles) != _canonical(variant_smiles)
+            changed += int(changed_flag)
+            mol_h = Chem.AddHs(variant)
+            params = AllChem.ETKDGv3()
+            params.randomSeed = 42
+            if AllChem.EmbedMolecule(mol_h, params) == -1:
+                raise RuntimeError("embed_failed")
+            mmff_status = AllChem.MMFFOptimizeMolecule(mol_h, mmffVariant="MMFF94", maxIters=200)
+            qc = _conformer_qc(mol_h)
+            pdbqt_blocks.append(_mol_h_to_pdbqt(mol_h, lig_id))
+        except Exception as exc:
+            failed.append({"audit_id": row.get("audit_id", ""), "smiles": original_smiles, "reason": str(exc)[:240]})
+            continue
+
+        out_row = dict(row)
+        out_row["original_ligand"] = row.get("ligand", "")
+        out_row["ligand"] = lig_id
+        out_row["original_smiles"] = original_smiles
+        out_row["original_formal_charge"] = str(before)
+        out_row["variant_formal_charge"] = str(after)
+        out_row["smiles_changed"] = str(changed_flag).lower()
+        out_row["smiles"] = variant_smiles
+        out_row["input_smiles"] = variant_smiles
+        out_row["conformer_qc"] = qc
+        out_row["prep_note"] = "local_uncharge_etkdg_seed42_mmff94_200"
+        out_row["mmff_status"] = str(mmff_status)
+        csv_rows.append(out_row)
+        index_rows.append({k: out_row.get(k, "") for k in index_fields})
+        written += 1
+
+    with out_csv.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(csv_rows)
+    with out_index.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=index_fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(index_rows)
+    out_pdbqt.write_text("\n".join(pdbqt_blocks), encoding="utf-8")
+    fail_csv = out_dir / "audit_panel_local_uncharge_mmff200_failed.csv"
+    if failed:
+        with fail_csv.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["audit_id", "smiles", "reason"])
+            writer.writeheader()
+            writer.writerows(failed)
+
+    return {
+        "variant_id": "ligprep_local_uncharge_mmff200",
+        "kind": "ligand_charge_protonation_conformer_prep",
+        "panel_csv": str(out_csv),
+        "panel_index_csv": str(out_index),
+        "panel_pdbqt": str(out_pdbqt),
+        "input_rows": len(rows),
+        "prepared_rows": written,
+        "changed_rows": changed,
+        "failed_rows": len(failed),
+        "failed_csv": str(fail_csv) if failed else "",
+    }
 
 def main() -> None:
     VARIANTS.mkdir(parents=True, exist_ok=True)
     manifest = {
         "updated_at": _now(),
         "purpose": "PPARD prep/protonation/charge audit variants; same box/search settings as current baseline.",
-        "ligand_variants": [_write_uncharge_panel(), _write_uncharge_redock_ligand(), _write_local_mmff_panel()],
+        "ligand_variants": [_write_uncharge_panel(), _write_uncharge_redock_ligand(), _write_local_mmff_panel(), _write_local_uncharge_mmff_panel()],
         "receptor_variants": _write_receptor_variants(),
     }
     out = VARIANTS / "prep_variant_manifest.json"
