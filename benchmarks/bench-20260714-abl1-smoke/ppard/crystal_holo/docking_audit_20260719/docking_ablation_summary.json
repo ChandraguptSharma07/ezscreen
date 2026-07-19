@@ -1,6 +1,6 @@
 ﻿{
-    "status":  "ligand_charge_conformer_ablation_complete",
-    "completed_ablation_count":  13,
+    "status":  "ligand_enumeration_ablation_complete",
+    "completed_ablation_count":  14,
     "completed_ablation_ids":  [
                                    "current_box_balance",
                                    "search_fast_current_box",
@@ -14,9 +14,10 @@
                                    "recfixed_obabel",
                                    "recraw_obabel",
                                    "ligprep_local",
-                                   "ligprep_uncharge"
+                                   "ligprep_uncharge",
+                                   "ligprep_enum2"
                                ],
-    "headline":  "PPARD ligand charge/conformer variants redock reliably but still do not rescue raw UniDock early enrichment.",
+    "headline":  "PPARD ligand protonation/enumeration variants redock reliably but still do not rescue raw UniDock early enrichment.",
     "best_panel_auc":  {
                            "ablation_id":  "current_box_balance",
                            "auc_roc":  0.3314
@@ -26,7 +27,7 @@
                                     "top20_actives":  4
                                 },
     "redocking_rmsd_range":  [
-                                 1.135,
+                                 1.053,
                                  1.78
                              ],
     "panel_auc_range":  [
@@ -35,9 +36,9 @@
                         ],
     "interpretation":  [
                            "All prep/search/box variants tested so far redock the 2ZNP cocrystal ligand under 2 A.",
+                           "Kaggle Gypsum protonation/tautomer enumeration generated 95 scored variants from 50 parent ligands; metrics collapsed to best score per parent and still gave EF1/EF5 0.0, AUC 0.2781, and 3 actives in top 20.",
                            "Local ETKDG seed42 + MMFF94 200-iteration PDBQT panel produced RMSD 1.181 A, AUC 0.3295, EF1/EF5 0.0, and 3 actives in top 20.",
                            "Local uncharged ETKDG/MMFF PDBQT panel produced RMSD 1.135 A, AUC 0.3067, EF1/EF5 0.0, and 2 actives in top 20; neutralization did not improve ranking.",
-                           "Open Babel receptor variants from receptor_prep.pdb, receptor_fixed_clean.pdb, and raw receptor.pdb produce weak 50-ligand panel AUC values from 0.2857 to 0.3238.",
                            "Current evidence says pose generation for the cocrystal is credible, but raw UniDock ranking remains dominated by hard decoys on the audit panel."
                        ],
     "rows":  [
@@ -250,6 +251,21 @@
                      "pose_clash_like_top20":  "0",
                      "runtime_seconds":  "733.579",
                      "notes":  "Panel plus redocking rerun ligprep_uncharge_r2 after audit shard filename fix."
+                 },
+                 {
+                     "ablation_id":  "ligprep_enum2",
+                     "status":  "ok",
+                     "redocking_rmsd":  "1.053",
+                     "redocking_reliable":  "True",
+                     "ef1":  "0.0",
+                     "ef5":  "0.0",
+                     "auc_roc":  "0.2781",
+                     "active_survival":  "15/15",
+                     "top20_actives":  "3",
+                     "top20_decoys":  "17",
+                     "pose_clash_like_top20":  "0",
+                     "runtime_seconds":  "458.999",
+                     "notes":  "Kaggle Gypsum protonation/tautomer enumeration max_variants=2; 95 scored variants collapsed to 50 parent ligands for metrics."
                  }
              ]
 }

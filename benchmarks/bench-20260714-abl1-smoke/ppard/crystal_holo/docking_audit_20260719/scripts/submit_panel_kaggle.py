@@ -5,6 +5,7 @@ import csv
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import time
@@ -25,6 +26,7 @@ PANEL_SMI = AUDIT / "audit_panel" / "audit_panel.smi"
 PANEL_LABEL_CSV = AUDIT / "audit_panel" / "audit_panel.csv"
 POSE_RECEPTOR_PDB = AUDIT / "inputs" / "receptor_prep.pdb"
 PREP_ON_KAGGLE = True
+ENUMERATE_OPTS: dict[str, Any] | None = None
 
 
 def _now() -> str:
@@ -60,11 +62,13 @@ def _float(row: dict[str, str], key: str, default: float = 0.0) -> float:
     return value if math.isfinite(value) else default
 
 
-def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], dict[str, int], dict[str, dict[str, str]], int]:
+def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], dict[str, int], dict[str, dict[str, str]], dict[str, int], dict[str, dict[str, str]], int]:
     labels: dict[str, int] = {}
     meta: dict[str, dict[str, str]] = {}
     labels_by_ligand: dict[str, int] = {}
     meta_by_ligand: dict[str, dict[str, str]] = {}
+    labels_by_name: dict[str, int] = {}
+    meta_by_name: dict[str, dict[str, str]] = {}
     active_total = 0
     with PANEL_LABEL_CSV.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
@@ -77,10 +81,12 @@ def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], dic
             if ligand:
                 labels_by_ligand[ligand] = label
                 meta_by_ligand[ligand] = dict(row)
+            for key in (row.get("name", ""), row.get("audit_id", "")):
+                if key:
+                    labels_by_name[key] = label
+                    meta_by_name[key] = dict(row)
             active_total += label
-    return labels, meta, labels_by_ligand, meta_by_ligand, active_total
-
-
+    return labels, meta, labels_by_ligand, meta_by_ligand, labels_by_name, meta_by_name, active_total
 def _receptor_coords(path: Path) -> list[tuple[float, float, float]]:
     coords = []
     for line in path.read_text(errors="ignore").splitlines():
@@ -244,23 +250,50 @@ def _update_metric_row(summary: dict[str, Any]) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
+def _parent_name(name: str) -> str:
+    return re.sub(r"_v\d+$", "", name or "")
+
+
+def _collapse_best_by_parent(rows: list[dict[str, str]]) -> tuple[list[dict[str, str]], int]:
+    by_parent: dict[str, dict[str, str]] = {}
+    duplicates = 0
+    for row in rows:
+        parent = row.get("audit_id") or row.get("parent_name") or _parent_name(row.get("name", "")) or row.get("ligand", "")
+        row["parent_key"] = parent
+        current = by_parent.get(parent)
+        if current is not None:
+            duplicates += 1
+        if current is None or _float(row, "score", 999.0) < _float(current, "score", 999.0):
+            by_parent[parent] = row
+    collapsed = sorted(by_parent.values(), key=lambda r: _float(r, "score", 999.0))
+    return collapsed, duplicates
+
 
 def _evaluate_panel(output_dir: Path, ablation_id: str, runtime: float) -> dict[str, Any]:
-    labels, meta, labels_by_ligand, meta_by_ligand, active_total = _load_panel_labels()
+    labels, meta, labels_by_ligand, meta_by_ligand, labels_by_name, meta_by_name, active_total = _load_panel_labels()
     with (output_dir / "scores.csv").open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
         c = _canonical(row.get("smiles", ""))
         lig = row.get("ligand", "")
+        input_name = row.get("name", "")
+        parent_name = _parent_name(input_name)
         row_meta = meta.get(c) if c in meta else meta_by_ligand.get(lig)
+        if row_meta is None:
+            row_meta = meta_by_name.get(input_name) or meta_by_name.get(parent_name)
         row_label = labels.get(c) if c in labels else labels_by_ligand.get(lig)
+        if row_label is None:
+            row_label = labels_by_name.get(input_name) if input_name in labels_by_name else labels_by_name.get(parent_name)
         row["label"] = "" if row_label is None else str(row_label)
+        row["input_name"] = input_name
+        row["parent_name"] = parent_name
         if row_meta:
             row["audit_id"] = row_meta.get("audit_id", "")
             row["audit_reason"] = row_meta.get("audit_reason", "")
             row["name"] = row_meta.get("name", row.get("name", ""))
             row["smiles"] = row.get("smiles") or row_meta.get("smiles", "")
     evaluated = [r for r in rows if r.get("label") in {"0", "1"}]
+    collapsed, duplicate_variant_rows = _collapse_best_by_parent(evaluated)
     out_csv = AUDIT / "panel_runs" / f"scores_labeled_{ablation_id}.csv"
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     fields = list(rows[0].keys()) if rows else []
@@ -268,12 +301,15 @@ def _evaluate_panel(output_dir: Path, ablation_id: str, runtime: float) -> dict[
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
-    summary = _metrics(evaluated, active_total, ablation_id, runtime)
+    summary = _metrics(collapsed, active_total, ablation_id, runtime)
     summary["scores_labeled_csv"] = str(out_csv)
+    summary["raw_score_rows"] = len(rows)
+    summary["evaluated_score_rows"] = len(evaluated)
+    summary["collapsed_parent_rows"] = len(collapsed)
+    summary["duplicate_variant_rows"] = duplicate_variant_rows
     (AUDIT / "panel_runs" / f"panel_summary_{ablation_id}.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
     _update_metric_row(summary)
     return summary
-
 
 def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, object]:
     from ezscreen.backends.kaggle.runner import render_vina_notebook, run_screening_job
@@ -295,6 +331,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
             ph=7.4,
             prep_on_kaggle=PREP_ON_KAGGLE,
             accelerator=accelerator,
+            enumerate_opts=ENUMERATE_OPTS,
             results_cfg={"poses_returned": 1000000, "prolif_rescore_enabled": False},
             engine="unidock",
             scoring="vina",
@@ -337,7 +374,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
 
 
 def main() -> None:
-    global RECEPTOR_PDBQT, PANEL_SMI, PANEL_LABEL_CSV, POSE_RECEPTOR_PDB, PREP_ON_KAGGLE
+    global RECEPTOR_PDBQT, PANEL_SMI, PANEL_LABEL_CSV, POSE_RECEPTOR_PDB, PREP_ON_KAGGLE, ENUMERATE_OPTS
     parser = argparse.ArgumentParser()
     parser.add_argument("--ablation-id", default="current_box_balance")
     parser.add_argument("--search-mode", default="balance", choices=["fast", "balance", "detail"])
@@ -347,12 +384,15 @@ def main() -> None:
     parser.add_argument("--panel-label-csv", type=Path, default=PANEL_LABEL_CSV)
     parser.add_argument("--pose-receptor-pdb", type=Path, default=POSE_RECEPTOR_PDB)
     parser.add_argument("--prep-on-kaggle", action=argparse.BooleanOptionalAction, default=PREP_ON_KAGGLE)
+    parser.add_argument("--enumerate-ligands", action="store_true")
+    parser.add_argument("--enumerate-max-variants", type=int, default=2)
     args = parser.parse_args()
     RECEPTOR_PDBQT = args.receptor_pdbqt
     PANEL_SMI = args.panel_smi
     PANEL_LABEL_CSV = args.panel_label_csv
     POSE_RECEPTOR_PDB = args.pose_receptor_pdb
     PREP_ON_KAGGLE = args.prep_on_kaggle
+    ENUMERATE_OPTS = {"enabled": True, "protonation": True, "tautomers": True, "stereo": False, "ring": False, "max_variants": args.enumerate_max_variants} if args.enumerate_ligands else None
     print(json.dumps(submit(args.ablation_id, args.search_mode, args.accelerator), indent=2))
 
 if __name__ == "__main__":

@@ -1,0 +1,21 @@
+{
+  "status": "ok",
+  "updated_at": "2026-07-19T20:10:24.785825+00:00",
+  "ablation_id": "ligprep_enum2",
+  "ef1": 0.0,
+  "ef5": 0.0,
+  "auc_roc": 0.2781,
+  "active_survival": "15/15",
+  "top20_actives": 3,
+  "top20_decoys": 17,
+  "runtime_seconds": 458.999,
+  "top20_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\top20_ligprep_enum2.csv",
+  "pose_validity_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\pose_validity\\panel_pose_validity_ligprep_enum2.csv",
+  "pose_rows": 20,
+  "clash_like_rows_min_heavy_distance_lt_2a": 0,
+  "scores_labeled_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\scores_labeled_ligprep_enum2.csv",
+  "raw_score_rows": 95,
+  "evaluated_score_rows": 95,
+  "collapsed_parent_rows": 50,
+  "duplicate_variant_rows": 45
+}

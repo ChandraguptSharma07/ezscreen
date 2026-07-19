@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-07-19T18:25:37.000006+00:00",
+  "updated_at": "2026-07-19T19:55:39.317619+00:00",
   "purpose": "PPARD prep/protonation/charge audit variants; same box/search settings as current baseline.",
   "ligand_variants": [
     {
@@ -40,6 +40,13 @@
       "changed_rows": 18,
       "failed_rows": 0,
       "failed_csv": ""
+    },
+    {
+      "variant_id": "ligprep_kaggle_enum_parent",
+      "kind": "ligand_protonation_tautomer_enumeration_input",
+      "panel_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_enum_parent.csv",
+      "panel_smi": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_enum_parent.smi",
+      "input_rows": 50
     }
   ],
   "receptor_variants": [

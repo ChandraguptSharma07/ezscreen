@@ -1,6 +1,6 @@
 # PPARD UniDock Docking Audit - Interim Results
 
-PPARD ligand charge/conformer variants redock reliably but still do not rescue raw UniDock early enrichment.
+PPARD ligand protonation/enumeration variants redock reliably but still do not rescue raw UniDock early enrichment.
 
 | Ablation | RMSD A | EF1 | EF5 | AUC | Active survival | Top20 actives | Clash-like top20 |
 |---|---:|---:|---:|---:|---|---:|---:|
@@ -17,10 +17,11 @@ PPARD ligand charge/conformer variants redock reliably but still do not rescue r
 | recraw_obabel | 1.157 | 0.000 | 0.000 | 0.2895 | 15/15 | 2 | 0 |
 | ligprep_local | 1.181 | 0.000 | 0.000 | 0.3295 | 15/15 | 3 | 0 |
 | ligprep_uncharge | 1.135 | 0.000 | 0.000 | 0.3067 | 15/15 | 2 | 0 |
+| ligprep_enum2 | 1.053 | 0.000 | 0.000 | 0.2781 | 15/15 | 3 | 0 |
 
 Interpretation:
 - All prep/search/box variants tested so far redock the 2ZNP cocrystal ligand under 2 A.
+- Kaggle Gypsum protonation/tautomer enumeration generated 95 scored variants from 50 parent ligands; metrics collapsed to best score per parent and still gave EF1/EF5 0.0, AUC 0.2781, and 3 actives in top 20.
 - Local ETKDG seed42 + MMFF94 200-iteration PDBQT panel produced RMSD 1.181 A, AUC 0.3295, EF1/EF5 0.0, and 3 actives in top 20.
 - Local uncharged ETKDG/MMFF PDBQT panel produced RMSD 1.135 A, AUC 0.3067, EF1/EF5 0.0, and 2 actives in top 20; neutralization did not improve ranking.
-- Open Babel receptor variants from receptor_prep.pdb, receptor_fixed_clean.pdb, and raw receptor.pdb produce weak 50-ligand panel AUC values from 0.2857 to 0.3238.
 - Current evidence says pose generation for the cocrystal is credible, but raw UniDock ranking remains dominated by hard decoys on the audit panel.

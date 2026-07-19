@@ -389,13 +389,46 @@ def _write_local_uncharge_mmff_panel() -> dict[str, Any]:
         "failed_rows": len(failed),
         "failed_csv": str(fail_csv) if failed else "",
     }
+def _write_enum_parent_panel() -> dict[str, Any]:
+    src = PANEL / "audit_panel.csv"
+    out_dir = VARIANTS / "ligands"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_csv = out_dir / "audit_panel_enum_parent.csv"
+    out_smi = out_dir / "audit_panel_enum_parent.smi"
+
+    with src.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+        base_fields = list(rows[0].keys()) if rows else []
+
+    fieldnames = list(dict.fromkeys(base_fields + ["original_ligand", "original_name", "prep_note"]))
+    with out_csv.open("w", newline="", encoding="utf-8") as csv_handle, out_smi.open("w", encoding="utf-8") as smi_handle:
+        writer = csv.DictWriter(csv_handle, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for idx, row in enumerate(rows):
+            audit_id = row.get("audit_id", f"ppard_audit_{idx:03d}")
+            out_row = dict(row)
+            out_row["original_ligand"] = row.get("ligand", "")
+            out_row["original_name"] = row.get("name", "")
+            out_row["ligand"] = f"enum_parent_lig_{idx:05d}"
+            out_row["name"] = audit_id
+            out_row["prep_note"] = "kaggle_gypsum_parent_named_input"
+            writer.writerow(out_row)
+            smi_handle.write(f"{row.get('smiles', '')}\t{audit_id}\n")
+
+    return {
+        "variant_id": "ligprep_kaggle_enum_parent",
+        "kind": "ligand_protonation_tautomer_enumeration_input",
+        "panel_csv": str(out_csv),
+        "panel_smi": str(out_smi),
+        "input_rows": len(rows),
+    }
 
 def main() -> None:
     VARIANTS.mkdir(parents=True, exist_ok=True)
     manifest = {
         "updated_at": _now(),
         "purpose": "PPARD prep/protonation/charge audit variants; same box/search settings as current baseline.",
-        "ligand_variants": [_write_uncharge_panel(), _write_uncharge_redock_ligand(), _write_local_mmff_panel(), _write_local_uncharge_mmff_panel()],
+        "ligand_variants": [_write_uncharge_panel(), _write_uncharge_redock_ligand(), _write_local_mmff_panel(), _write_local_uncharge_mmff_panel(), _write_enum_parent_panel()],
         "receptor_variants": _write_receptor_variants(),
     }
     out = VARIANTS / "prep_variant_manifest.json"

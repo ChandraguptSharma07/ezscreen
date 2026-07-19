@@ -1,0 +1,111 @@
+{
+  "ablation_id": "ligprep_enum2",
+  "search_mode": "balance",
+  "box_center": [
+    15.656,
+    2.308,
+    39.483
+  ],
+  "box_size": [
+    21.337,
+    22.566,
+    22.752
+  ],
+  "receptor_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_fixed.pdbqt",
+  "redock_ligand_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\cocrystal_2znp.pdbqt",
+  "panel_smi": "benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_enum_parent.smi",
+  "panel_label_csv": "benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_enum_parent.csv",
+  "pose_receptor_pdb": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_prep.pdb",
+  "prep_on_kaggle": true,
+  "enumerate_opts": {
+    "enabled": true,
+    "protonation": true,
+    "tautomers": true,
+    "stereo": false,
+    "ring": false,
+    "max_variants": 2
+  },
+  "redock": {
+    "status": "complete",
+    "ablation_id": "ligprep_enum2",
+    "run_id": "ezs-ppard-redock-ligprep-enum2",
+    "username": "chandraguptsharma",
+    "kaggle_key_path": "C:\\Users\\Chandragupt\\.kaggle\\kaggle.json",
+    "work_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\kaggle_ligprep_enum2",
+    "runtime_seconds": 358.698,
+    "result": {
+      "status": "complete",
+      "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\kaggle_ligprep_enum2\\output",
+      "error_type": null
+    },
+    "evaluation": {
+      "status": "ok",
+      "updated_at": "2026-07-19T20:02:43.028500+00:00",
+      "ablation_id": "ligprep_enum2",
+      "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_ligprep_enum2",
+      "scores_rows": 1,
+      "redocking_rmsd": 1.053,
+      "redocking_reliable": true,
+      "reference_ligand": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
+      "redocked_pose_sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_ligprep_enum2\\poses.sdf",
+      "crystal_centroid": [
+        15.381,
+        2.563,
+        38.046
+      ],
+      "redocked_centroid": [
+        15.23,
+        3.23,
+        38.223
+      ],
+      "centroid_delta": [
+        -0.151,
+        0.668,
+        0.178
+      ],
+      "pose_validity": {
+        "min_heavy_atom_distance": 3.013,
+        "contacts_4a": 93,
+        "contacts_6a": 831,
+        "clashes_lt_2a": 0
+      },
+      "runtime_seconds": 358.698,
+      "notes": "Heavy-atom symmetry RMSD via RDKit CalcRMS, no alignment."
+    }
+  },
+  "panel": {
+    "status": "complete",
+    "ablation_id": "ligprep_enum2",
+    "run_id": "ezs-ppard-panel-ligprep-enum2",
+    "username": "chandraguptsharma",
+    "kaggle_key_path": "C:\\Users\\Chandragupt\\.kaggle\\kaggle.json",
+    "work_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\kaggle_ligprep_enum2",
+    "runtime_seconds": 458.999,
+    "result": {
+      "status": "complete",
+      "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\kaggle_ligprep_enum2\\output",
+      "error_type": null
+    },
+    "panel_evaluation": {
+      "status": "ok",
+      "updated_at": "2026-07-19T20:10:24.785825+00:00",
+      "ablation_id": "ligprep_enum2",
+      "ef1": 0.0,
+      "ef5": 0.0,
+      "auc_roc": 0.2781,
+      "active_survival": "15/15",
+      "top20_actives": 3,
+      "top20_decoys": 17,
+      "runtime_seconds": 458.999,
+      "top20_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\top20_ligprep_enum2.csv",
+      "pose_validity_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\pose_validity\\panel_pose_validity_ligprep_enum2.csv",
+      "pose_rows": 20,
+      "clash_like_rows_min_heavy_distance_lt_2a": 0,
+      "scores_labeled_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\scores_labeled_ligprep_enum2.csv",
+      "raw_score_rows": 95,
+      "evaluated_score_rows": 95,
+      "collapsed_parent_rows": 50,
+      "duplicate_variant_rows": 45
+    }
+  }
+}

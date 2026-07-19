@@ -13,3 +13,4 @@ recfixed_obabel,ok,1.617,True,0.0,0.0,0.2857,15/15,3,17,0,387.79,Redocking RMSD 
 recraw_obabel,ok,1.157,True,0.0,0.0,0.2895,15/15,2,18,0,424.12,Redocking RMSD plus 50-ligand panel baseline.
 ligprep_local,ok,1.181,True,0.0,0.0,0.3295,15/15,3,17,0,356.48,Redocking RMSD plus 50-ligand panel baseline.
 ligprep_uncharge,ok,1.135,True,0.0,0.0,0.3067,15/15,2,18,0,733.579,Panel plus redocking rerun ligprep_uncharge_r2 after audit shard filename fix.
+ligprep_enum2,ok,1.053,True,0.0,0.0,0.2781,15/15,3,17,0,458.999,Kaggle Gypsum protonation/tautomer enumeration max_variants=2; 95 scored variants collapsed to 50 parent ligands for metrics.

@@ -34,6 +34,8 @@ def main() -> None:
     parser.add_argument('--panel-label-csv', type=Path, default=AUDIT / 'audit_panel' / 'audit_panel.csv')
     parser.add_argument('--pose-receptor-pdb', type=Path, default=AUDIT / 'inputs' / 'receptor_prep.pdb')
     parser.add_argument('--prep-on-kaggle', action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument('--enumerate-ligands', action='store_true')
+    parser.add_argument('--enumerate-max-variants', type=int, default=2)
     args = parser.parse_args()
 
     from scripts import submit_panel_kaggle, submit_redocking_kaggle
@@ -49,6 +51,7 @@ def main() -> None:
     submit_panel_kaggle.PANEL_LABEL_CSV = args.panel_label_csv
     submit_panel_kaggle.POSE_RECEPTOR_PDB = args.pose_receptor_pdb
     submit_panel_kaggle.PREP_ON_KAGGLE = args.prep_on_kaggle
+    submit_panel_kaggle.ENUMERATE_OPTS = {'enabled': True, 'protonation': True, 'tautomers': True, 'stereo': False, 'ring': False, 'max_variants': args.enumerate_max_variants} if args.enumerate_ligands else None
 
     redock = submit_redocking_kaggle.submit(args.ablation_id, args.search_mode, args.accelerator)
     panel = submit_panel_kaggle.submit(args.ablation_id, args.search_mode, args.accelerator)
@@ -63,6 +66,7 @@ def main() -> None:
         'panel_label_csv': str(args.panel_label_csv),
         'pose_receptor_pdb': str(args.pose_receptor_pdb),
         'prep_on_kaggle': args.prep_on_kaggle,
+        'enumerate_opts': submit_panel_kaggle.ENUMERATE_OPTS,
         'redock': redock,
         'panel': panel,
     }
