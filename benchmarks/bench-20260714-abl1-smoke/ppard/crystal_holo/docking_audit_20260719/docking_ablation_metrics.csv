@@ -9,3 +9,5 @@ box_padding_8a_crystal_centroid,ok,1.753,True,0.0,0.0,0.2724,15/15,1,19,0,357.82
 seed_repeat_current_box_001,ok,1.298,True,0.0,0.0,0.3181,15/15,3,17,0,391.511,Redocking RMSD plus 50-ligand panel baseline.
 ligand_uncharge_current_receptor,ok,1.141,True,0.0,0.0,0.3162,15/15,1,19,0,386.6,Redocking RMSD plus 50-ligand panel baseline.
 recprep_obabel,ok,1.362,True,0.0,0.0,0.3238,15/15,2,18,0,358.395,Redocking RMSD plus 50-ligand panel baseline.
+recfixed_obabel,ok,1.617,True,0.0,0.0,0.2857,15/15,3,17,0,387.79,Redocking RMSD plus 50-ligand panel baseline.
+recraw_obabel,ok,1.157,True,0.0,0.0,0.2895,15/15,2,18,0,424.12,Redocking RMSD plus 50-ligand panel baseline.

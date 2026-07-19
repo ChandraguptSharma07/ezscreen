@@ -1,0 +1,34 @@
+{
+  "status": "ok",
+  "updated_at": "2026-07-19T16:14:56.850908+00:00",
+  "ablation_id": "recfixed_obabel",
+  "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_recfixed_obabel",
+  "scores_rows": 1,
+  "redocking_rmsd": 1.617,
+  "redocking_reliable": true,
+  "reference_ligand": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
+  "redocked_pose_sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_recfixed_obabel\\poses.sdf",
+  "crystal_centroid": [
+    15.381,
+    2.563,
+    38.046
+  ],
+  "redocked_centroid": [
+    15.331,
+    3.178,
+    38.343
+  ],
+  "centroid_delta": [
+    -0.049,
+    0.615,
+    0.297
+  ],
+  "pose_validity": {
+    "min_heavy_atom_distance": 3.058,
+    "contacts_4a": 86,
+    "contacts_6a": 849,
+    "clashes_lt_2a": 0
+  },
+  "runtime_seconds": 357.0,
+  "notes": "Heavy-atom symmetry RMSD via RDKit CalcRMS, no alignment."
+}

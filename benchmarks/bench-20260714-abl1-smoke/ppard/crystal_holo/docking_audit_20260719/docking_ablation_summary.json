@@ -1,6 +1,6 @@
 {
-  "status": "prep_ablation_block_started",
-  "completed_ablation_count": 9,
+  "status": "receptor_prep_ablation_block_complete",
+  "completed_ablation_count": 11,
   "completed_ablation_ids": [
     "current_box_balance",
     "search_fast_current_box",
@@ -10,9 +10,11 @@
     "box_padding_8a_crystal_centroid",
     "seed_repeat_current_box_001",
     "ligand_uncharge_current_receptor",
-    "recprep_obabel"
+    "recprep_obabel",
+    "recfixed_obabel",
+    "recraw_obabel"
   ],
-  "headline": "PPARD redocking remains reliable under ligand uncharge and receptor-prep variants, but raw UniDock early enrichment is still weak.",
+  "headline": "PPARD receptor-prep and ligand-uncharge variants redock reliably but do not rescue raw UniDock early enrichment.",
   "best_panel_auc": {
     "ablation_id": "current_box_balance",
     "auc_roc": 0.3314
@@ -30,9 +32,10 @@
     0.3314
   ],
   "interpretation": [
-    "Ligand uncharge changed 18/50 audit-panel ligands and the cocrystal ligand formal charge from -1 to 0; redocking improved to 1.141 A but panel AUC stayed weak at 0.3162.",
-    "Open Babel receptor_prep.pdb PDBQT redocked at 1.362 A and produced panel AUC 0.3238, so this receptor-prep/protonation variant does not rescue top ranking.",
-    "The next prep audit should compare remaining receptor PDBQT variants and ligand conformer/prep settings before any full PPARD rerun."
+    "All receptor PDBQT variants tested so far redock the 2ZNP cocrystal ligand under 2 A.",
+    "Open Babel receptor variants from receptor_prep.pdb, receptor_fixed_clean.pdb, and raw receptor.pdb produce weak 50-ligand panel AUC values from 0.2857 to 0.3238.",
+    "Ligand uncharge improved redocking RMSD to 1.141 A but still left EF1/EF5 at 0.0 and only 1 active in the top 20.",
+    "Remaining high-yield branch is ligand conformer/prep handling, especially pregenerated conformers versus Kaggle-side SMILES prep."
   ],
   "rows": [
     {
@@ -168,6 +171,36 @@
       "top20_decoys": "18",
       "pose_clash_like_top20": "0",
       "runtime_seconds": "358.395",
+      "notes": "Redocking RMSD plus 50-ligand panel baseline."
+    },
+    {
+      "ablation_id": "recfixed_obabel",
+      "status": "ok",
+      "redocking_rmsd": "1.617",
+      "redocking_reliable": "True",
+      "ef1": "0.0",
+      "ef5": "0.0",
+      "auc_roc": "0.2857",
+      "active_survival": "15/15",
+      "top20_actives": "3",
+      "top20_decoys": "17",
+      "pose_clash_like_top20": "0",
+      "runtime_seconds": "387.79",
+      "notes": "Redocking RMSD plus 50-ligand panel baseline."
+    },
+    {
+      "ablation_id": "recraw_obabel",
+      "status": "ok",
+      "redocking_rmsd": "1.157",
+      "redocking_reliable": "True",
+      "ef1": "0.0",
+      "ef5": "0.0",
+      "auc_roc": "0.2895",
+      "active_survival": "15/15",
+      "top20_actives": "2",
+      "top20_decoys": "18",
+      "pose_clash_like_top20": "0",
+      "runtime_seconds": "424.12",
       "notes": "Redocking RMSD plus 50-ligand panel baseline."
     }
   ]

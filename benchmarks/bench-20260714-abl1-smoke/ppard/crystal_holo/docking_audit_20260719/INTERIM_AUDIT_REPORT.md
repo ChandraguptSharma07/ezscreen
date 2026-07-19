@@ -1,6 +1,6 @@
 # PPARD UniDock Docking Audit - Interim Results
 
-PPARD redocking remains reliable under ligand uncharge and receptor-prep variants, but raw UniDock early enrichment is still weak.
+PPARD receptor-prep and ligand-uncharge variants redock reliably but do not rescue raw UniDock early enrichment.
 
 | Ablation | RMSD A | EF1 | EF5 | AUC | Active survival | Top20 actives | Clash-like top20 |
 |---|---:|---:|---:|---:|---|---:|---:|
@@ -13,8 +13,11 @@ PPARD redocking remains reliable under ligand uncharge and receptor-prep variant
 | seed_repeat_current_box_001 | 1.298 | 0.000 | 0.000 | 0.3181 | 15/15 | 3 | 0 |
 | ligand_uncharge_current_receptor | 1.141 | 0.000 | 0.000 | 0.3162 | 15/15 | 1 | 0 |
 | recprep_obabel | 1.362 | 0.000 | 0.000 | 0.3238 | 15/15 | 2 | 0 |
+| recfixed_obabel | 1.617 | 0.000 | 0.000 | 0.2857 | 15/15 | 3 | 0 |
+| recraw_obabel | 1.157 | 0.000 | 0.000 | 0.2895 | 15/15 | 2 | 0 |
 
 Interpretation:
-- Ligand uncharge changed 18/50 audit-panel ligands and the cocrystal ligand formal charge from -1 to 0; redocking improved to 1.141 A but panel AUC stayed weak at 0.3162.
-- Open Babel receptor_prep.pdb PDBQT redocked at 1.362 A and produced panel AUC 0.3238, so this receptor-prep/protonation variant does not rescue top ranking.
-- The next prep audit should compare remaining receptor PDBQT variants and ligand conformer/prep settings before any full PPARD rerun.
+- All receptor PDBQT variants tested so far redock the 2ZNP cocrystal ligand under 2 A.
+- Open Babel receptor variants from receptor_prep.pdb, receptor_fixed_clean.pdb, and raw receptor.pdb produce weak 50-ligand panel AUC values from 0.2857 to 0.3238.
+- Ligand uncharge improved redocking RMSD to 1.141 A but still left EF1/EF5 at 0.0 and only 1 active in the top 20.
+- Remaining high-yield branch is ligand conformer/prep handling, especially pregenerated conformers versus Kaggle-side SMILES prep.
