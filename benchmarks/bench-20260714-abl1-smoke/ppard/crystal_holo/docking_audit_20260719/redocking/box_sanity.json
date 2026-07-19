@@ -1,0 +1,38 @@
+{
+  "source": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\crystal_ligand.mol2",
+  "sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
+  "pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\cocrystal_2znp.pdbqt",
+  "prep_backend": "meeko",
+  "heavy_atoms": 33,
+  "smiles": "CCCCOc1ccc(C[C@H](CC)C(=O)[O-])cc1CNC(=O)c1ccc(C(F)(F)F)cc1F",
+  "centroid": [
+    15.381,
+    2.563,
+    38.046
+  ],
+  "extent": [
+    9.337,
+    10.566,
+    10.752
+  ],
+  "current_box_center": [
+    15.656,
+    2.308,
+    39.483
+  ],
+  "current_box_size": [
+    21.337,
+    22.566,
+    22.752
+  ],
+  "center_delta_from_ligand_centroid": [
+    0.275,
+    -0.255,
+    1.437
+  ],
+  "nominal_padding_each_axis": [
+    6.0,
+    6.0,
+    6.0
+  ]
+}

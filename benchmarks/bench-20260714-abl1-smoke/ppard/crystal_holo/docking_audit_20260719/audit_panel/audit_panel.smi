@@ -1,0 +1,50 @@
+CCC(Cc1ccc(OCc2ccccc2)c(CNC(=O)c2ccc(C(F)(F)F)cc2)c1)C(=O)O ppard_audit_000 380925 CHEMBL426371
+O=C(O)Cc1ccc(CNc2cccc(-c3c(Cc4ccccc4)cnc4c(Cl)cccc34)c2)cc1 ppard_audit_001 379341 CHEMBL225936
+Cc1ccccc1-c1onc(-c2cccc(CC(=O)O)c2)c1C(=O)NCCOc1ccc(Cl)cc1Cl ppard_audit_002 367774 CHEMBL218384
+Cc1cc(Oc2cccc(CNC(=O)c3ccc(C(F)(F)F)cc3Oc3ccccc3)c2)ccc1OC(C)(C)C(=O)O ppard_audit_003 400255 CHEMBL237710
+O=C(O)Cc1coc2cc(OCc3ccccc3COc3ccc(C(F)(F)F)cc3)ccc12 ppard_audit_004 397306 CHEMBL393766
+CCCc1c(OCCCn2ccc3cc(CC(=O)O)ccc32)ccc2c(C(F)(F)F)noc12 ppard_audit_005 347649 CHEMBL383728
+CCO[C@@H](Cc1ccc(OCCc2nc(-c3ccccc3)oc2C)c2ccccc12)C(=O)O ppard_audit_006 520891 CHEMBL484725
+CC[C@@](C)(Cc1ccc(OCCCOc2ccc3c(C(F)(F)F)cc(=O)oc3c2C)cc1)C(=O)O ppard_audit_007 342356 CHEMBL205777
+CCC#CCOc1cc(COCC2CC2)ccc1Sc1ccc(OCC(=O)O)c2c1CCCC2 ppard_audit_008 501058 CHEMBL496593
+CCCCOc1ccc(-c2cccc(C(=O)O)c2C)cc1CNC(=O)c1ccc(C(F)(F)F)cc1F ppard_audit_009 612392 CHEMBL1081354
+Cc1cc(OCc2nc(C)c(-c3ccc(Cl)cc3)s2)ccc1OCC(=O)O ppard_audit_010 610705 CHEMBL1081949
+O=C(O)Cc1ccc(-c2noc(-c3ccco3)c2C(=O)NCCOc2ccc(Cl)cc2Cl)c(Cl)c1 ppard_audit_011 355681 CHEMBL213524
+COc1ccc(-c2nc(COc3ccc(OCC(=O)O)c(C)c3)sc2-c2ccc(Cl)nc2)cc1 ppard_audit_012 611013 CHEMBL1081926
+COc1ccc(-c2nc(COc3ccc(OCC(=O)O)c(C)c3)oc2-c2ccc(-c3ccccc3)cc2)cc1 ppard_audit_013 611354 CHEMBL1079911
+CCCc1cc(Oc2ccccc2)ccc1OCCCOc1cccc(C2SC(=O)NC2=O)c1 ppard_audit_014 154812 CHEMBL94306
+O=C(N[C@H](Cc1cc2ccccc2c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21 ppard_audit_015 C44320267
+O=C(NC(=S)Nc1ccc2oc(-c3ccc4ccccc4c3)nc2c1)C(c1ccccc1)c1ccccc1 ppard_audit_016 C02052218
+O=C(N[C@@H](Cc1ccc2ccc3cccc4ccc1c2c34)C(=O)[O-])OCC1c2ccccc2-c2ccccc21 ppard_audit_017 C02386123
+O=C([O-])c1ccccc1/C=C1\Oc2cc(OC(c3ccc(F)cc3)c3ccc(F)cc3)ccc2C1=O ppard_audit_018 C27101274
+Cc1ccc(Cn2cc(/C=C3/C(=O)N(c4cccc(Br)c4)C(=O)N=C3[O-])c3ccccc32)cc1 ppard_audit_019 C59198440
+O=C([O-])c1cccc(/C=C2\Oc3cc(OC(c4ccc(F)cc4)c4ccc(F)cc4)ccc3C2=O)c1 ppard_audit_020 C27101776
+C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@@H]3c3cccc(Oc4ccccc4)c3)ccc2O1 ppard_audit_021 C09292957
+O=c1oc2ccccc2cc1-c1cccc(/N=C/c2cc(Cc3ccccc3)cc([N+](=O)[O-])c2[O-])c1 ppard_audit_022 C01947809
+O=C1/C(=C\c2cn(Cc3cccc(C(F)(F)F)c3)c3ccccc23)N=C([S-])N1C1CCCCC1 ppard_audit_023 C39557082
+O=[N+]([O-])c1cc(Cc2ccccc2)cc(/C=N/c2cccc(-c3nc4cc(Cl)ccc4o3)c2)c1[O-] ppard_audit_024 C01947815
+O=C1N=C([O-])/C(=C\c2cn(Cc3ccccc3F)c3ccccc23)C(=O)N1c1ccc(Br)cc1 ppard_audit_025 C01294990
+O=S(=O)(NC1CCCCC1)c1ccc2c(c1)[C@H]1C=CC[C@H]1[C@H](c1ccccc1OCc1ccccc1)N2 ppard_audit_026 C14476291
+CCc1ccc2oc(-c3cccc(/N=C/c4cc(Cc5ccccc5)cc(Br)c4[O-])c3)nc2c1 ppard_audit_027 C08448904
+C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@H]3c3cccc(Oc4ccccc4)c3)ccc2O1 ppard_audit_028 C09292959
+O=C1N=C([O-])N(c2cccc(C(F)(F)F)c2)C(=O)/C1=C\c1cn(Cc2ccccc2)c2ccccc12 ppard_audit_029 C09087453
+O=C(N[C@H](Cc1c2ccccc2c(Cl)c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21 ppard_audit_030 C44321324
+O=C(Nc1cc(Oc2ccc(F)cc2)cc(Oc2cccnc2)c1)C(c1ccccc1)c1ccccc1 ppard_audit_031 C06446085
+Cc1ccc2ccccc2c1C[C@H](NC(=O)OCC1c2ccccc2-c2ccccc21)C(=O)[O-] ppard_audit_032 C44321452
+C[C@@H](c1ccccc1)N1C(=O)/C(=C\c2cn(Cc3ccc(F)cc3)c3ccccc23)N=C1[S-] ppard_audit_033 C39556994
+CC[C@@H](C)c1ccc(N2C(=O)N=C([O-])/C(=C\c3cn(Cc4ccccc4F)c4ccccc34)C2=O)cc1 ppard_audit_034 C08741493
+CCCC[C@@]1(c2ccccc2)NC(=O)N(CC(=O)N[C@@H](c2ccc(C)cc2)c2cccs2)C1=O ppard_audit_035 C24108017
+CCc1ccccc1NC(=O)COC(=O)CSc1nc2ccccc2n1Cc1cccc(C)c1 ppard_audit_036 C33014119
+CC[C@@H](C)c1ccccc1O[C@@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1 ppard_audit_037 C09866329
+CC[C@H](C)c1ccccc1O[C@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1 ppard_audit_038 C09866352
+CC[C@H](C)c1ccccc1O[C@@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1 ppard_audit_039 C09866338
+C#CCOc1ccc2ccccc2c1/C=N/NC(=O)[C@H](CC(C)C)NC(=O)c1ccc(Cl)cc1 ppard_audit_040 C10000927
+CC1=C[C@@H](CNC(=O)Nc2ccc(Cl)cc2)[C@H](C(C)C)C[C@H]1CC(=O)N(C)Cc1cccnc1 ppard_audit_041 C30881830
+CC[C@H](c1nc2ccccc2c(=O)n1CCOC)N(CCC(C)C)C(=O)Nc1cccc(Cl)c1 ppard_audit_042 C35060071
+CCCCN(CC(=O)Nc1cc(C(C)(C)C)nn1-c1ccccc1)C(=O)[C@@H](Cl)c1ccccc1 ppard_audit_043 C35135724
+Cc1ccc(CCNc2c(C(=O)OC(C)C)cnc3c2cnn3C[C@H](Cl)c2ccccc2)cc1 ppard_audit_044 C13675520
+C[C@H](CNC(=O)CSc1nnc(-c2ccccc2)n1Cc1ccc2c(c1)OCO2)c1ccccc1 ppard_audit_045 C08747878
+CCC/C(=N\CCC1=c2cc(OCc3ccccc3)ccc2=[NH+][C@H]1C)C1=C([O-])CC(C)(C)CC1=O ppard_audit_046 C63514662
+CCOC(=O)C1=C(C)N(CC(=O)N[C@@H](C)CCc2ccccc2)C(=O)C[C@@H]1c1cccc(C)c1 ppard_audit_047 C16604060
+COc1ccc([C@H](C(=O)NC(C)(C)CC(C)(C)C)N(Cc2ccc(C)o2)C(=O)C=C(C)C)cc1 ppard_audit_048 C36599555
+COc1ccc(NC(=O)C[C@H]2C(=O)N(c3ccc(OC)cc3)C(=S)N2CCc2cccs2)cc1 ppard_audit_049 C12420952

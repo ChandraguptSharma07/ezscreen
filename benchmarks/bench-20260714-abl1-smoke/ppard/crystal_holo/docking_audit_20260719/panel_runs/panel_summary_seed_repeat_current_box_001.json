@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "updated_at": "2026-07-19T09:42:28.449402+00:00",
+  "ablation_id": "seed_repeat_current_box_001",
+  "ef1": 0.0,
+  "ef5": 0.0,
+  "auc_roc": 0.3181,
+  "active_survival": "15/15",
+  "top20_actives": 3,
+  "top20_decoys": 17,
+  "runtime_seconds": 391.511,
+  "top20_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\top20_seed_repeat_current_box_001.csv",
+  "pose_validity_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\pose_validity\\panel_pose_validity_seed_repeat_current_box_001.csv",
+  "pose_rows": 20,
+  "clash_like_rows_min_heavy_distance_lt_2a": 0,
+  "scores_labeled_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\panel_runs\\scores_labeled_seed_repeat_current_box_001.csv"
+}

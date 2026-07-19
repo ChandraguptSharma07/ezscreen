@@ -1,0 +1,34 @@
+{
+  "status": "ok",
+  "updated_at": "2026-07-19T09:23:35.480668+00:00",
+  "ablation_id": "box_padding_8a_crystal_centroid",
+  "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_box_padding_8a_crystal_centroid",
+  "scores_rows": 1,
+  "redocking_rmsd": 1.753,
+  "redocking_reliable": true,
+  "reference_ligand": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
+  "redocked_pose_sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_box_padding_8a_crystal_centroid\\poses.sdf",
+  "crystal_centroid": [
+    15.381,
+    2.563,
+    38.046
+  ],
+  "redocked_centroid": [
+    15.161,
+    3.262,
+    38.342
+  ],
+  "centroid_delta": [
+    -0.219,
+    0.699,
+    0.296
+  ],
+  "pose_validity": {
+    "min_heavy_atom_distance": 3.079,
+    "contacts_4a": 91,
+    "contacts_6a": 841,
+    "clashes_lt_2a": 0
+  },
+  "runtime_seconds": 358.793,
+  "notes": "Heavy-atom symmetry RMSD via RDKit CalcRMS, no alignment."
+}

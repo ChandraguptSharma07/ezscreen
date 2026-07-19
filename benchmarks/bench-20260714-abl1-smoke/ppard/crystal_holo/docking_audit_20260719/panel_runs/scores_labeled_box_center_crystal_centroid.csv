@@ -1,0 +1,51 @@
+ligand,score,receptor_variant,score_qc,name,smiles,LE,BEI,engine,label,audit_id,audit_reason
+audit_panel_lig_00015,-12.973,default,,C44320267,O=C(N[C@H](Cc1cc2ccccc2c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21,0.351,26.663,unidock,0,ppard_audit_015,hard_top_raw_decoy
+audit_panel_lig_00020,-12.943,default,,C27101776,O=C([O-])c1cccc(/C=C2\Oc3cc(OC(c4ccc(F)cc4)c4ccc(F)cc4)ccc3C2=O)c1,0.360,26.772,unidock,0,ppard_audit_020,hard_top_raw_decoy
+audit_panel_lig_00017,-12.922,default,,C02386123,O=C(N[C@@H](Cc1ccc2ccc3cccc4ccc1c2c34)C(=O)[O-])OCC1c2ccccc2-c2ccccc21,0.331,25.309,unidock,0,ppard_audit_017,hard_top_raw_decoy
+audit_panel_lig_00030,-12.902,default,,C44321324,O=C(N[C@H](Cc1c2ccccc2c(Cl)c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21,0.340,24.764,unidock,0,ppard_audit_030,hard_top_raw_decoy
+audit_panel_lig_00018,-12.753,default,,C27101274,O=C([O-])c1ccccc1/C=C1\Oc2cc(OC(c3ccc(F)cc3)c3ccc(F)cc3)ccc2C1=O,0.354,26.379,unidock,0,ppard_audit_018,hard_top_raw_decoy
+audit_panel_lig_00022,-12.53,default,,C01947809,O=c1oc2ccccc2cc1-c1cccc(/N=C/c2cc(Cc3ccccc3)cc([N+](=O)[O-])c2[O-])c1,0.348,26.352,unidock,0,ppard_audit_022,hard_top_raw_decoy
+audit_panel_lig_00023,-12.526,default,,C39557082,O=C1/C(=C\c2cn(Cc3cccc(C(F)(F)F)c3)c3ccccc23)N=C([S-])N1C1CCCCC1,0.368,25.958,unidock,0,ppard_audit_023,hard_top_raw_decoy
+audit_panel_lig_00019,-12.476,default,,C59198440,Cc1ccc(Cn2cc(/C=C3/C(=O)N(c4cccc(Br)c4)C(=O)N=C3[O-])c3ccccc32)cc1,0.367,24.302,unidock,0,ppard_audit_019,hard_top_raw_decoy
+audit_panel_lig_00025,-12.337,default,,C01294990,O=C1N=C([O-])/C(=C\c2cn(Cc3ccccc3F)c3ccccc23)C(=O)N1c1ccc(Br)cc1,0.363,23.847,unidock,0,ppard_audit_025,hard_top_raw_decoy
+audit_panel_lig_00027,-12.287,default,,C08448904,CCc1ccc2oc(-c3cccc(/N=C/c4cc(Cc5ccccc5)cc(Br)c4[O-])c3)nc2c1,0.361,24.073,unidock,0,ppard_audit_027,hard_top_raw_decoy
+audit_panel_lig_00033,-12.046,default,,C39556994,C[C@@H](c1ccccc1)N1C(=O)/C(=C\c2cn(Cc3ccc(F)cc3)c3ccccc23)N=C1[S-],0.365,26.501,unidock,0,ppard_audit_033,hard_top_raw_decoy
+audit_panel_lig_00021,-11.861,default,,C09292957,C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@@H]3c3cccc(Oc4ccccc4)c3)ccc2O1,0.304,22.961,unidock,0,ppard_audit_021,hard_top_raw_decoy
+audit_panel_lig_00034,-11.832,default,,C08741493,CC[C@@H](C)c1ccc(N2C(=O)N=C([O-])/C(=C\c3cn(Cc4ccccc4F)c4ccccc34)C2=O)cc1,0.320,23.925,unidock,0,ppard_audit_034,hard_top_raw_decoy
+audit_panel_lig_00024,-11.688,default,,C01947815,O=[N+]([O-])c1cc(Cc2ccccc2)cc(/C=N/c2cccc(-c3nc4cc(Cl)ccc4o3)c2)c1[O-],0.334,24.204,unidock,0,ppard_audit_024,hard_top_raw_decoy
+audit_panel_lig_00029,-11.55,default,,C09087453,O=C1N=C([O-])N(c2cccc(C(F)(F)F)c2)C(=O)/C1=C\c1cn(Cc2ccccc2)c2ccccc12,0.321,23.646,unidock,0,ppard_audit_029,hard_top_raw_decoy
+audit_panel_lig_00016,-11.486,default,,C02052218,O=C(NC(=S)Nc1ccc2oc(-c3ccc4ccccc4c3)nc2c1)C(c1ccccc1)c1ccccc1,0.302,22.363,unidock,0,ppard_audit_016,hard_top_raw_decoy
+audit_panel_lig_00028,-11.458,default,,C09292959,C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@H]3c3cccc(Oc4ccccc4)c3)ccc2O1,0.294,22.181,unidock,0,ppard_audit_028,hard_top_raw_decoy
+audit_panel_lig_00031,-11.374,default,,C06446085,O=C(Nc1cc(Oc2ccc(F)cc2)cc(Oc2cccnc2)c1)C(c1ccccc1)c1ccccc1,0.307,23.187,unidock,0,ppard_audit_031,hard_top_raw_decoy
+audit_panel_lig_00000,-11.187,default,,380925 CHEMBL426371,CCC(Cc1ccc(OCc2ccccc2)c(CNC(=O)c2ccc(C(F)(F)F)cc2)c1)C(=O)O,0.320,23.042,unidock,1,ppard_audit_000,active_best_raw
+audit_panel_lig_00026,-11.056,default,,C14476291,O=S(=O)(NC1CCCCC1)c1ccc2c(c1)[C@H]1C=CC[C@H]1[C@H](c1ccccc1OCc1ccccc1)N2,0.299,21.481,unidock,0,ppard_audit_026,hard_top_raw_decoy
+audit_panel_lig_00001,-11.053,default,,379341 CHEMBL225936,O=C(O)Cc1ccc(CNc2cccc(-c3c(Cc4ccccc4)cnc4c(Cl)cccc34)c2)cc1,0.307,22.420,unidock,1,ppard_audit_001,active_best_raw
+audit_panel_lig_00032,-11.03,default,,C44321452,Cc1ccc2ccccc2c1C[C@H](NC(=O)OCC1c2ccccc2-c2ccccc21)C(=O)[O-],0.324,24.483,unidock,0,ppard_audit_032,hard_top_raw_decoy
+audit_panel_lig_00003,-10.855,default,,400255 CHEMBL237710,Cc1cc(Oc2cccc(CNC(=O)c3ccc(C(F)(F)F)cc3Oc3ccccc3)c2)ccc1OC(C)(C)C(=O)O,0.258,18.729,unidock,1,ppard_audit_003,active_best_raw
+audit_panel_lig_00009,-10.814,default,,612392 CHEMBL1081354,CCCCOc1ccc(-c2cccc(C(=O)O)c2C)cc1CNC(=O)c1ccc(C(F)(F)F)cc1F,0.300,21.478,unidock,1,ppard_audit_009,active_best_cnn
+audit_panel_lig_00002,-10.696,default,,367774 CHEMBL218384,Cc1ccccc1-c1onc(-c2cccc(CC(=O)O)c2)c1C(=O)NCCOc1ccc(Cl)cc1Cl,0.297,20.358,unidock,1,ppard_audit_002,active_best_raw
+audit_panel_lig_00004,-10.524,default,,397306 CHEMBL393766,O=C(O)Cc1coc2cc(OCc3ccccc3COc3ccc(C(F)(F)F)cc3)ccc12,0.319,23.058,unidock,1,ppard_audit_004,active_best_raw
+audit_panel_lig_00044,-10.436,default,,C13675520,Cc1ccc(CCNc2c(C(=O)OC(C)C)cnc3c2cnn3C[C@H](Cl)c2ccccc2)cc1,0.307,21.878,unidock,0,ppard_audit_044,neutral_property_matched_decoy
+audit_panel_lig_00036,-10.226,default,,C33014119,CCc1ccccc1NC(=O)COC(=O)CSc1nc2ccccc2n1Cc1cccc(C)c1,0.301,21.592,unidock,0,ppard_audit_036,neutral_property_matched_decoy
+audit_panel_lig_00013,-9.996,default,,611354 CHEMBL1079911,COc1ccc(-c2nc(COc3ccc(OCC(=O)O)c(C)c3)oc2-c2ccc(-c3ccccc3)cc2)cc1,0.256,19.165,unidock,1,ppard_audit_013,active_hash_sample
+audit_panel_lig_00038,-9.761,default,,C09866352,CC[C@H](C)c1ccccc1O[C@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1,0.287,20.309,unidock,0,ppard_audit_038,neutral_property_matched_decoy
+audit_panel_lig_00008,-9.703,default,,501058 CHEMBL496593,CCC#CCOc1cc(COCC2CC2)ccc1Sc1ccc(OCC(=O)O)c2c1CCCC2,0.285,20.188,unidock,1,ppard_audit_008,active_best_cnn
+audit_panel_lig_00005,-9.699,default,,347649 CHEMBL383728,CCCc1c(OCCCn2ccc3cc(CC(=O)O)ccc32)ccc2c(C(F)(F)F)noc12,0.294,21.064,unidock,1,ppard_audit_005,active_best_cnn
+audit_panel_lig_00006,-9.676,default,,520891 CHEMBL484725,CCO[C@@H](Cc1ccc(OCCc2nc(-c3ccccc3)oc2C)c2ccccc12)C(=O)O,0.293,21.719,unidock,1,ppard_audit_006,active_best_cnn
+audit_panel_lig_00045,-9.645,default,,C08747878,C[C@H](CNC(=O)CSc1nnc(-c2ccccc2)n1Cc1ccc2c(c1)OCO2)c1ccccc1,0.276,19.821,unidock,0,ppard_audit_045,neutral_property_matched_decoy
+audit_panel_lig_00014,-9.612,default,,154812 CHEMBL94306,CCCc1cc(Oc2ccccc2)ccc1OCCCOc1cccc(C2SC(=O)NC2=O)c1,0.283,20.126,unidock,1,ppard_audit_014,active_hash_sample
+audit_panel_lig_00040,-9.576,default,,C10000927,C#CCOc1ccc2ccccc2c1/C=N/NC(=O)[C@H](CC(C)C)NC(=O)c1ccc(Cl)cc1,0.282,20.119,unidock,0,ppard_audit_040,neutral_property_matched_decoy
+audit_panel_lig_00035,-9.57,default,,C24108017,CCCC[C@@]1(c2ccccc2)NC(=O)N(CC(=O)N[C@@H](c2ccc(C)cc2)c2cccs2)C1=O,0.281,20.121,unidock,0,ppard_audit_035,neutral_property_matched_decoy
+audit_panel_lig_00041,-9.496,default,,C30881830,CC1=C[C@@H](CNC(=O)Nc2ccc(Cl)cc2)[C@H](C(C)C)C[C@H]1CC(=O)N(C)Cc1cccnc1,0.279,19.658,unidock,0,ppard_audit_041,neutral_property_matched_decoy
+audit_panel_lig_00046,-9.483,default,,C63514662,CCC/C(=N\CCC1=c2cc(OCc3ccccc3)ccc2=[NH+][C@H]1C)C1=C([O-])CC(C)(C)CC1=O,0.271,20.064,unidock,0,ppard_audit_046,neutral_property_matched_decoy
+audit_panel_lig_00037,-9.22,default,,C09866329,CC[C@@H](C)c1ccccc1O[C@@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1,0.271,19.183,unidock,0,ppard_audit_037,neutral_property_matched_decoy
+audit_panel_lig_00011,-9.01,default,,355681 CHEMBL213524,O=C(O)Cc1ccc(-c2noc(-c3ccco3)c2C(=O)NCCOc2ccc(Cl)cc2Cl)c(Cl)c1,0.257,16.817,unidock,1,ppard_audit_011,active_hash_sample
+audit_panel_lig_00039,-8.967,default,,C09866338,CC[C@H](C)c1ccccc1O[C@@H](C)C(=O)Nc1ccc(S(=O)(=O)N(CC)c2ccccc2)cc1,0.264,18.657,unidock,0,ppard_audit_039,neutral_property_matched_decoy
+audit_panel_lig_00007,-8.926,default,,342356 CHEMBL205777,CC[C@@](C)(Cc1ccc(OCCCOc2ccc3c(C(F)(F)F)cc(=O)oc3c2C)cc1)C(=O)O,0.255,18.124,unidock,1,ppard_audit_007,active_best_cnn
+audit_panel_lig_00043,-8.776,default,,C35135724,CCCCN(CC(=O)Nc1cc(C(C)(C)C)nn1-c1ccccc1)C(=O)[C@@H](Cl)c1ccccc1,0.258,18.244,unidock,0,ppard_audit_043,neutral_property_matched_decoy
+audit_panel_lig_00010,-8.703,default,,610705 CHEMBL1081949,Cc1cc(OCc2nc(C)c(-c3ccc(Cl)cc3)s2)ccc1OCC(=O)O,0.322,21.548,unidock,1,ppard_audit_010,active_hash_sample
+audit_panel_lig_00049,-8.63,default,,C12420952,COc1ccc(NC(=O)C[C@H]2C(=O)N(c3ccc(OC)cc3)C(=S)N2CCc2cccs2)cc1,0.254,17.412,unidock,0,ppard_audit_049,neutral_property_matched_decoy
+audit_panel_lig_00048,-8.506,default,,C36599555,COc1ccc([C@H](C(=O)NC(C)(C)CC(C)(C)C)N(Cc2ccc(C)o2)C(=O)C=C(C)C)cc1,0.250,18.150,unidock,0,ppard_audit_048,neutral_property_matched_decoy
+audit_panel_lig_00047,-8.42,default,,C16604060,CCOC(=O)C1=C(C)N(CC(=O)N[C@@H](C)CCc2ccccc2)C(=O)C[C@@H]1c1cccc(C)c1,0.248,18.202,unidock,0,ppard_audit_047,neutral_property_matched_decoy
+audit_panel_lig_00012,-8.402,default,,611013 CHEMBL1081926,COc1ccc(-c2nc(COc3ccc(OCC(=O)O)c(C)c3)sc2-c2ccc(Cl)nc2)cc1,0.247,16.906,unidock,1,ppard_audit_012,active_hash_sample
+audit_panel_lig_00042,-7.907,default,,C35060071,CC[C@H](c1nc2ccccc2c(=O)n1CCOC)N(CCC(C)C)C(=O)Nc1cccc(Cl)c1,0.233,16.302,unidock,0,ppard_audit_042,neutral_property_matched_decoy

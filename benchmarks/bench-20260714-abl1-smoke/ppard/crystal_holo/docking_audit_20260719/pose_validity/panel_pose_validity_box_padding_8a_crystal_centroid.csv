@@ -1,0 +1,21 @@
+rank,label,ligand,name,score,pose_min_heavy_atom_distance,contact_count_4a,contact_count_6a,clashes_lt_2a,smiles
+1,0,audit_panel_lig_00015,C44320267,-13.024,3.024,112,922,0,O=C(N[C@H](Cc1cc2ccccc2c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+2,0,audit_panel_lig_00020,C27101776,-12.937,3.083,105,875,0,O=C([O-])c1cccc(/C=C2\Oc3cc(OC(c4ccc(F)cc4)c4ccc(F)cc4)ccc3C2=O)c1
+3,0,audit_panel_lig_00030,C44321324,-12.868,2.985,123,921,0,O=C(N[C@H](Cc1c2ccccc2c(Cl)c2ccccc12)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+4,0,audit_panel_lig_00018,C27101274,-12.776,2.838,127,922,0,O=C([O-])c1ccccc1/C=C1\Oc2cc(OC(c3ccc(F)cc3)c3ccc(F)cc3)ccc2C1=O
+5,0,audit_panel_lig_00019,C59198440,-12.507,2.961,97,851,0,Cc1ccc(Cn2cc(/C=C3/C(=O)N(c4cccc(Br)c4)C(=O)N=C3[O-])c3ccccc32)cc1
+6,0,audit_panel_lig_00022,C01947809,-12.482,2.83,89,823,0,O=c1oc2ccccc2cc1-c1cccc(/N=C/c2cc(Cc3ccccc3)cc([N+](=O)[O-])c2[O-])c1
+7,0,audit_panel_lig_00023,C39557082,-12.425,3.022,85,843,0,O=C1/C(=C\c2cn(Cc3cccc(C(F)(F)F)c3)c3ccccc23)N=C([S-])N1C1CCCCC1
+8,0,audit_panel_lig_00025,C01294990,-12.383,2.757,91,829,0,O=C1N=C([O-])/C(=C\c2cn(Cc3ccccc3F)c3ccccc23)C(=O)N1c1ccc(Br)cc1
+9,0,audit_panel_lig_00017,C02386123,-12.194,2.811,109,870,0,O=C(N[C@@H](Cc1ccc2ccc3cccc4ccc1c2c34)C(=O)[O-])OCC1c2ccccc2-c2ccccc21
+10,0,audit_panel_lig_00027,C08448904,-12.176,2.928,110,858,0,CCc1ccc2oc(-c3cccc(/N=C/c4cc(Cc5ccccc5)cc(Br)c4[O-])c3)nc2c1
+11,0,audit_panel_lig_00033,C39556994,-12.011,3.053,90,788,0,C[C@@H](c1ccccc1)N1C(=O)/C(=C\c2cn(Cc3ccc(F)cc3)c3ccccc23)N=C1[S-]
+12,0,audit_panel_lig_00021,C09292957,-11.971,3.032,124,925,0,C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@@H]3c3cccc(Oc4ccccc4)c3)ccc2O1
+13,0,audit_panel_lig_00024,C01947815,-11.909,2.849,86,799,0,O=[N+]([O-])c1cc(Cc2ccccc2)cc(/C=N/c2cccc(-c3nc4cc(Cl)ccc4o3)c2)c1[O-]
+14,1,audit_panel_lig_00000,380925 CHEMBL426371,-11.807,2.817,108,927,0,CCC(Cc1ccc(OCc2ccccc2)c(CNC(=O)c2ccc(C(F)(F)F)cc2)c1)C(=O)O
+15,0,audit_panel_lig_00034,C08741493,-11.773,2.931,103,891,0,CC[C@@H](C)c1ccc(N2C(=O)N=C([O-])/C(=C\c3cn(Cc4ccccc4F)c4ccccc34)C2=O)cc1
+16,0,audit_panel_lig_00028,C09292959,-11.655,3.087,112,923,0,C[C@H]1Cc2cc(C(=O)C3=C([O-])C(=O)N(Cc4ccccc4)[C@H]3c3cccc(Oc4ccccc4)c3)ccc2O1
+17,0,audit_panel_lig_00031,C06446085,-11.517,3.048,98,860,0,O=C(Nc1cc(Oc2ccc(F)cc2)cc(Oc2cccnc2)c1)C(c1ccccc1)c1ccccc1
+18,0,audit_panel_lig_00029,C09087453,-11.339,2.948,104,831,0,O=C1N=C([O-])N(c2cccc(C(F)(F)F)c2)C(=O)/C1=C\c1cn(Cc2ccccc2)c2ccccc12
+19,0,audit_panel_lig_00032,C44321452,-11.212,3.354,69,727,0,Cc1ccc2ccccc2c1C[C@H](NC(=O)OCC1c2ccccc2-c2ccccc21)C(=O)[O-]
+20,0,audit_panel_lig_00016,C02052218,-11.189,2.783,87,763,0,O=C(NC(=S)Nc1ccc2oc(-c3ccc4ccccc4c3)nc2c1)C(c1ccccc1)c1ccccc1

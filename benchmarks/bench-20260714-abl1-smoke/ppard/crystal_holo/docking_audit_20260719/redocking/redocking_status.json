@@ -1,0 +1,17 @@
+{
+    "status":  "complete",
+    "updated_at":  "2026-07-19T08:14:33.455281+00:00",
+    "reason":  "UniDock redocking completed on Kaggle after user explicitly allowed Kaggle use.",
+    "prepared_ligand_pdbqt":  "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\cocrystal_2znp.pdbqt",
+    "current_receptor_pdbqt":  "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_fixed.pdbqt",
+    "current_box_center":  [
+                               15.656,
+                               2.308,
+                               39.483
+                           ],
+    "current_box_size":  [
+                             21.337,
+                             22.566,
+                             22.752
+                         ]
+}

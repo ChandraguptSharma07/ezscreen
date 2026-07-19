@@ -1,0 +1,9 @@
+ablation_id,status,redocking_rmsd,redocking_reliable,ef1,ef5,auc_roc,active_survival,top20_actives,top20_decoys,pose_clash_like_top20,runtime_seconds,notes
+prior_full_screen_current_box_balance,prior_full_screen_metrics_only,,,0.420,1.001,0.7011,240/240,0,20,,,Seed row from completed PPARD all-pose rescoring; redocking still pending.
+current_box_balance,ok,1.521,True,0.0,0.0,0.3314,15/15,3,17,0,419.881,Redocking RMSD plus 50-ligand panel baseline.
+search_fast_current_box,ok,1.535,True,0.0,0.0,0.2686,15/15,2,18,0,353.768,Redocking RMSD plus 50-ligand panel baseline.
+search_detail_current_box,ok,1.615,True,0.0,0.0,0.2762,15/15,1,19,0,358.09,Redocking RMSD plus 50-ligand panel baseline.
+box_center_crystal_centroid,ok,1.581,True,0.0,0.0,0.3219,15/15,1,19,0,418.356,Redocking RMSD plus 50-ligand panel baseline.
+box_padding_4a_crystal_centroid,ok,1.78,True,0.0,0.0,0.299,15/15,4,16,0,417.586,Redocking RMSD plus 50-ligand panel baseline.
+box_padding_8a_crystal_centroid,ok,1.753,True,0.0,0.0,0.2724,15/15,1,19,0,357.822,Redocking RMSD plus 50-ligand panel baseline.
+seed_repeat_current_box_001,ok,1.298,True,0.0,0.0,0.3181,15/15,3,17,0,391.511,Redocking RMSD plus 50-ligand panel baseline.
