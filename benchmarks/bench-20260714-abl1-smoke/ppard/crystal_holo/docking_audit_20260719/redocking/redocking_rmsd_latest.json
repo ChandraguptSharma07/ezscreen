@@ -1,34 +1,34 @@
 {
   "status": "ok",
-  "updated_at": "2026-07-19T09:35:54.140043+00:00",
-  "ablation_id": "seed_repeat_current_box_001",
-  "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_seed_repeat_current_box_001",
+  "updated_at": "2026-07-19T15:15:31.971944+00:00",
+  "ablation_id": "recprep_obabel",
+  "output_dir": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_recprep_obabel",
   "scores_rows": 1,
-  "redocking_rmsd": 1.298,
+  "redocking_rmsd": 1.362,
   "redocking_reliable": true,
   "reference_ligand": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\crystal_ligand.sdf",
-  "redocked_pose_sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_seed_repeat_current_box_001\\poses.sdf",
+  "redocked_pose_sdf": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\redocking\\output_recprep_obabel\\poses.sdf",
   "crystal_centroid": [
     15.381,
     2.563,
     38.046
   ],
   "redocked_centroid": [
-    15.292,
-    3.383,
-    38.246
+    15.22,
+    3.321,
+    38.495
   ],
   "centroid_delta": [
-    -0.089,
-    0.82,
-    0.2
+    -0.161,
+    0.759,
+    0.45
   ],
   "pose_validity": {
-    "min_heavy_atom_distance": 3.15,
-    "contacts_4a": 86,
-    "contacts_6a": 834,
+    "min_heavy_atom_distance": 3.123,
+    "contacts_4a": 100,
+    "contacts_6a": 816,
     "clashes_lt_2a": 0
   },
-  "runtime_seconds": 354.674,
+  "runtime_seconds": 352.838,
   "notes": "Heavy-atom symmetry RMSD via RDKit CalcRMS, no alignment."
 }

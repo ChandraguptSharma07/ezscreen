@@ -1,0 +1,51 @@
+{
+  "updated_at": "2026-07-19T14:55:53.942081+00:00",
+  "purpose": "PPARD prep/protonation/charge audit variants; same box/search settings as current baseline.",
+  "ligand_variants": [
+    {
+      "variant_id": "ligand_uncharge",
+      "kind": "ligand_charge_protonation",
+      "panel_csv": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_uncharge.csv",
+      "panel_smi": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\audit_panel_uncharge.smi",
+      "input_rows": 50,
+      "changed_rows": 18,
+      "failed_rows": 0
+    },
+    {
+      "variant_id": "redock_ligand_uncharge",
+      "kind": "ligand_charge_protonation",
+      "redock_ligand_pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\ligands\\cocrystal_2znp_uncharge.pdbqt",
+      "original_formal_charge": -1,
+      "variant_formal_charge": 0
+    }
+  ],
+  "receptor_variants": [
+    {
+      "variant_id": "receptor_fixed_clean_obabel",
+      "kind": "receptor_prep",
+      "status": "ok",
+      "source": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_fixed_clean.pdb",
+      "pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\receptors\\receptor_fixed_clean_obabel.pdbqt",
+      "returncode": 0,
+      "stderr_tail": "1 molecule converted\n"
+    },
+    {
+      "variant_id": "receptor_prep_obabel",
+      "kind": "receptor_prep",
+      "status": "ok",
+      "source": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor_prep.pdb",
+      "pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\receptors\\receptor_prep_obabel.pdbqt",
+      "returncode": 0,
+      "stderr_tail": "1 molecule converted\n"
+    },
+    {
+      "variant_id": "receptor_raw_obabel",
+      "kind": "receptor_prep",
+      "status": "ok",
+      "source": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\inputs\\receptor.pdb",
+      "pdbqt": "C:\\Users\\Chandragupt\\projects\\SwiftScreen\\benchmarks\\bench-20260714-abl1-smoke\\ppard\\crystal_holo\\docking_audit_20260719\\prep_variants\\receptors\\receptor_raw_obabel.pdbqt",
+      "returncode": 0,
+      "stderr_tail": "symbol of an atom.\n  but OpenBabel found '  ' (atom 2577)\n==============================\n*** Open Babel Warning  in OpenBabel::parseAtomRecord\n  WARNING: Problems reading a PDB file\n  Problems reading a HETATM or ATOM record.\n  According to the PDB specification,\n  columns 77-78 should contain the element symbol of an atom.\n  but OpenBabel found '  ' (atom 2578)\n==============================\n*** Open Babel Warning  in OpenBabel::parseAtomRecord\n  WARNING: Problems reading a PDB file\n  Problems reading a HETATM or ATOM record.\n  According to the PDB specification,\n  columns 77-78 should contain the element symbol of an atom.\n  but OpenBabel found '  ' (atom 2579)\n==============================\n*** Open Babel Warning  in OpenBabel::parseAtomRecord\n  WARNING: Problems reading a PDB file\n  Problems reading a HETATM or ATOM record.\n  According to the PDB specification,\n  columns 77-78 should contain the element symbol of an atom.\n  but OpenBabel found '  ' (atom 2580)\n1 molecule converted\n"
+    }
+  ]
+}

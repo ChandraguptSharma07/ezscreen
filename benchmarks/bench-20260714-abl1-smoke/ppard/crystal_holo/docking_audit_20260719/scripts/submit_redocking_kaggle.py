@@ -18,6 +18,8 @@ if str(AUDIT) not in sys.path:
 
 BOX_CENTER = [15.656, 2.308, 39.483]
 BOX_SIZE = [21.337, 22.566, 22.752]
+RECEPTOR_PDBQT = AUDIT / "inputs" / "receptor_fixed.pdbqt"
+REDOCK_LIGAND_PDBQT = AUDIT / "redocking" / "cocrystal_2znp.pdbqt"
 
 
 def _load_primary_kaggle() -> tuple[str, Path]:
@@ -63,8 +65,8 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
     started = time.time()
     result = run_screening_job(
         run_id=run_id,
-        receptor_pdbqt=AUDIT / "inputs" / "receptor_fixed.pdbqt",
-        shard_paths=[AUDIT / "redocking" / "cocrystal_2znp.pdbqt"],
+        receptor_pdbqt=RECEPTOR_PDBQT,
+        shard_paths=[REDOCK_LIGAND_PDBQT],
         notebook_path=notebook,
         username=username,
         work_dir=work,
@@ -101,6 +103,8 @@ def main() -> None:
     parser.add_argument("--ablation-id", default="current_box_balance")
     parser.add_argument("--search-mode", default="balance", choices=["fast", "balance", "detail"])
     parser.add_argument("--accelerator", default="nvidiaTeslaT4")
+    parser.add_argument("--receptor-pdbqt", type=Path, default=RECEPTOR_PDBQT)
+    parser.add_argument("--redock-ligand-pdbqt", type=Path, default=REDOCK_LIGAND_PDBQT)
     args = parser.parse_args()
     print(json.dumps(submit(args.ablation_id, args.search_mode, args.accelerator), indent=2))
 

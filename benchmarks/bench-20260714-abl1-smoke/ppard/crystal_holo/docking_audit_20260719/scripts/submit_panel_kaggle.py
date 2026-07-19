@@ -20,6 +20,10 @@ if str(REPO) not in sys.path:
 
 BOX_CENTER = [15.656, 2.308, 39.483]
 BOX_SIZE = [21.337, 22.566, 22.752]
+RECEPTOR_PDBQT = AUDIT / "inputs" / "receptor_fixed.pdbqt"
+PANEL_SMI = AUDIT / "audit_panel" / "audit_panel.smi"
+PANEL_LABEL_CSV = AUDIT / "audit_panel" / "audit_panel.csv"
+POSE_RECEPTOR_PDB = AUDIT / "inputs" / "receptor_prep.pdb"
 
 
 def _now() -> str:
@@ -59,7 +63,7 @@ def _load_panel_labels() -> tuple[dict[str, int], dict[str, dict[str, str]], int
     labels: dict[str, int] = {}
     meta: dict[str, dict[str, str]] = {}
     active_total = 0
-    with (AUDIT / "audit_panel" / "audit_panel.csv").open(newline="", encoding="utf-8") as handle:
+    with PANEL_LABEL_CSV.open(newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             c = _canonical(row.get("smiles", ""))
             if not c:
@@ -129,7 +133,7 @@ def _pose_validity(output_dir: Path, rows: list[dict[str, str]], ablation_id: st
     from rdkit import Chem
 
     poses = [m for m in Chem.SDMolSupplier(str(output_dir / "poses.sdf"), removeHs=False) if m is not None]
-    rec = _receptor_coords(AUDIT / "inputs" / "receptor_prep.pdb")
+    rec = _receptor_coords(POSE_RECEPTOR_PDB)
     by_name = {m.GetProp("_Name"): m for m in poses if m.HasProp("_Name")}
     out_path = AUDIT / "pose_validity" / f"panel_pose_validity_{ablation_id}.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -272,7 +276,7 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
     notebook.write_text(
         render_vina_notebook(
             run_id=run_id,
-            shard_filenames=["audit_panel.smi"],
+            shard_filenames=[PANEL_SMI.name],
             notebook_index=0,
             total_notebooks=1,
             box_center=BOX_CENTER,
@@ -291,8 +295,8 @@ def submit(ablation_id: str, search_mode: str, accelerator: str) -> dict[str, ob
     started = time.time()
     result = run_screening_job(
         run_id=run_id,
-        receptor_pdbqt=AUDIT / "inputs" / "receptor_fixed.pdbqt",
-        shard_paths=[AUDIT / "audit_panel" / "audit_panel.smi"],
+        receptor_pdbqt=RECEPTOR_PDBQT,
+        shard_paths=[PANEL_SMI],
         notebook_path=notebook,
         username=username,
         work_dir=work,
@@ -327,6 +331,10 @@ def main() -> None:
     parser.add_argument("--ablation-id", default="current_box_balance")
     parser.add_argument("--search-mode", default="balance", choices=["fast", "balance", "detail"])
     parser.add_argument("--accelerator", default="nvidiaTeslaT4")
+    parser.add_argument("--receptor-pdbqt", type=Path, default=RECEPTOR_PDBQT)
+    parser.add_argument("--panel-smi", type=Path, default=PANEL_SMI)
+    parser.add_argument("--panel-label-csv", type=Path, default=PANEL_LABEL_CSV)
+    parser.add_argument("--pose-receptor-pdb", type=Path, default=POSE_RECEPTOR_PDB)
     args = parser.parse_args()
     print(json.dumps(submit(args.ablation_id, args.search_mode, args.accelerator), indent=2))
 

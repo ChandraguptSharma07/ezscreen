@@ -28,6 +28,11 @@ def main() -> None:
     parser.add_argument('--box-center', type=_vec, default=[15.656, 2.308, 39.483])
     parser.add_argument('--box-size', type=_vec, default=[21.337, 22.566, 22.752])
     parser.add_argument('--accelerator', default='nvidiaTeslaT4')
+    parser.add_argument('--receptor-pdbqt', type=Path, default=AUDIT / 'inputs' / 'receptor_fixed.pdbqt')
+    parser.add_argument('--redock-ligand-pdbqt', type=Path, default=AUDIT / 'redocking' / 'cocrystal_2znp.pdbqt')
+    parser.add_argument('--panel-smi', type=Path, default=AUDIT / 'audit_panel' / 'audit_panel.smi')
+    parser.add_argument('--panel-label-csv', type=Path, default=AUDIT / 'audit_panel' / 'audit_panel.csv')
+    parser.add_argument('--pose-receptor-pdb', type=Path, default=AUDIT / 'inputs' / 'receptor_prep.pdb')
     args = parser.parse_args()
 
     from scripts import submit_panel_kaggle, submit_redocking_kaggle
@@ -44,6 +49,11 @@ def main() -> None:
         'search_mode': args.search_mode,
         'box_center': args.box_center,
         'box_size': args.box_size,
+        'receptor_pdbqt': str(args.receptor_pdbqt),
+        'redock_ligand_pdbqt': str(args.redock_ligand_pdbqt),
+        'panel_smi': str(args.panel_smi),
+        'panel_label_csv': str(args.panel_label_csv),
+        'pose_receptor_pdb': str(args.pose_receptor_pdb),
         'redock': redock,
         'panel': panel,
     }
