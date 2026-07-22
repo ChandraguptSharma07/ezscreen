@@ -49,6 +49,31 @@ class ResultsScreen(Screen):
         self._collapsed: bool = False     # showing one row per source molecule?
         self._sorted_by_cnn: bool = False
 
+    def _benchmark_report_path(self) -> Path:
+        return self._output / "benchmark_report.html"
+
+    @staticmethod
+    def _format_benchmark_summary(metrics: dict) -> str:
+        return "\n".join([
+            "[bold #3fb950]Benchmark complete[/bold #3fb950]",
+            "",
+            f"[#6e7681]EF 1%:[/#6e7681]  [bold #79c0ff]{float(metrics["ef1"]):.2f}x[/bold #79c0ff]",
+            f"[#6e7681]EF 5%:[/#6e7681]  [bold #79c0ff]{float(metrics["ef5"]):.2f}x[/bold #79c0ff]",
+            f"[#6e7681]AUC-ROC:[/#6e7681] [bold #79c0ff]{float(metrics["auc_roc"]):.3f}[/bold #79c0ff]",
+            f"[#6e7681]Actives matched:[/#6e7681] {metrics["n_actives"]} / {metrics["total_screened"]}",
+        ])
+
+    @staticmethod
+    def _generate_benchmark_artifacts(actives_path: Path, scores_csv: Path, output_dir: Path) -> dict:
+        from ezscreen.commands.benchmark import generate_benchmark_artifacts
+
+        return generate_benchmark_artifacts(
+            actives_path=actives_path,
+            scores_csv=scores_csv,
+            report_path=output_dir / "benchmark_report.html",
+            context_dir=output_dir,
+        )
+
     @staticmethod
     def _resolve_output_dir(run_dir: Path) -> Path:
         return resolve_output_dir(run_dir)
@@ -842,26 +867,17 @@ class ResultsScreen(Screen):
             self.app.notify("No docking results found for this run.", severity="error", timeout=5)
             return
 
+        self.query_one("#btn-validate").disabled = True
         self.query_one("#benchmark-result", Static).update(
             "[#e3b341]Running benchmark...[/#e3b341]"
         )
 
         def _worker() -> None:
-            from ezscreen.benchmark.runner import run_benchmark
-            from ezscreen.results.report_html import write_benchmark_report
-
             try:
-                result = run_benchmark(actives_path, scores_csv)
-                report_path = self._output / "benchmark_report.html"
-                write_benchmark_report(result, report_path)
-                self.call_from_thread(self._show_benchmark_result, result, report_path)
+                artifact_result = self._generate_benchmark_artifacts(actives_path, scores_csv, self._output)
+                self.call_from_thread(self._show_benchmark_result, artifact_result["result"], artifact_result["report_path"])
             except Exception as exc:
-                self.call_from_thread(
-                    self.app.notify,
-                    f"Benchmark failed: {exc}",
-                    severity="error",
-                    timeout=8,
-                )
+                self.call_from_thread(self._on_benchmark_error, str(exc))
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()

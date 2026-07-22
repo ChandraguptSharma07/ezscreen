@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import math
 from pathlib import Path
 from typing import Any
 
@@ -487,6 +488,7 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
     all_rows: list[dict] = []
     fieldnames: list[str] = []
     index = _load_index(shard_dirs)
+    failed_docking = _load_failed_docking(shard_dirs)
 
     for d in shard_dirs:
         sf = d / "scores.csv"
@@ -525,6 +527,43 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
 
     higher_is_better = _score_is_higher_better(result_engine)
 
+    # Preserve finite above-ceiling docking results as scored QC rows. They are
+    # weak/non-binding and rank last naturally. Below-floor results are favorable
+    # GPU underflow artifacts and usually have no retained pose, so keep them in
+    # unscored_reasons.csv instead of turning them into headline top hits.
+    if score_col and failed_docking:
+        recovered_fields = ["name", "smiles", "score_qc", "raw_score"]
+        if any(row.get("receptor_variant") for row in failed_docking):
+            recovered_fields.append("receptor_variant")
+        if result_engine and "engine" not in fieldnames:
+            fieldnames.append("engine")
+        _append_missing_fields(fieldnames, recovered_fields)
+        for row in failed_docking:
+            reason = str(row.get("reason", "")).strip()
+            if reason != "score_ceiling":
+                continue
+            raw = str(row.get("raw_score", "")).strip()
+            try:
+                score = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(score):
+                continue
+            lig_id = row.get("ligand", "")
+            info = index.get(lig_id, {})
+            recovered = {
+                "ligand": lig_id,
+                score_col: raw,
+                "name": info.get("name", row.get("name", "")),
+                "smiles": info.get("smiles", row.get("smiles", "")),
+                "score_qc": reason,
+                "raw_score": raw,
+                "engine": result_engine,
+            }
+            if row.get("receptor_variant"):
+                recovered["receptor_variant"] = row.get("receptor_variant", "")
+            all_rows.append(recovered)
+
     def _score(row: dict) -> float:
         try:
             return float(row.get(score_col, 0)) if score_col else 0.0
@@ -542,20 +581,31 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
 
     score_filtered: list[dict] = []
     if _enable_floor and result_engine != "diffdock":
-        # Vina-family scores are always negative for real binding events.
-        # Scores below the floor are GPU underflow artifacts; scores at or above
-        # the ceiling (≥ 0) are GPU overflow artifacts (e.g. 3.776e+06 kcal/mol).
+        # Vina-family scores below the floor are GPU underflow artifacts. Keep
+        # finite evidence for benchmark survival, but clamp to the floor and tag
+        # it so artifacts do not outrank plausible binders at impossible scores.
         valid: list[dict] = []
         for r in all_rows:
             s = _score(r)
+            existing_qc = str(r.get("score_qc", "")).strip()
+            qc_parts = [qc for qc in existing_qc.split(";") if qc]
             if s < _score_floor:
-                r["_reason"] = "score_floor"
-                score_filtered.append(r)
+                if "score_floor" not in qc_parts:
+                    qc_parts.append("score_floor")
+                r["score_qc"] = ";".join(qc_parts)
+                r["raw_score"] = str(r.get("raw_score") or r.get(score_col, ""))
+                r[score_col] = f"{_score_floor:g}"
+                if "score_qc" not in fieldnames:
+                    fieldnames.append("score_qc")
+                if "raw_score" not in fieldnames:
+                    fieldnames.append("raw_score")
             elif s >= _score_ceil:
-                r["_reason"] = "score_ceiling"
-                score_filtered.append(r)
-            else:
-                valid.append(r)
+                if "score_ceiling" not in qc_parts:
+                    qc_parts.append("score_ceiling")
+                r["score_qc"] = ";".join(qc_parts)
+                if "score_qc" not in fieldnames:
+                    fieldnames.append("score_qc")
+            valid.append(r)
         all_rows = valid
     valid_scored_ids = {row.get(id_col, "") for row in all_rows} if id_col else set()
 

@@ -40,6 +40,7 @@ _CSS = """
   .struct-card svg, .struct-card img { width: 160px; height: 120px; }
   .rank { font-weight: bold; color: #1a3a5c; font-size: 1.1em; }
   .score { color: #2c5f8a; }
+  .warn { background: #fff3cd; border: 1px solid #eed37f; border-radius: 6px; padding: 10px 12px; }
 """
 
 # ---------------------------------------------------------------------------
@@ -70,6 +71,14 @@ _BENCHMARK_TEMPLATE = """\
   EF = enrichment factor (how many times more actives appear in the top X% vs random).
   AUC-ROC = area under the receiver operating characteristic curve (0.5 = random, 1.0 = perfect).
 </p>
+
+<h2>Label Diagnostics</h2>
+<table>
+  <tr><th>Matched by ID</th><th>Matched by SMILES only</th><th>Matched by both</th><th>Unmatched active entries</th><th>First active rank</th></tr>
+  <tr><td>{matched_by_identifier}</td><td>{matched_by_smiles_only}</td><td>{matched_by_both}</td><td>{unmatched_active_entries}</td><td>{first_active_rank}</td></tr>
+</table>
+
+{ranking_diagnostics_html}
 
 <h2>ROC Curve</h2>
 <img src="data:image/png;base64,{roc_b64}" alt="ROC curve">
@@ -111,7 +120,133 @@ def _roc_plot_b64(result: BenchmarkResult) -> str:
     return base64.b64encode(buf.getvalue()).decode()
 
 
+
+def _bench_escape(value: object, default: str = "") -> str:
+    if value in (None, ""):
+        return default
+    return html.escape(str(value), quote=True)
+
+
+def _benchmark_ranking_diagnostics_html(diag: dict) -> str:
+    if not diag:
+        return ""
+
+    flags = diag.get("flags") if isinstance(diag.get("flags"), list) else []
+    flag_html = ""
+    if flags:
+        flag_html = "<p class=\"warn\"><b>Ranking flags:</b> " + ", ".join(_bench_escape(flag) for flag in flags) + "</p>"
+
+    gate = diag.get("credibility_gate") if isinstance(diag.get("credibility_gate"), dict) else {}
+    gate_html = ""
+    if gate:
+        gate_rows = []
+        gates = gate.get("gates") if isinstance(gate.get("gates"), dict) else {}
+        for name, payload in gates.items():
+            if not isinstance(payload, dict):
+                continue
+            gate_rows.append(
+                "<tr>"
+                f"<td>{_bench_escape(name)}</td>"
+                f"<td>{_bench_escape(payload.get('status'))}</td>"
+                f"<td>{_bench_escape(payload.get('message'))}</td>"
+                "</tr>"
+            )
+        if gate_rows:
+            gate_html = (
+                f"<h3>Credibility Gate: {_bench_escape(gate.get('status'))}</h3>"
+                "<table><tr><th>Gate</th><th>Status</th><th>Reason</th></tr>"
+                + "\n".join(gate_rows)
+                + "</table>"
+            )
+
+    windows = diag.get("top_windows") if isinstance(diag.get("top_windows"), dict) else {}
+    window_rows = []
+    for label, payload in windows.items():
+        if not isinstance(payload, dict):
+            continue
+        med = payload.get("descriptor_medians") if isinstance(payload.get("descriptor_medians"), dict) else {}
+        window_rows.append(
+            "<tr>"
+            f"<td>{_bench_escape(label)}</td>"
+            f"<td>{_bench_escape(payload.get('active_count'))}</td>"
+            f"<td>{_bench_escape(payload.get('decoy_count'))}</td>"
+            f"<td>{_bench_escape(payload.get('charged_fraction'))}</td>"
+            f"<td>{_bench_escape(med.get('abs_formal_charge'))}</td>"
+            f"<td>{_bench_escape(med.get('heavy_atoms'))}</td>"
+            f"<td>{_bench_escape(med.get('molecular_weight'))}</td>"
+            "</tr>"
+        )
+    window_table = ""
+    if window_rows:
+        window_table = (
+            "<h3>Top-Window Bias</h3>"
+            "<table><tr><th>Window</th><th>Actives</th><th>Decoys</th><th>Charged fraction</th>"
+            "<th>Median abs charge</th><th>Median heavy atoms</th><th>Median MW</th></tr>"
+            + "\n".join(window_rows)
+            + "</table>"
+        )
+
+    alternatives = diag.get("alternative_rankings") if isinstance(diag.get("alternative_rankings"), dict) else {}
+    alt_rows = []
+    for name, payload in alternatives.items():
+        if not isinstance(payload, dict):
+            continue
+        alt_rows.append(
+            "<tr>"
+            f"<td>{_bench_escape(name)}</td>"
+            f"<td>{_bench_escape(payload.get('formula'))}</td>"
+            f"<td>{_bench_escape(payload.get('ef1'))}</td>"
+            f"<td>{_bench_escape(payload.get('ef5'))}</td>"
+            f"<td>{_bench_escape(payload.get('auc_roc'))}</td>"
+            f"<td>{_bench_escape(payload.get('first_active_rank'))}</td>"
+            f"<td>{_bench_escape(payload.get('top_1_percent_actives'))}</td>"
+            f"<td>{_bench_escape(payload.get('top_5_percent_actives'))}</td>"
+            "</tr>"
+        )
+    alt_table = ""
+    if alt_rows:
+        alt_table = (
+            "<h3>Exploratory Alternative Rankings</h3>"
+            "<p class=\"note\">These are diagnostics only; official EF/AUC still use the raw score column.</p>"
+            "<table><tr><th>Name</th><th>Formula</th><th>EF1</th><th>EF5</th><th>AUC</th>"
+            "<th>First active rank</th><th>Top 1% actives</th><th>Top 5% actives</th></tr>"
+            + "\n".join(alt_rows)
+            + "</table>"
+        )
+
+    top_decoys = diag.get("top_decoy_examples") if isinstance(diag.get("top_decoy_examples"), list) else []
+    decoy_rows = []
+    for row in top_decoys[:10]:
+        if not isinstance(row, dict):
+            continue
+        decoy_rows.append(
+            "<tr>"
+            f"<td>{_bench_escape(row.get('rank'))}</td>"
+            f"<td>{_bench_escape(row.get('name') or row.get('ligand'))}</td>"
+            f"<td>{_bench_escape(row.get('score'))}</td>"
+            f"<td>{_bench_escape(row.get('formal_charge'))}</td>"
+            f"<td>{_bench_escape(row.get('abs_formal_charge'))}</td>"
+            f"<td>{_bench_escape(row.get('heavy_atoms'))}</td>"
+            f"<td>{_bench_escape(row.get('molecular_weight'))}</td>"
+            f"<td>{_bench_escape(row.get('smiles'))}</td>"
+            "</tr>"
+        )
+    decoy_table = ""
+    if decoy_rows:
+        decoy_table = (
+            "<h3>Top Decoy Examples</h3>"
+            "<table><tr><th>Rank</th><th>Compound</th><th>Score</th><th>Formal charge</th>"
+            "<th>Abs charge</th><th>Heavy atoms</th><th>MW</th><th>SMILES</th></tr>"
+            + "\n".join(decoy_rows)
+            + "</table>"
+        )
+
+    note = _bench_escape(diag.get("official_ranking_note", ""))
+    note_html = f"<p class=\"note\">{note}</p>" if note else ""
+    return f"<h2>Ranking Diagnostics</h2>{note_html}{flag_html}{gate_html}{window_table}{alt_table}{decoy_table}"
+
 def write_benchmark_report(result: BenchmarkResult, output_path: Path) -> Path:
+    diag = result.label_diagnostics or {}
     html = _BENCHMARK_TEMPLATE.format(
         css=_CSS,
         ef1=result.ef1,
@@ -120,6 +255,12 @@ def write_benchmark_report(result: BenchmarkResult, output_path: Path) -> Path:
         n_actives=result.n_actives,
         n_decoys=result.n_decoys,
         total=result.total_screened,
+        matched_by_identifier=diag.get("matched_by_identifier", 0),
+        matched_by_smiles_only=diag.get("matched_by_smiles_only", 0),
+        matched_by_both=diag.get("matched_by_both", 0),
+        unmatched_active_entries=diag.get("unmatched_active_entries", ""),
+        first_active_rank=diag.get("first_active_rank", ""),
+        ranking_diagnostics_html=_benchmark_ranking_diagnostics_html(result.ranking_diagnostics),
         roc_b64=_roc_plot_b64(result),
     )
     output_path.write_text(html, encoding="utf-8")

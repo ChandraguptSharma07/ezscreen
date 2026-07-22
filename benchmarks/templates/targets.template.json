@@ -1,0 +1,33 @@
+[
+  {
+    "target_id": "hiv1_protease",
+    "target_class": "protease",
+    "primary_structure": {
+      "kind": "pdb",
+      "id": "1HSG",
+      "path": ""
+    },
+    "backup_structure": {
+      "kind": "pdb",
+      "id": "",
+      "path": ""
+    },
+    "alphafold_structure": {
+      "id": "",
+      "path": "",
+      "retrieved_at": ""
+    },
+    "cocrystal_ligand": {
+      "resname": "",
+      "chain": "",
+      "resseq": 0
+    },
+    "residue_box": {
+      "enabled": false,
+      "residues": []
+    },
+    "actives_file": "inputs/actives/hiv1_protease.smi",
+    "decoys_file": "inputs/decoys/hiv1_protease_decoys.smi",
+    "notes": []
+  }
+]

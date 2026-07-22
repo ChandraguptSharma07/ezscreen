@@ -1,0 +1,14 @@
+{
+  "benchmark_id": "bench-YYYYMMDD-name",
+  "target_id": "",
+  "target_class": "",
+  "receptor_regime": "crystal_holo",
+  "pocket_mode": "cocrystal",
+  "engine_path": "",
+  "baseline_name": "",
+  "ablation_flags": {},
+  "repeats_planned": 1,
+  "repeats_completed": 0,
+  "actives_source": "",
+  "decoy_source": ""
+}

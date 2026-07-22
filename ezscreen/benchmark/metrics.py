@@ -12,6 +12,8 @@ class BenchmarkResult:
     n_decoys: int
     total_screened: int
     ranked_labels: list[int] = field(default_factory=list)  # 1=active 0=decoy, best score first
+    label_diagnostics: dict = field(default_factory=dict)
+    ranking_diagnostics: dict = field(default_factory=dict)
 
 
 def compute_metrics(

@@ -17,7 +17,10 @@ app = typer.Typer(
 
 console = Console()
 team_app = typer.Typer(help="Manage team runners and worker control-plane state.")
+benchmark_app = typer.Typer(help="Bootstrap and manage benchmark workspaces.")
 app.add_typer(team_app, name="team")
+app.add_typer(benchmark_app, name="benchmark")
+
 
 @app.callback(invoke_without_command=True)
 def main_callback(ctx: typer.Context) -> None:
@@ -33,44 +36,49 @@ def main_callback(ctx: typer.Context) -> None:
 
     if ctx.invoked_subcommand is None:
         from ezscreen.tui import launch_tui
-        launch_tui()
 
+        launch_tui()
 
 
 @app.command()
 def auth(
     update: str = typer.Option(
-        None, "--update", "-u",
+        None,
+        "--update",
+        "-u",
         help="Update a specific key: 'Kaggle credentials' | 'NIM API key' | 'Both'",
     ),
 ) -> None:
     """Set up or update Kaggle and NIM credentials."""
     from ezscreen.commands import auth as _auth
+
     _auth.invoke(update=update)
 
 
 @app.command()
 def validate(
     receptor: Path = typer.Argument(..., help="Path to receptor PDB file"),
-    hits:   Path = typer.Argument(..., help="Path to hits SDF or CSV file"),
+    hits: Path = typer.Argument(..., help="Path to hits SDF or CSV file"),
     output: Path = typer.Option(
         Path("validation_out"), "--output", "-o", help="Output directory"
     ),
 ) -> None:
     """Run Stage 2 hit validation with DiffDock-L via NVIDIA NIM."""
     from ezscreen.commands import validate as _validate
+
     _validate.invoke(receptor_path=receptor, hits_path=hits, output_dir=output)
 
 
 @app.command()
 def admet(
-    input_file:  Path = typer.Argument(..., help="Input SDF file"),
+    input_file: Path = typer.Argument(..., help="Input SDF file"),
     output_file: Path = typer.Option(
         None, "--output", "-o", help="Output SDF (default: <input>_admet.sdf)"
     ),
 ) -> None:
     """Run standalone ADMET filtering on an SDF or SMILES file."""
     from ezscreen.commands import admet as _admet
+
     _admet.invoke(input_path=input_file, output_path=output_file)
 
 
@@ -83,6 +91,7 @@ def view(
 ) -> None:
     """Open the results viewer for a completed run."""
     from ezscreen.commands import view as _view
+
     p = Path(results_dir)
     # Resolve run ID shorthand to full path under ~/.ezscreen/runs
     if not p.exists() and results_dir.startswith("ezs-"):
@@ -96,6 +105,7 @@ def status(
 ) -> None:
     """Show all recent runs with live status."""
     from ezscreen.commands import status as _status
+
     _status.invoke(live=live)
 
 
@@ -127,14 +137,14 @@ def resume(
         )
         return
 
-    console.print(Panel(
-        f"[bold]{run_id}[/bold]  status: {run['status']}\n"
-        f"{len(incomplete)} shard(s) still incomplete",
-        title="[bold]Resume[/bold]",
-    ))
     console.print(
-        "[dim]Re-submit uses the same run.py flow with resume context.[/dim]"
+        Panel(
+            f"[bold]{run_id}[/bold]  status: {run['status']}\n"
+            f"{len(incomplete)} shard(s) still incomplete",
+            title="[bold]Resume[/bold]",
+        )
     )
+    console.print("[dim]Re-submit uses the same run.py flow with resume context.[/dim]")
     console.print(
         "[yellow]Full resume is planned for v1.1 â€” launch ezscreen to start fresh.[/yellow]"  # noqa: E501
     )
@@ -142,16 +152,19 @@ def resume(
 
 @app.command()
 def download(
-    run_id: str = typer.Argument(..., help="Run ID to download results for (e.g. ezs-4f2a8c)"),  # noqa: E501
+    run_id: str = typer.Argument(
+        ..., help="Run ID to download results for (e.g. ezs-4f2a8c)"
+    ),  # noqa: E501
 ) -> None:
     """Download results for a completed Kaggle run (if download failed after a run)."""
     from ezscreen import auth as _auth
     from ezscreen.backends.kaggle import runner as kaggle_runner
     from ezscreen.commands import view as _view
 
-    creds    = _auth.load_credentials()
+    creds = _auth.load_credentials()
     kaggle_path = _auth.get_kaggle_json_path(creds)
     import json
+
     username = (
         json.loads(kaggle_path.read_text())["username"]
         if kaggle_path and kaggle_path.exists()
@@ -161,7 +174,7 @@ def download(
         console.print("[red]Kaggle credentials not found â€” run: ezscreen auth[/red]")
         raise typer.Exit(1)
     kernel_ref = f"{username}/{run_id}"
-    work_dir   = Path.home() / ".ezscreen" / "runs" / run_id
+    work_dir = Path.home() / ".ezscreen" / "runs" / run_id
 
     console.print(f"  [dim]Downloading results for {kernel_ref}...[/dim]")
     output_dir = kaggle_runner._download_output(kernel_ref, work_dir)
@@ -179,7 +192,7 @@ def clean(
     from ezscreen import auth as _auth
     from ezscreen.backends.kaggle import runner as kaggle_runner
 
-    creds    = _auth.load_credentials()
+    creds = _auth.load_credentials()
     username = Path(creds.get("kaggle_json_path", "")).stem or "user"
 
     confirmed = questionary.confirm(
@@ -190,6 +203,291 @@ def clean(
 
     kaggle_runner.clean_run(run_id, username)
     console.print(f"  [green]âœ“ Cleaned {run_id}[/green]")
+
+
+@benchmark_app.command("init")
+def benchmark_init(
+    benchmark_id: str = typer.Argument(
+        ..., help="Benchmark campaign id, for example bench-20260714-core-panel"
+    ),
+    target: str = typer.Option(
+        None, "--target", help="Target id for a benchmark cell scaffold"
+    ),
+    regime: str = typer.Option(
+        None, "--regime", help="Condition or regime id for a benchmark cell scaffold"
+    ),
+    run_label: str = typer.Option(
+        None, "--run-label", help="Run label for a benchmark cell scaffold"
+    ),
+    root: Path = typer.Option(
+        None, "--root", help="Optional benchmark root directory override"
+    ),
+) -> None:
+    """Create a benchmark campaign or benchmark cell scaffold from repo templates."""
+    from ezscreen.commands import benchmark as _benchmark
+
+    try:
+        path = _benchmark.init_scaffold(
+            benchmark_id,
+            target=target,
+            regime=regime,
+            run_label=run_label,
+            root=root,
+        )
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if target and regime and run_label:
+        console.print(f"[green]Benchmark cell scaffold created[/green] {path}")
+    else:
+        console.print(f"[green]Benchmark campaign scaffold created[/green] {path}")
+
+
+@benchmark_app.command("run-cell")
+def benchmark_run_cell(
+    cell_dir: Path = typer.Argument(..., help="Path to a benchmark cell directory"),
+    actives: Path = typer.Option(
+        None, "--actives", help="Optional override for the known-actives .smi file"
+    ),
+    scores: Path = typer.Option(
+        None, "--scores", help="Optional override for the archived scores.csv file"
+    ),
+    score_col: str = typer.Option(
+        None, "--score-col", help="Score column to rank by; defaults to first score/affinity column"
+    ),
+) -> None:
+    """Run benchmark metrics for one archived cell and write report + summary files."""
+    from ezscreen.commands import benchmark as _benchmark
+
+    try:
+        result = _benchmark.run_cell_benchmark(
+            cell_dir,
+            actives_path=actives,
+            scores_csv=scores,
+            score_col=score_col,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except Exception as exc:
+        console.print(f"[red]Benchmark cell failed[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]Benchmark cell completed[/green] {result['cell_dir']}")
+    console.print(f"  metrics -> {result['metrics_path']}")
+    console.print(f"  report  -> {result['report_path']}")
+
+
+
+@benchmark_app.command("correct-scores")
+def benchmark_correct_scores(
+    scores_csv: Path = typer.Argument(..., help="Path to scores.csv to annotate"),
+    output: Path = typer.Option(None, "--output", help="Output CSV; defaults to in-place"),
+    score_col: str = typer.Option(None, "--score-col", help="Raw score column; defaults to first score/affinity column"),
+    output_col: str = typer.Option("bias_corrected_score", "--output-col", help="Corrected score column name"),
+) -> None:
+    """Append ligand-bias-corrected score column for benchmark reranking."""
+    from ezscreen.commands import benchmark as _benchmark
+
+    try:
+        result = _benchmark.correct_scores_file(
+            scores_csv,
+            output_csv=output,
+            score_col=score_col,
+            output_col=output_col,
+        )
+    except Exception as exc:
+        console.print(f"[red]Score correction failed[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]Corrected scores written[/green] {result['output_csv']}")
+    console.print(f"  score_col -> {result['score_col']}")
+    console.print(f"  output_col -> {result['output_col']}")
+    console.print(f"  formula -> {result['formula']}")
+
+
+
+@benchmark_app.command("compare-rescores")
+def benchmark_compare_rescores(
+    scores_csv: Path = typer.Argument(..., help="Path to scores.csv with raw and rescoring columns"),
+    actives: Path = typer.Option(..., "--actives", help="Known-actives .smi/.ism file with identifiers"),
+    output_dir: Path = typer.Option(None, "--output-dir", help="Output directory; defaults beside scores.csv"),
+    score_cols: str = typer.Option(None, "--score-cols", help="Comma-separated score columns; defaults to numeric score/affinity columns"),
+) -> None:
+    """Compare EF/AUC and diagnostics for multiple score columns in one scores.csv."""
+    from ezscreen.commands import benchmark as _benchmark
+
+    cols = [part.strip() for part in score_cols.split(",") if part.strip()] if score_cols else None
+    try:
+        result = _benchmark.compare_rescore_file(
+            actives_path=actives,
+            scores_csv=scores_csv,
+            output_dir=output_dir,
+            score_cols=cols,
+        )
+    except Exception as exc:
+        console.print(f"[red]Rescore comparison failed[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    console.print(f"[green]Rescore comparison written[/green] {result['output_dir']}")
+    console.print(f"  metrics -> {result['metrics_table']}")
+    console.print(f"  summary -> {result['summary_path']}")
+
+@benchmark_app.command("submit-kaggle-cell")
+def benchmark_submit_kaggle_cell(
+    cell_dir: Path = typer.Argument(..., help="Path to a benchmark cell directory"),
+    receptor_pdbqt: Path = typer.Option(..., "--receptor-pdbqt", help="Prepared receptor PDBQT uploaded to Kaggle"),
+    ligands: Path = typer.Option(..., "--ligands", help="Benchmark ligand library (.smi/.ism/.sdf) to shard for Kaggle prep"),
+    box_center: str = typer.Option(..., "--box-center", help="Docking box center as x,y,z"),
+    box_size: str = typer.Option(..., "--box-size", help="Docking box size as x,y,z"),
+    actives: Path = typer.Option(None, "--actives", help="Known-actives .smi file for metrics; defaults to cell inputs/actives.smi"),
+    run_id: str = typer.Option(None, "--run-id", help="Optional ezscreen run id"),
+    shards: int = typer.Option(None, "--shards", help="Optional number of raw ligand shards"),
+    accelerator: str = typer.Option("nvidiaTeslaT4", "--accelerator", help="Kaggle accelerator metadata value"),
+    engine: str = typer.Option("unidock", "--engine", help="Kaggle docking engine"),
+    search_mode: str = typer.Option("balance", "--search-mode", help="Kaggle notebook search mode"),
+) -> None:
+    """Submit one benchmark cell to Kaggle, then archive outputs and compute metrics."""
+    from ezscreen.commands import benchmark as _benchmark
+
+    try:
+        result = _benchmark.submit_kaggle_cell(
+            cell_dir,
+            receptor_pdbqt=receptor_pdbqt,
+            ligands=ligands,
+            box_center=box_center,
+            box_size=box_size,
+            actives_path=actives,
+            run_id=run_id,
+            n_shards=shards,
+            accelerator=accelerator,
+            engine=engine,
+            search_mode=search_mode,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    except Exception as exc:
+        console.print(f"[red]Kaggle benchmark submission failed[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    if result.get("status") == "complete":
+        console.print(f"[green]Kaggle benchmark cell completed[/green] {result['cell_dir']}")
+        console.print(f"  run_id -> {result['run_id']}")
+        console.print(f"  scores -> {result['scores_csv']}")
+        console.print(f"  report -> {result['report_path']}")
+    else:
+        console.print(f"[red]Kaggle benchmark cell {result.get('status', 'failed')}[/red]")
+        console.print(f"  run_id -> {result.get('run_id', '')}")
+        raise typer.Exit(1)
+
+@benchmark_app.command("validate-campaign")
+def benchmark_validate_campaign(
+    campaign_dir: Path = typer.Argument(
+        ..., help="Path to a benchmark campaign directory"
+    ),
+) -> None:
+    """Validate one benchmark campaign manifest, target registry, and referenced input files."""
+    from ezscreen.benchmark.summary import validate_campaign
+
+    try:
+        result = validate_campaign(campaign_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]Benchmark campaign validated[/green] {result['campaign_dir']}"
+    )
+    console.print(f"  targets -> {result['target_count']}")
+    console.print(f"  checked files -> {result['checked_file_count']}")
+    if result.get("warnings"):
+        console.print("  [yellow]warnings:[/yellow]")
+        for item in result["warnings"]:
+            console.print(f"    - {item}")
+
+
+@benchmark_app.command("audit-campaign")
+def benchmark_audit_campaign(
+    campaign_dir: Path = typer.Argument(
+        ..., help="Path to a benchmark campaign directory"
+    ),
+    strict: bool = typer.Option(
+        False, "--strict", help="Exit nonzero when publishable-pipeline gates fail"
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print machine-readable audit JSON"
+    ),
+) -> None:
+    """Audit whether a campaign is shaped like publishable pipeline evidence."""
+    import json as json_lib
+
+    from ezscreen.benchmark.summary import audit_campaign_quality
+
+    try:
+        result = audit_campaign_quality(campaign_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if json_output:
+        console.print(json_lib.dumps(result, indent=2))
+    else:
+        console.print(
+            f"[green]Benchmark campaign audit[/green] {result['campaign_dir']}"
+        )
+        console.print(f"  readiness -> {result['readiness']}")
+        console.print(
+            f"  targets   -> {result['target_count']} across {result['target_class_count']} class(es)"
+        )
+        console.print(
+            f"  cells     -> {result['complete_cell_count']}/{result['cell_count']} complete"
+        )
+        console.print(f"  repeats   -> max {result['max_repeat_count']}")
+        console.print(f"  comparators -> max {result['max_comparator_count']}")
+        if result["strengths"]:
+            console.print("  strengths:")
+            for item in result["strengths"]:
+                console.print(f"    - {item}")
+        if result["issues"]:
+            console.print("  [red]publishability gaps:[/red]")
+            for item in result["issues"]:
+                console.print(f"    - {item}")
+        if result["warnings"]:
+            console.print("  [yellow]warnings:[/yellow]")
+            for item in result["warnings"]:
+                console.print(f"    - {item}")
+
+    if strict and result["issues"]:
+        raise typer.Exit(1)
+
+
+@benchmark_app.command("summarize")
+def benchmark_summarize(
+    campaign_dir: Path = typer.Argument(
+        ..., help="Path to a benchmark campaign directory"
+    ),
+) -> None:
+    """Summarize benchmark cells into campaign-level CSV tables."""
+    from ezscreen.benchmark.summary import summarize_campaign
+
+    try:
+        result = summarize_campaign(campaign_dir)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    console.print(
+        f"[green]Benchmark campaign summarized[/green] {result['campaign_dir']}"
+    )
+    console.print(f"  cells      -> {result['cell_count']}")
+    console.print(f"  metrics    -> {result['metrics_path']}")
+    console.print(f"  failures   -> {result['failure_path']}")
+    console.print(f"  throughput -> {result['throughput_path']}")
+    console.print(f"  variance   -> {result['variance_path']}")
+
+
 @team_app.command("serve")
 def team_serve(
     host: str = typer.Option("127.0.0.1", "--host", help="Bind host"),
@@ -202,10 +500,17 @@ def team_serve(
 
     serve(host=host, port=port, db_path=db, storage_root=storage)
 
+
 @team_app.command("login")
 def team_login(
-    server_url: str = typer.Option(None, "--server-url", help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url."),
-    poll_seconds: int = typer.Option(180, "--poll-seconds", help="How long to wait for GitHub authorization."),
+    server_url: str = typer.Option(
+        None,
+        "--server-url",
+        help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url.",
+    ),
+    poll_seconds: int = typer.Option(
+        180, "--poll-seconds", help="How long to wait for GitHub authorization."
+    ),
 ) -> None:
     """Sign in to the team server with GitHub device login."""
     import time
@@ -224,7 +529,9 @@ def team_login(
     verify_url = start.get("verification_uri_complete") or start.get("verification_uri")
     if verify_url:
         webbrowser.open(verify_url)
-    console.print(f"Open GitHub and enter code: [bold]{start.get('user_code', '')}[/bold]")
+    console.print(
+        f"Open GitHub and enter code: [bold]{start.get('user_code', '')}[/bold]"
+    )
     if verify_url:
         console.print(verify_url)
     deadline = time.time() + poll_seconds
@@ -247,10 +554,13 @@ def team_login(
             }
         )
         save_local_state(state)
-        console.print(f"[green]Signed in[/green] {state.get('github_login') or state['user_name']}")
+        console.print(
+            f"[green]Signed in[/green] {state.get('github_login') or state['user_name']}"
+        )
         return
     console.print("[yellow]GitHub authorization timed out.[/yellow]")
     raise typer.Exit(1)
+
 
 @team_app.command("logout")
 def team_logout() -> None:
@@ -265,26 +575,59 @@ def team_logout() -> None:
     state = load_local_state()
     session_token = state.get("session_token")
     if not session_token:
-        console.print("[yellow]No ezscreen account session is currently signed in.[/yellow]")
+        console.print(
+            "[yellow]No ezscreen account session is currently signed in.[/yellow]"
+        )
         return
     user_name = state.get("user_name") or state.get("github_login") or "account"
-    TeamClient(state.get("server_url") or default_server_url(), token=session_token).logout()
+    TeamClient(
+        state.get("server_url") or default_server_url(), token=session_token
+    ).logout()
     kept = clear_local_session()
     console.print(f"[green]Signed out[/green] {user_name}")
     if kept.get("server_url"):
         console.print(f"Team server kept at {kept['server_url']}")
 
+
 @team_app.command("create")
 def team_create(
-    server_url: str = typer.Option(None, "--server-url", help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url."),
+    server_url: str = typer.Option(
+        None,
+        "--server-url",
+        help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url.",
+    ),
     owner: str = typer.Option(..., "--owner", help="Owner display name"),
     team_name: str = typer.Option(..., "--name", help="Team name"),
-    github_repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
-    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
-    kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
-    kaggle_key: str = typer.Option(None, "--kaggle-key", help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json"),
-    use_local_kaggle: bool = typer.Option(False, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
-    github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
+    github_repo: str = typer.Option(
+        "",
+        "--repo",
+        help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo.",
+    ),
+    team_account: str = typer.Option(
+        None,
+        "--team-account",
+        help="Saved ezscreen team account name to use for this worker's Kaggle key.",
+    ),
+    kaggle_username: str = typer.Option(
+        None,
+        "--kaggle-username",
+        help="Worker Kaggle username; defaults to local kaggle.json username",
+    ),
+    kaggle_key: str = typer.Option(
+        None,
+        "--kaggle-key",
+        help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json",
+    ),
+    use_local_kaggle: bool = typer.Option(
+        False,
+        "--use-local-kaggle/--no-use-local-kaggle",
+        help="Read existing ezscreen Kaggle credentials if no key is provided",
+    ),
+    github_token: str = typer.Option(
+        None,
+        "--github-token",
+        help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN.",
+    ),
 ) -> None:
     """Create a team and optionally provision a dedicated private worker repo."""
     from ezscreen.team.client import (
@@ -304,13 +647,18 @@ def team_create(
     if github_token:
         from ezscreen.team.github import provision_managed_worker_repo
 
-        repo_info = provision_managed_worker_repo(github_token=github_token, repo_name=github_repo or None)
+        repo_info = provision_managed_worker_repo(
+            github_token=github_token, repo_name=github_repo or None
+        )
         worker_repo = repo_info["repo"]
     elif github_repo:
         worker_repo = github_repo
 
     result = TeamClient(server_url, token=session_token).create_team(
-        owner_name=owner, team_name=team_name, github_repo=worker_repo, owner_user_id=owner_user_id
+        owner_name=owner,
+        team_name=team_name,
+        github_repo=worker_repo,
+        owner_user_id=owner_user_id,
     )
     state.update(
         {
@@ -347,17 +695,35 @@ def team_create(
         source = f" ({kaggle_creds.source})"
         console.print(f"[green]Dedicated worker ready[/green] {worker_repo}{source}")
     else:
-        console.print("Set GITHUB_TOKEN, then run `ezscreen team connect-worker` to provision a dedicated private worker repo.")
+        console.print(
+            "Set GITHUB_TOKEN, then run `ezscreen team connect-worker` to provision a dedicated private worker repo."
+        )
 
 
 @team_app.command("join")
 def team_join(
-    server_url: str = typer.Option(None, "--server-url", help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url."),
+    server_url: str = typer.Option(
+        None,
+        "--server-url",
+        help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url.",
+    ),
     invite_code: str = typer.Option(..., "--invite", help="Team invite code"),
     user: str = typer.Option(..., "--user", help="Member display name"),
-    repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
-    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
-    kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
+    repo: str = typer.Option(
+        "",
+        "--repo",
+        help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo.",
+    ),
+    team_account: str = typer.Option(
+        None,
+        "--team-account",
+        help="Saved ezscreen team account name to use for this worker's Kaggle key.",
+    ),
+    kaggle_username: str = typer.Option(
+        None,
+        "--kaggle-username",
+        help="Worker Kaggle username; defaults to local kaggle.json username",
+    ),
     kaggle_key: str = typer.Option(
         None,
         "--kaggle-key",
@@ -390,7 +756,9 @@ def team_join(
     server_url = server_url or default_server_url()
     github_token = github_token or os.environ.get("GITHUB_TOKEN")
     if not github_token:
-        console.print("[red]GitHub token is required via --github-token or GITHUB_TOKEN.[/red]")
+        console.print(
+            "[red]GitHub token is required via --github-token or GITHUB_TOKEN.[/red]"
+        )
         raise typer.Exit(1)
 
     kaggle_creds = resolve_worker_kaggle_credentials(
@@ -401,10 +769,16 @@ def team_join(
     )
     state = load_local_state()
     session_token = state.get("session_token")
-    repo_info = provision_managed_worker_repo(github_token=github_token, repo_name=repo or None)
+    repo_info = provision_managed_worker_repo(
+        github_token=github_token, repo_name=repo or None
+    )
     worker_repo = repo_info["repo"]
 
-    join_kwargs = {"invite_code": invite_code, "user_name": user, "github_repo": worker_repo}
+    join_kwargs = {
+        "invite_code": invite_code,
+        "user_name": user,
+        "github_repo": worker_repo,
+    }
     if session_token and state.get("user_id"):
         join_kwargs["user_id"] = state["user_id"]
     result = TeamClient(server_url, token=session_token).join_team(**join_kwargs)
@@ -441,11 +815,15 @@ def team_status() -> None:
     state = load_local_state()
     local_kaggle = local_kaggle_summary()
     if local_kaggle.get("configured"):
-        console.print(f"Local Kaggle: configured for {local_kaggle.get('username', '')} at {local_kaggle.get('path', '')}")
+        console.print(
+            f"Local Kaggle: configured for {local_kaggle.get('username', '')} at {local_kaggle.get('path', '')}"
+        )
     else:
         console.print("Local Kaggle: not configured")
     if not state.get("server_url") or not state.get("user_id"):
-        console.print("[yellow]No local team state. Use ezscreen team create or join.[/yellow]")
+        console.print(
+            "[yellow]No local team state. Use ezscreen team create or join.[/yellow]"
+        )
         return
     status = TeamClient(state["server_url"]).status(state["user_id"])
     if not status.get("team"):
@@ -468,14 +846,18 @@ def team_status() -> None:
 
 @team_app.command("pause-worker")
 def team_pause_worker(
-    paused: bool = typer.Option(True, "--paused/--enabled", help="Pause or re-enable this member's worker"),
+    paused: bool = typer.Option(
+        True, "--paused/--enabled", help="Pause or re-enable this member's worker"
+    ),
 ) -> None:
     """Pause or re-enable the local member worker."""
     from ezscreen.team.client import TeamClient, load_local_state
 
     state = load_local_state()
     if not state.get("server_url") or not state.get("user_id"):
-        console.print("[yellow]No local team state. Use ezscreen team create or join.[/yellow]")
+        console.print(
+            "[yellow]No local team state. Use ezscreen team create or join.[/yellow]"
+        )
         raise typer.Exit(1)
     result = TeamClient(state["server_url"]).request(
         "POST",
@@ -487,13 +869,41 @@ def team_pause_worker(
 
 @team_app.command("connect-worker")
 def team_connect_worker(
-    repo: str = typer.Option("", "--repo", help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo."),
-    server_url: str = typer.Option(None, "--server-url", help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url."),
-    team_account: str = typer.Option(None, "--team-account", help="Saved ezscreen team account name to use for this worker's Kaggle key."),
-    kaggle_username: str = typer.Option(None, "--kaggle-username", help="Worker Kaggle username; defaults to local kaggle.json username"),
-    kaggle_key: str = typer.Option(None, "--kaggle-key", help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json"),
-    use_local_kaggle: bool = typer.Option(False, "--use-local-kaggle/--no-use-local-kaggle", help="Read existing ezscreen Kaggle credentials if no key is provided"),
-    github_token: str = typer.Option(None, "--github-token", help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN."),
+    repo: str = typer.Option(
+        "",
+        "--repo",
+        help="Optional dedicated worker repo override. Defaults to an ezscreen-managed private repo.",
+    ),
+    server_url: str = typer.Option(
+        None,
+        "--server-url",
+        help="Team server URL. Defaults to EZSCREEN_TEAM_SERVER_URL or config team.server_url.",
+    ),
+    team_account: str = typer.Option(
+        None,
+        "--team-account",
+        help="Saved ezscreen team account name to use for this worker's Kaggle key.",
+    ),
+    kaggle_username: str = typer.Option(
+        None,
+        "--kaggle-username",
+        help="Worker Kaggle username; defaults to local kaggle.json username",
+    ),
+    kaggle_key: str = typer.Option(
+        None,
+        "--kaggle-key",
+        help="Worker Kaggle API key; defaults to KAGGLE_KEY or local kaggle.json",
+    ),
+    use_local_kaggle: bool = typer.Option(
+        False,
+        "--use-local-kaggle/--no-use-local-kaggle",
+        help="Read existing ezscreen Kaggle credentials if no key is provided",
+    ),
+    github_token: str = typer.Option(
+        None,
+        "--github-token",
+        help="GitHub token with repo and Actions secrets write access. Defaults to GITHUB_TOKEN.",
+    ),
 ) -> None:
     """Attach a dedicated private GitHub worker repo to the current member and seed its secrets."""
     from ezscreen.team.client import (
@@ -512,11 +922,15 @@ def team_connect_worker(
     server_url = server_url or state.get("server_url") or default_server_url()
     session_token = state.get("session_token")
     if not session_token:
-        console.print("[red]Sign in first with `ezscreen team login` or the Team screen.[/red]")
+        console.print(
+            "[red]Sign in first with `ezscreen team login` or the Team screen.[/red]"
+        )
         raise typer.Exit(1)
     github_token = github_token or os.environ.get("GITHUB_TOKEN")
     if not github_token:
-        console.print("[red]GitHub token is required via --github-token or GITHUB_TOKEN.[/red]")
+        console.print(
+            "[red]GitHub token is required via --github-token or GITHUB_TOKEN.[/red]"
+        )
         raise typer.Exit(1)
 
     kaggle_creds = resolve_worker_kaggle_credentials(
@@ -525,10 +939,14 @@ def team_connect_worker(
         kaggle_key=kaggle_key,
         use_local=use_local_kaggle,
     )
-    repo_info = provision_managed_worker_repo(github_token=github_token, repo_name=repo or None)
+    repo_info = provision_managed_worker_repo(
+        github_token=github_token, repo_name=repo or None
+    )
     worker_repo = repo_info["repo"]
     client = TeamClient(server_url, token=session_token)
-    result = client.connect_worker(github_repo=worker_repo, kaggle_username=kaggle_creds.username)
+    result = client.connect_worker(
+        github_repo=worker_repo, kaggle_username=kaggle_creds.username
+    )
     configure_worker_repo(
         repo=worker_repo,
         github_token=github_token,
@@ -546,9 +964,13 @@ def team_connect_worker(
     if not result.get("github_installation_id"):
         install_url = str(result.get("app_install_url") or "").strip()
         if install_url:
-            console.print(f"Install the ezscreen GitHub App for this repo: {install_url}")
+            console.print(
+                f"Install the ezscreen GitHub App for this repo: {install_url}"
+            )
         else:
-            console.print("Install the ezscreen GitHub App on this repo to enable server-side dispatch.")
+            console.print(
+                "Install the ezscreen GitHub App on this repo to enable server-side dispatch."
+            )
 
 
 @team_app.command("disconnect-worker")
@@ -558,7 +980,9 @@ def team_disconnect_worker() -> None:
 
     state = load_local_state()
     if not state.get("server_url") or not state.get("session_token"):
-        console.print("[yellow]Sign in first, then open Team or use team login.[/yellow]")
+        console.print(
+            "[yellow]Sign in first, then open Team or use team login.[/yellow]"
+        )
         raise typer.Exit(1)
     client = TeamClient(state["server_url"], token=state["session_token"])
     result = client.disconnect_worker(user_id=state.get("user_id"))

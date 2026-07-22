@@ -1,0 +1,33 @@
+{
+  "benchmark_id": "bench-YYYYMMDD-name",
+  "goal": "reviewer-hardening benchmark block",
+  "owner": "",
+  "status": "planned",
+  "targets_file": "inputs/targets.json",
+  "baselines": [
+    "local_vina",
+    "competitor_placeholder"
+  ],
+  "required_ablations": [
+    "pocket_mode",
+    "enumeration",
+    "admet_prefilter",
+    "receptor_ensemble",
+    "gnina_rescore",
+    "consensus",
+    "prep_location",
+    "retry_resume"
+  ],
+  "required_metrics": [
+    "ef1",
+    "ef5",
+    "auc_roc",
+    "redock_rmsd",
+    "completion_rate",
+    "recovery_rate",
+    "runtime",
+    "ligands_per_hour",
+    "failure_categories"
+  ],
+  "notes": []
+}

@@ -216,7 +216,7 @@ def test_merge_receptor_variants_keeps_best_per_ligand_identity(tmp_path):
     assert by_smiles["CCN"]["receptor_variant"] == "default"
 
 
-def test_merge_skips_receptor_variant_partial_failures_in_unscored_reasons(tmp_path):
+def test_merge_retains_receptor_variant_score_ceiling_as_scored_qc(tmp_path):
     sd = tmp_path / "rv"
     sd.mkdir()
     _write(sd / "scores.csv", ["ligand", "score", "name", "smiles", "receptor_variant"], [
@@ -235,12 +235,77 @@ def test_merge_skips_receptor_variant_partial_failures_in_unscored_reasons(tmp_p
     out = tmp_path / "output"
     result = merge_shard_results([sd], out)
 
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    by_smiles = {row["smiles"]: row for row in rows}
     reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
-    assert len(reasons) == 1
-    assert reasons[0]["ligand"] == "nb0_lig_00001"
-    assert reasons[0]["raw_score"] == "default:20.0; propka_ph:2.0"
-    assert result["unscored_reason_counts"]["score_ceiling"] == 1
 
+    assert len(rows) == 2
+    assert by_smiles["CCN"]["score"] == "2.0"
+    assert by_smiles["CCN"]["receptor_variant"] == "propka_ph"
+    assert by_smiles["CCN"]["score_qc"] == "score_ceiling"
+    assert reasons == []
+    assert result["unscored_reason_counts"].get("score_ceiling", 0) == 0
+
+
+
+def test_merge_keeps_score_floor_failures_unscored_not_headline_hits(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "ezscreen.config.load",
+        lambda: {"local": {"enable_score_floor": True, "score_floor": -15.0, "score_ceiling": 0.0}},
+    )
+    sd = tmp_path / "floor"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score", "name", "smiles"], [
+        {"ligand": "nb0_lig_00000", "score": "-7.0", "name": "A", "smiles": "CCO"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles"], [
+        {"ligand": "nb0_lig_00000", "name": "A", "smiles": "CCO"},
+        {"ligand": "nb0_lig_00001", "name": "B", "smiles": "CCN"},
+    ])
+    _write(sd / "failed_docking.csv", ["ligand", "raw_score", "reason"], [
+        {"ligand": "nb0_lig_00001", "raw_score": "-50.0", "reason": "score_floor"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
+
+    assert len(rows) == 1
+    assert rows[0]["smiles"] == "CCO"
+    assert reasons == [
+        {
+            "ligand": "nb0_lig_00001",
+            "name": "B",
+            "smiles": "CCN",
+            "reason": "score_floor",
+            "raw_score": "-50.0",
+        }
+    ]
+    assert result["unscored_reason_counts"].get("score_floor", 0) == 1
+
+
+def test_merge_marks_existing_finite_ceiling_score_with_qc(tmp_path):
+    sd = tmp_path / "shard"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score"], [
+        {"ligand": "nb0_lig_00000", "score": "0.5"},
+    ])
+    _write(sd / "index.csv", ["ligand", "name", "smiles"], [
+        {"ligand": "nb0_lig_00000", "name": "weak", "smiles": "CCO"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
+
+    assert rows[0]["score"] == "0.5"
+    assert rows[0]["score_qc"] == "score_ceiling"
+    assert reasons == []
+    assert result["total_hits"] == 1
 
 def test_merge_unions_later_shard_only_columns(tmp_path):
     sd0 = tmp_path / "s0"
