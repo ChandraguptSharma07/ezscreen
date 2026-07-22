@@ -566,6 +566,7 @@ def run_screening_job(
     retry_limit: int = 3,
     accelerator: str = "nvidiaTeslaP100",
     engine: str = "unidock",
+    kaggle_json_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """
     Full pipeline: upload dataset → push kernel → poll → download output.
@@ -616,11 +617,18 @@ def run_screening_job(
             kernel_ref=kernel_ref,
             run_id=run_id,
             retry_limit=retry_limit - retry_count,
+            cred_lock=_KAGGLE_API_LOCK if kaggle_json_path is not None else None,
+            kj_path=str(kaggle_json_path) if kaggle_json_path is not None else None,
         )
 
         if result["status"] == "complete":
             console.print("  [green]Run complete — downloading results...[/green]")
-            output_dir = _download_output(kernel_ref, work_dir, engine=engine)
+            output_dir = _download_output(
+                kernel_ref,
+                work_dir,
+                kj_path=str(kaggle_json_path) if kaggle_json_path is not None else None,
+                engine=engine,
+            )
             return {"status": "complete", "output_dir": output_dir, "error_type": None}
 
         if result["status"] == "retry":
@@ -636,7 +644,21 @@ def run_screening_job(
             )
             continue
 
-        # failed or timeout
+        # failed or timeout. Recheck under the owning account before giving up;
+        # Kaggle can report transient/private-kernel errors even after completion.
+        recovered_output = _download_if_kernel_completed_after_poll_failure(
+            kernel_ref=kernel_ref,
+            nb_work=work_dir,
+            kj_path=kaggle_json_path,
+            engine=engine,
+        )
+        if recovered_output is not None:
+            return {
+                "status": "complete",
+                "output_dir": recovered_output,
+                "error_type": None,
+                "recovered_after_poll_failure": True,
+            }
         return {"status": result["status"], "output_dir": None, "error_type": result["error_type"]}
 
     return {"status": "failed", "output_dir": None, "error_type": "max_retries_exceeded"}
@@ -691,6 +713,7 @@ def _resume_one_shard(
             username=effective_u,
             work_dir=sub_work,
             retry_limit=retry_limit,
+            kaggle_json_path=account.get("kaggle_json_path") if account else None,
         )
         new_status = "done" if result["status"] == "complete" else "failed"
         with ck_lock:
@@ -789,6 +812,73 @@ def _set_account_creds(kaggle_json_path: str | Path) -> str:
     kaggle.api.authenticate()
     return username
 
+
+
+def _kernel_status_with_account(
+    kernel_ref: str,
+    *,
+    cred_lock: threading.Lock | None = None,
+    kj_path: str | Path | None = None,
+) -> tuple[str, str]:
+    """Return normalized Kaggle kernel status using the account that owns it."""
+    import kaggle
+
+    def _call() -> tuple[str, str]:
+        if kj_path is not None:
+            _set_account_creds(kj_path)
+        else:
+            kaggle.api.authenticate()
+        resp = kaggle.api.kernels_status(kernel_ref)
+        status = str(getattr(resp, "status", "unknown")).split(".")[-1].lower()
+        message = getattr(resp, "failure_message", "") or ""
+        return status, message
+
+    if cred_lock is not None:
+        with cred_lock:
+            return _call()
+    return _call()
+
+
+def _download_if_kernel_completed_after_poll_failure(
+    *,
+    kernel_ref: str,
+    nb_work: Path,
+    kj_path: str | Path | None = None,
+    index_csv: Path | None = None,
+    filtered_csv: Path | None = None,
+    receptor_variant: str | None = None,
+    engine: str = "unidock",
+) -> Path | None:
+    """Recover output when poller classified a kernel as failed but Kaggle now says complete."""
+    try:
+        status, message = _kernel_status_with_account(
+            kernel_ref,
+            cred_lock=_KAGGLE_API_LOCK if kj_path is not None else None,
+            kj_path=kj_path,
+        )
+    except Exception as exc:
+        console.print(f"  [dim]Recovery status check failed for {kernel_ref}: {exc}[/dim]")
+        return None
+
+    if status != "complete":
+        detail = f" ({message})" if message else ""
+        console.print(f"  [dim]Recovery status for {kernel_ref}: {status}{detail}[/dim]")
+        return None
+
+    console.print(f"  [yellow]Recovered completed kernel after poller failure: {kernel_ref}[/yellow]")
+    try:
+        return _download_output(
+            kernel_ref,
+            nb_work,
+            kj_path=str(kj_path) if kj_path is not None else None,
+            index_csv=index_csv,
+            filtered_csv=filtered_csv,
+            receptor_variant=receptor_variant,
+            engine=engine,
+        )
+    except Exception as exc:
+        console.print(f"  [yellow]Recovery download failed for {kernel_ref}: {exc}[/yellow]")
+        return None
 
 def render_vina_notebook(
     *,
@@ -1199,7 +1289,15 @@ def run_multi_account_screening(
     def _download_one(pr: dict) -> Path | None:
         sub = pr["sub"]
         if pr["result"]["status"] != "complete":
-            return None
+            return _download_if_kernel_completed_after_poll_failure(
+                kernel_ref=sub["kernel_ref"],
+                nb_work=sub["nb_work"],
+                kj_path=sub["kj_path"],
+                index_csv=_index_csv,
+                filtered_csv=_filtered_csv,
+                receptor_variant=sub.get("receptor_variant"),
+                engine=engine,
+            )
         try:
             return _download_output(
                 sub["kernel_ref"], sub["nb_work"],

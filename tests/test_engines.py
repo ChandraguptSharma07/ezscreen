@@ -439,3 +439,90 @@ def test_run_screening_job_waits_for_sync_probe_before_submit(tmp_path, monkeypa
 
     assert result["status"] == "complete"
     assert steps == ["ready", "sync", "push"]
+
+
+def test_multi_account_recovers_completed_kernel_after_poll_failure(tmp_path, monkeypatch):
+    from ezscreen.backends.kaggle import runner
+
+    out_dir = tmp_path / "downloaded"
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_status(kernel_ref, *, cred_lock=None, kj_path=None):
+        calls.append((kernel_ref, kj_path))
+        return "complete", "Kernel status: complete"
+
+    def fake_download(kernel_ref, work_dir, **kwargs):
+        calls.append((f"download:{kernel_ref}", kwargs.get("kj_path")))
+        out_dir.mkdir()
+        return out_dir
+
+    monkeypatch.setattr(runner, "_kernel_status_with_account", fake_status)
+    monkeypatch.setattr(runner, "_download_output", fake_download)
+
+    recovered = runner._download_if_kernel_completed_after_poll_failure(
+        kernel_ref="owner/kernel",
+        nb_work=tmp_path,
+        engine="unidock",
+        kj_path="acct/kaggle.json",
+    )
+
+    assert recovered == out_dir
+    assert calls == [
+        ("owner/kernel", "acct/kaggle.json"),
+        ("download:owner/kernel", "acct/kaggle.json"),
+    ]
+
+
+def test_run_screening_job_recovers_completed_kernel_after_poll_failure(
+    tmp_path, monkeypatch
+):
+    from ezscreen.backends.kaggle import runner
+
+    receptor = tmp_path / "receptor.pdbqt"
+    receptor.write_text("RECEPTOR
+")
+    (tmp_path / "receptor_prep.pdb").write_text("ATOM
+END
+")
+    shard = tmp_path / "shard_0000.smi"
+    shard.write_text("CCO ligand
+")
+    notebook = tmp_path / "run.ipynb"
+    notebook.write_text("{}")
+    work_dir = tmp_path / "run"
+    recovered = tmp_path / "recovered-output"
+    recovered.mkdir()
+
+    monkeypatch.setattr(runner, "upload_run_dataset", lambda **_kwargs: "user/ezs-run")
+    monkeypatch.setattr(runner, "_wait_for_dataset", lambda _ref: None)
+    monkeypatch.setattr(runner, "_wait_for_dataset_sync", lambda _ref: None)
+    monkeypatch.setattr(runner, "push_kernel", lambda **_kwargs: "user/kernel")
+    monkeypatch.setattr(
+        runner,
+        "poll_until_done",
+        lambda **_kwargs: {
+            "status": "timeout",
+            "error_type": "transient",
+            "message": "poll failed",
+        },
+    )
+    monkeypatch.setattr(
+        runner,
+        "_download_if_kernel_completed_after_poll_failure",
+        lambda **_kwargs: recovered,
+    )
+
+    result = runner.run_screening_job(
+        run_id="ezs-run",
+        receptor_pdbqt=receptor,
+        shard_paths=[shard],
+        notebook_path=notebook,
+        username="user",
+        work_dir=work_dir,
+        kaggle_json_path="acct/kaggle.json",
+    )
+
+    assert result["status"] == "complete"
+    assert result["output_dir"] == recovered
+    assert result["error_type"] is None
+    assert result["recovered_after_poll_failure"] is True
