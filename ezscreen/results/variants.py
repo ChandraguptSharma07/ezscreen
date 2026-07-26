@@ -8,6 +8,17 @@ import re
 _VARIANT_RE = re.compile(r"_v\d+$")
 
 
+_SOURCE_KEYS = (
+    'source_compound_id',
+    'source_id',
+    'parent_id',
+    'original_id',
+    'name',
+    'ligand',
+    'id',
+)
+
+
 def source_name(name: str) -> str:
     return _VARIANT_RE.sub("", name or "")
 
@@ -45,3 +56,14 @@ def collapse_variants(rows: list[dict], name_key: str = "name") -> list[dict]:
         else:
             best[base]["variant_count"] += 1
     return [best[b] for b in order]
+
+
+def source_compound_id(row: dict, name_key: str = 'name') -> str:
+    for key in _SOURCE_KEYS:
+        if key == 'name':
+            value = str(row.get(name_key, '') or '').strip()
+        else:
+            value = str(row.get(key, '') or '').strip()
+        if value:
+            return source_name(value)
+    return ''

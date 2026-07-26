@@ -59,7 +59,10 @@ _BENCHMARK_TEMPLATE = """\
 <div class="metrics">
   <div class="badge"><div class="value">{ef1:.2f}x</div><div class="label">EF 1%</div></div>
   <div class="badge"><div class="value">{ef5:.2f}x</div><div class="label">EF 5%</div></div>
+  <div class="badge"><div class="value">{ef20:.2f}x</div><div class="label">EF 20%</div></div>
   <div class="badge"><div class="value">{auc:.3f}</div><div class="label">AUC-ROC</div></div>
+  <div class="badge"><div class="value">{bedroc:.3f}</div><div class="label">BEDROC alpha=20</div></div>
+  <div class="badge"><div class="value">{coverage:.2%}</div><div class="label">Coverage</div></div>
 </div>
 
 <table>
@@ -251,7 +254,10 @@ def write_benchmark_report(result: BenchmarkResult, output_path: Path) -> Path:
         css=_CSS,
         ef1=result.ef1,
         ef5=result.ef5,
+        ef20=result.ef20,
         auc=result.auc_roc,
+        bedroc=result.bedroc,
+        coverage=result.coverage,
         n_actives=result.n_actives,
         n_decoys=result.n_decoys,
         total=result.total_screened,

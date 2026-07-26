@@ -336,7 +336,22 @@ def audit_campaign_quality(
             }
         )
 
-        for key in ("ef1", "ef5", "auc_roc", "n_actives", "n_decoys", "total_screened"):
+        required_metrics = (
+            "ef1",
+            "ef5",
+            "auc_roc",
+            "n_actives",
+            "n_decoys",
+            "total_screened",
+        )
+        if int(metrics.get("metric_contract_version") or 1) >= 2:
+            required_metrics += (
+                "ef20",
+                "bedroc",
+                "coverage",
+                "first_active_rank",
+            )
+        for key in required_metrics:
             if metrics.get(key) in ("", None):
                 issues.append(f"{cell}: complete cell missing metric `{key}`")
         for key in (
@@ -528,6 +543,9 @@ def summarize_campaign(campaign_dir: Path) -> dict[str, Path | int]:
         ranking_diagnostics = metrics.get("ranking_diagnostics")
         if not isinstance(ranking_diagnostics, dict):
             ranking_diagnostics = {}
+        pose_diagnostics = metrics.get("pose_retention_diagnostics")
+        if not isinstance(pose_diagnostics, dict):
+            pose_diagnostics = {}
         ranking_flags = ranking_diagnostics.get("flags")
         if not isinstance(ranking_flags, list):
             ranking_flags = []
@@ -578,7 +596,10 @@ def summarize_campaign(campaign_dir: Path) -> dict[str, Path | int]:
             "status": row_status,
             "ef1": metrics.get("ef1", ""),
             "ef5": metrics.get("ef5", ""),
+            "ef20": metrics.get("ef20", ""),
             "auc_roc": metrics.get("auc_roc", ""),
+            "bedroc": metrics.get("bedroc", ""),
+            "coverage": metrics.get("coverage", ""),
             "score_col": metrics.get("score_col", ""),
             "external_baseline_status": baseline_eval["external_baseline_status"],
             "external_baseline_failed_metrics": baseline_eval["external_baseline_failed_metrics"],
@@ -593,7 +614,21 @@ def summarize_campaign(campaign_dir: Path) -> dict[str, Path | int]:
             "n_actives": metrics.get("n_actives", ""),
             "n_decoys": metrics.get("n_decoys", ""),
             "total_screened": metrics.get("total_screened", ""),
-            "first_active_rank": label_diagnostics.get("first_active_rank", ""),
+            "first_active_rank": metrics.get(
+                "first_active_rank", label_diagnostics.get("first_active_rank", "")
+            ),
+            "pose_retention_fraction": pose_diagnostics.get(
+                "retained_pose_fraction", ""
+            ),
+            "counts_before_prep": label_diagnostics.get("counts_before_prep", ""),
+            "counts_after_prep": label_diagnostics.get("counts_after_prep", ""),
+            "counts_after_aggregation": label_diagnostics.get(
+                "counts_after_aggregation", ""
+            ),
+            "counts_scored": label_diagnostics.get("counts_scored", ""),
+            "counts_failed": label_diagnostics.get("counts_failed", ""),
+            "counts_filtered": label_diagnostics.get("counts_filtered", ""),
+            "counts_unmatched": label_diagnostics.get("counts_unmatched", ""),
             "matched_by_identifier": label_diagnostics.get("matched_by_identifier", ""),
             "matched_by_smiles_only": label_diagnostics.get("matched_by_smiles_only", ""),
             "unmatched_active_identifiers": label_diagnostics.get("unmatched_active_identifiers", ""),
@@ -732,7 +767,10 @@ def summarize_campaign(campaign_dir: Path) -> dict[str, Path | int]:
             "status",
             "ef1",
             "ef5",
+            "ef20",
             "auc_roc",
+            "bedroc",
+            "coverage",
             "score_col",
             "external_baseline_status",
             "external_baseline_failed_metrics",
@@ -748,6 +786,14 @@ def summarize_campaign(campaign_dir: Path) -> dict[str, Path | int]:
             "n_decoys",
             "total_screened",
             "first_active_rank",
+            "pose_retention_fraction",
+            "counts_before_prep",
+            "counts_after_prep",
+            "counts_after_aggregation",
+            "counts_scored",
+            "counts_failed",
+            "counts_filtered",
+            "counts_unmatched",
             "matched_by_identifier",
             "matched_by_smiles_only",
             "unmatched_active_identifiers",

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from ezscreen.benchmark.metrics import BenchmarkResult, compute_metrics
+from ezscreen.benchmark.aggregation import aggregate_source_compounds
 from ezscreen.results.variants import source_name
 
 
@@ -559,12 +560,32 @@ def pose_retention_diagnostics(
     }
 
 
+def _load_intended_rows(path: Path) -> list[dict]:
+    if path.suffix.lower() == '.csv':
+        with path.open(newline='', encoding='utf-8') as handle:
+            return [dict(row) for row in csv.DictReader(handle)]
+    rows: list[dict] = []
+    with path.open(encoding='utf-8') as handle:
+        for line in handle:
+            parts = line.strip().split()
+            if not parts or line.lstrip().startswith('#'):
+                continue
+            rows.append(
+                {
+                    'smiles': parts[0],
+                    'name': parts[1] if len(parts) > 1 else '',
+                }
+            )
+    return rows
+
+
 def run_benchmark(
     actives_path: Path,
     scores_csv: Path,
     smiles_col: str = "smiles",
     score_col: str | None = None,
     score_direction: str | None = None,
+    intended_compounds_path: Path | None = None,
 ) -> BenchmarkResult:
     active_smiles, active_ids, active_entries = _load_actives(actives_path)
 
@@ -582,14 +603,128 @@ def run_benchmark(
         score_col = _autodetect_score_col(headers)
     score_direction = score_direction or score_direction_for_col(score_col)
 
+    metric_rows: list[dict] = []
+    for source_row in rows:
+        row = dict(source_row)
+        raw_score = _finite_number(row.get(score_col))
+        qc_text = ' '.join(
+            str(row.get(key, '')).lower()
+            for key in ('score_qc', 'status', 'reason', 'stage')
+        )
+        filtered = 'filter' in qc_text
+        if raw_score is not None:
+            row['_ranking_score'] = ranking_score(
+                raw_score, score_col, score_direction
+            )
+        row['_filtered'] = filtered
+        row['_scored'] = raw_score is not None and not filtered
+        metric_rows.append(row)
+
+    unscored_path = scores_csv.parent / 'unscored_reasons.csv'
+    if unscored_path.exists():
+        with unscored_path.open(newline='', encoding='utf-8') as handle:
+            for source_row in csv.DictReader(handle):
+                row = dict(source_row)
+                row['_scored'] = False
+                row['_filtered'] = 'filter' in ' '.join(
+                    str(row.get(key, '')).lower()
+                    for key in ('score_qc', 'status', 'reason', 'stage')
+                )
+                metric_rows.append(row)
+
+    for entry_index, (entry_smiles, entry_ids) in enumerate(active_entries):
+        entry_found = False
+        for row in metric_rows:
+            row_ids = {
+                str(row.get(key, '')).strip()
+                for key in (
+                    'name',
+                    'id',
+                    'ligand',
+                    'chembl_id',
+                    'compound_id',
+                    'source_compound_id',
+                )
+                if str(row.get(key, '')).strip()
+            }
+            row_smiles = str(row.get(smiles_col, '')).strip()
+            canonical = _canonical(row_smiles) if row_smiles else None
+            if (
+                (entry_smiles and entry_smiles == canonical)
+                or bool(_identifier_matches(entry_ids, row_ids))
+            ):
+                entry_found = True
+                break
+        if not entry_found:
+            metric_rows.append(
+                {
+                    'name': sorted(entry_ids)[0] if entry_ids else f'active_{entry_index}',
+                    smiles_col: entry_smiles or '',
+                    'reason': 'prep_or_output_missing',
+                    '_scored': False,
+                    '_filtered': False,
+                }
+            )
+
+    postprep_rows = [
+        row
+        for row in metric_rows
+        if 'prep' not in ' '.join(
+            str(row.get(key, '')).lower()
+            for key in ('score_qc', 'status', 'reason', 'stage')
+        )
+    ]
+    postprep_count = aggregate_source_compounds(
+        postprep_rows
+    ).counts['after_aggregation']
+
+    intended_rows: list[dict] = []
+    if intended_compounds_path:
+        intended_rows = _load_intended_rows(intended_compounds_path)
+        for source_row in intended_rows:
+            row = dict(source_row)
+            row['_scored'] = False
+            row['_filtered'] = False
+            metric_rows.append(row)
+
+    aggregation = aggregate_source_compounds(metric_rows)
+    rows = aggregation.records
+    source_score_direction = score_direction
+    for row in rows:
+        row[score_col] = row['_ranking_score']
+    metric_score_direction = 'lower'
+    intended_count = (
+        aggregate_source_compounds(
+            [
+                {**row, '_scored': False, '_filtered': False}
+                for row in intended_rows
+            ]
+        ).counts['after_aggregation']
+        if intended_rows
+        else aggregation.counts['after_aggregation']
+    )
+
     scores: list[float] = []
     labels: list[int] = []
+    scored_flags: list[bool] = []
     diagnostics = {
+        'counts_before_prep': intended_count,
+        'counts_after_prep': postprep_count,
+        'counts_after_aggregation': aggregation.counts['after_aggregation'],
+        'counts_scored': aggregation.counts['scored'],
+        'counts_failed': aggregation.counts['failed'],
+        'counts_filtered': aggregation.counts['filtered'],
+        'counts_unmatched': aggregation.counts['unmatched'],
+        'variant_rows_collapsed': aggregation.counts['variant_rows_collapsed'],
+        'intended_compounds_path': (
+            str(intended_compounds_path) if intended_compounds_path else ''
+        ),
+        'source_score_direction': source_score_direction,
         "actives_file_smiles_count": len(active_smiles),
         "actives_file_identifier_count": len(active_ids),
         "actives_file_entry_count": len(active_entries),
         "score_column": score_col,
-        "score_direction": score_direction,
+        "score_direction": source_score_direction,
         "smiles_column": smiles_col,
         "scored_rows": 0,
         "skipped_rows": 0,
@@ -613,7 +748,9 @@ def run_benchmark(
     for row in rows:
         raw_score = row.get(score_col, "")
         try:
-            score = ranking_score(float(raw_score), score_col, score_direction)
+            score = ranking_score(
+                float(raw_score), score_col, metric_score_direction
+            )
         except (ValueError, TypeError):
             diagnostics["skipped_rows"] += 1
             continue
@@ -625,6 +762,11 @@ def run_benchmark(
             for key in ("name", "id", "ligand", "chembl_id", "compound_id")
             if str(row.get(key, "")).strip()
         }
+        row_ids.update(
+            str(row.get(key, '')).strip()
+            for key in ('source_compound_id', 'source_id', 'parent_id', 'original_id')
+            if str(row.get(key, '')).strip()
+        )
         id_matches = _identifier_matches(active_ids, row_ids)
         smiles_match = bool(canonical and canonical in active_smiles)
         id_match = bool(id_matches)
@@ -645,6 +787,7 @@ def run_benchmark(
 
         scores.append(score)
         labels.append(label)
+        scored_flags.append(bool(row.get('_scored')))
         ranked_pairs.append((score, label))
         ranked_records.append(
             {
@@ -678,7 +821,11 @@ def run_benchmark(
     diagnostics["matched_active_entries"] = len(matched_entry_indexes)
     diagnostics["unmatched_active_entries"] = max(0, len(active_entries) - len(matched_entry_indexes))
 
-    result = compute_metrics(scores, labels)
+    diagnostics['scored_rows'] = aggregation.counts['scored']
+    diagnostics['failed_rows'] = aggregation.counts['failed']
+    result = compute_metrics(scores, labels, scored=scored_flags)
+    diagnostics['first_active_rank'] = result.first_active_rank
+    diagnostics['coverage'] = result.coverage
     result.label_diagnostics = diagnostics
     result.ranking_diagnostics = _ranking_diagnostics(ranked_records)
     return result
