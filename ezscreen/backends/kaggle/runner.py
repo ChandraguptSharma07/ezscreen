@@ -6,7 +6,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import requests as _req
 from rich.console import Console
@@ -567,12 +567,31 @@ def run_screening_job(
     accelerator: str = "nvidiaTeslaP100",
     engine: str = "unidock",
     kaggle_json_path: str | Path | None = None,
+    job_observer: Callable[[str, dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """
     Full pipeline: upload dataset → push kernel → poll → download output.
     Returns: {status, output_dir|None, error_type|None}
     """
     work_dir.mkdir(parents=True, exist_ok=True)
+
+    def observe(event: str, **details: Any) -> None:
+        if job_observer is not None:
+            job_observer(
+                event,
+                {
+                    "run_id": run_id,
+                    "work_dir": str(work_dir),
+                    "notebook_path": str(notebook_path),
+                    "engine": engine,
+                    "kaggle_json_path": (
+                        str(kaggle_json_path) if kaggle_json_path is not None else None
+                    ),
+                    **details,
+                },
+            )
+
+    observe("preparing")
 
     # Persist paths so resume_failed_shards can find them later
     receptor_pdb = receptor_pdbqt.parent / "receptor_prep.pdb"
@@ -610,6 +629,7 @@ def run_screening_job(
         accelerator=accelerator,
     )
     console.print(f"  [dim]Kernel: {kernel_ref}[/dim]")
+    observe("submitted", kernel_ref=kernel_ref, retry_count=0)
 
     retry_count = 0
     while retry_count <= retry_limit:
@@ -629,7 +649,18 @@ def run_screening_job(
                 kj_path=str(kaggle_json_path) if kaggle_json_path is not None else None,
                 engine=engine,
             )
-            return {"status": "complete", "output_dir": output_dir, "error_type": None}
+            observe(
+                "complete",
+                kernel_ref=kernel_ref,
+                output_dir=str(output_dir),
+                ended_epoch=time.time(),
+            )
+            return {
+                "status": "complete",
+                "output_dir": output_dir,
+                "error_type": None,
+                "kernel_ref": kernel_ref,
+            }
 
         if result["status"] == "retry":
             retry_count = result["retry_count"]
@@ -642,6 +673,7 @@ def run_screening_job(
                 work_dir=work_dir,
                 accelerator=accelerator,
             )
+            observe("submitted", kernel_ref=kernel_ref, retry_count=retry_count)
             continue
 
         # failed or timeout. Recheck under the owning account before giving up;
@@ -653,15 +685,45 @@ def run_screening_job(
             engine=engine,
         )
         if recovered_output is not None:
+            observe(
+                "complete",
+                kernel_ref=kernel_ref,
+                output_dir=str(recovered_output),
+                ended_epoch=time.time(),
+                recovered_after_poll_failure=True,
+            )
             return {
                 "status": "complete",
                 "output_dir": recovered_output,
                 "error_type": None,
                 "recovered_after_poll_failure": True,
+                "kernel_ref": kernel_ref,
             }
-        return {"status": result["status"], "output_dir": None, "error_type": result["error_type"]}
+        observe(
+            str(result["status"]),
+            kernel_ref=kernel_ref,
+            error_type=result["error_type"],
+            ended_epoch=time.time(),
+        )
+        return {
+            "status": result["status"],
+            "output_dir": None,
+            "error_type": result["error_type"],
+            "kernel_ref": kernel_ref,
+        }
 
-    return {"status": "failed", "output_dir": None, "error_type": "max_retries_exceeded"}
+    observe(
+        "failed",
+        kernel_ref=kernel_ref,
+        error_type="max_retries_exceeded",
+        ended_epoch=time.time(),
+    )
+    return {
+        "status": "failed",
+        "output_dir": None,
+        "error_type": "max_retries_exceeded",
+        "kernel_ref": kernel_ref,
+    }
 
 
 def _apply_account(account: dict | None) -> str | None:

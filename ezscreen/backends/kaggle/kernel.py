@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -10,10 +13,35 @@ from rich.console import Console
 from ezscreen.errors import KaggleForbiddenError, KaggleUnauthorizedError
 
 console = Console()
+MAX_KERNEL_SLUG_LEN = 50
 _MAX_RETRIES = 5
 _BACKOFF_BASE = 2
 # 409 = kernel version currently queued/saving — transient lock, safe to retry
 _TRANSIENT_CODES = ("409", "429", "500", "502", "503", "504", "rate")
+KAGGLE_BACKENDS = {
+    "cpu": "none",
+    "p100": "nvidiaTeslaP100",
+    "t4x2": "nvidiaTeslaT4",
+}
+
+
+def accelerator_for_backend(backend: str) -> str:
+    key = str(backend or "").strip().lower()
+    if key not in KAGGLE_BACKENDS:
+        raise ValueError(
+            f"Unknown Kaggle backend {backend!r}; choose cpu, p100, or t4x2"
+        )
+    return KAGGLE_BACKENDS[key]
+
+
+def kernel_slug(run_id: str) -> str:
+    """Return a deterministic Kaggle-safe kernel slug bounded for SaveKernel."""
+    safe = re.sub(r"[^a-z0-9-]+", "-", str(run_id).lower()).strip("-") or "run"
+    if len(safe) <= MAX_KERNEL_SLUG_LEN:
+        return safe
+    digest = hashlib.sha1(str(run_id).encode("utf-8")).hexdigest()[:8]
+    keep = MAX_KERNEL_SLUG_LEN - len(digest) - 1
+    return f"{safe[:keep].rstrip('-')}-{digest}"
 
 
 def _api():
@@ -46,28 +74,34 @@ def push_kernel(
     username: str,
     work_dir: Path,
     accelerator: str = "nvidiaTeslaP100",
+    backend: str | None = None,
 ) -> str:
     """Render and push the notebook to Kaggle. Returns kernel ref."""
     api = _api()
 
-    kernel_dir = work_dir / f"kernel_{run_id}"
+    slug = kernel_slug(run_id)
+    kernel_dir = Path(tempfile.gettempdir()) / "ezscreen_kaggle_kernels" / slug
     kernel_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(notebook_path, kernel_dir / "notebook.ipynb")
 
-    # run_id already carries the "ezs-" prefix — use it directly as the slug
-    slug = run_id
     # title must slugify to exactly the slug — replace hyphens with spaces so
     # Kaggle's slug derivation round-trips back to the same value
     title = slug.replace("-", " ")
     # Kaggle still needs GPU to be explicitly enabled or the notebook may start
-    # on a CPU-only runtime even when machine_shape is present. machine_shape
-    # still carries the desired accelerator selection; Kaggle exposes the
-    # dual-T4 shape as GPU_T4x2.
+    # on a CPU-only runtime even when machine_shape is present. Explicit
+    # ``none``/``cpu`` requests must disable it so CPU-only benchmark stages do
+    # not silently consume GPU quota.
     _MACHINE_SHAPE = {
         "nvidiaTeslaT4": "GPU_T4x2",
         "nvidiaTeslaP100": "NvidiaTeslaP100",
     }
-    machine_shape = _MACHINE_SHAPE.get(accelerator)
+    accelerator_key = (
+        accelerator_for_backend(backend)
+        if backend is not None
+        else str(accelerator or "").strip()
+    )
+    enable_gpu = accelerator_key.lower() not in {"", "none", "cpu"}
+    machine_shape = _MACHINE_SHAPE.get(accelerator_key) if enable_gpu else None
     meta = {
         "id": f"{username}/{slug}",
         "title": title,
@@ -75,7 +109,7 @@ def push_kernel(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": True,
+        "enable_gpu": enable_gpu,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],

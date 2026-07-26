@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -219,6 +220,7 @@ def test_benchmark_cli_run_cell_writes_metrics_and_report(tmp_path: Path):
         "lig_0002,decoy,CCC,-6.0\n",
         encoding="utf-8",
     )
+    shutil.rmtree(cell / "reports")
 
     result = runner.invoke(app, ["benchmark", "run-cell", str(cell)])
 
@@ -907,6 +909,7 @@ def test_submit_kaggle_cell_archives_remote_outputs_without_local_docking(tmp_pa
         return {"shard_paths": [shard], "report": {"total_input": 2}}
 
     captured = {}
+    campaign = tmp_path / "campaign"
 
     def fake_render_vina_notebook(**kwargs):
         captured.update(kwargs)
@@ -922,6 +925,26 @@ def test_submit_kaggle_cell_archives_remote_outputs_without_local_docking(tmp_pa
             encoding="utf-8",
         )
         (out / "results_meta.json").write_text('{"engine":"unidock"}\n', encoding="utf-8")
+        observer = kwargs["job_observer"]
+        observer(
+            "preparing",
+            {
+                "run_id": kwargs["run_id"],
+                "work_dir": str(kwargs["work_dir"]),
+                "notebook_path": str(kwargs["notebook_path"]),
+                "engine": kwargs["engine"],
+                "kaggle_json_path": None,
+            },
+        )
+        observer("submitted", {"kernel_ref": "tester/kernel", "retry_count": 0})
+        observer(
+            "complete",
+            {
+                "kernel_ref": "tester/kernel",
+                "output_dir": str(out),
+                "ended_epoch": 1.0,
+            },
+        )
         return {"status": "complete", "output_dir": out, "error_type": None}
 
     monkeypatch.setattr("ezscreen.prep.ligands.shard_raw", fake_shard_raw)
@@ -937,16 +960,19 @@ def test_submit_kaggle_cell_archives_remote_outputs_without_local_docking(tmp_pa
         run_id="ezs-bench-test",
         n_shards=1,
         kaggle_username="tester",
+        campaign_dir=campaign,
+        campaign_account="acct1",
+        planned_gpu_hours=1.0,
     )
 
     metrics = json.loads((cell / "metrics_summary.json").read_text(encoding="utf-8"))
     provenance = json.loads((cell / "provenance.json").read_text(encoding="utf-8"))
     assert result["status"] == "complete"
     assert captured["prep_on_kaggle"] is True
-    assert captured["prep_cfg"]["enumerate_enabled"] is True
-    assert captured["prep_cfg"]["enumerate_protonation"] is True
-    assert captured["prep_cfg"]["enumerate_tautomers"] is True
-    assert captured["prep_cfg"]["max_variants_per_ligand"] >= 2
+    assert captured["prep_cfg"]["enumerate_enabled"] is False
+    assert captured["prep_cfg"]["enumerate_protonation"] is False
+    assert captured["prep_cfg"]["enumerate_tautomers"] is False
+    assert captured["prep_cfg"]["max_variants_per_ligand"] == 1
     assert captured["box_center"] == [1.0, 2.0, 3.0]
     assert captured["receptor_filename"] == "receptor.pdbqt"
     assert (cell / "raw_outputs" / "scores.csv").exists()
@@ -955,7 +981,14 @@ def test_submit_kaggle_cell_archives_remote_outputs_without_local_docking(tmp_pa
     assert metrics["status"] == "complete"
     assert provenance["kaggle_runtime_identifiers"]["run_id"] == "ezs-bench-test"
     assert provenance["kaggle_runtime_identifiers"]["prep_on_kaggle"] is True
-    assert provenance["settings_snapshot"]["benchmark_prep_cfg"]["enumerate_enabled"] is True
+    assert provenance["settings_snapshot"]["benchmark_prep_cfg"]["enumerate_enabled"] is False
+    assert (cell / "inputs" / "intended_compounds.csv").exists()
+    assert (cell / "inputs" / "submitted_receptor.pdbqt").exists()
+    assert (cell / "inputs" / "submitted_library.ism").exists()
+    assert provenance["input_hashes_sha256"]["submitted_library"]
+    campaign_state = json.loads((campaign / "campaign_state.json").read_text())
+    assert campaign_state["status"] == "complete"
+    assert campaign_state["jobs"][0]["kernel_ref"] == "tester/kernel"
 
 
 
@@ -988,13 +1021,12 @@ def test_benchmark_cli_run_cell_fails_when_active_unscored(tmp_path: Path):
 
     failure = json.loads((cell / "failure_summary.json").read_text(encoding="utf-8"))
     metrics = json.loads((cell / "metrics_summary.json").read_text(encoding="utf-8"))
-    assert result.exit_code == 1
-    assert failure["status"] == "failed"
-    assert failure["failure_stage"] == "benchmark_run"
-    assert "active survival gate failed" in failure["failure_reason"].lower()
-    assert "meeko_failed" in failure["failure_reason"]
-    assert metrics["status"] == "failed"
-    assert metrics["ef1"] is None
+    assert result.exit_code == 0
+    assert failure["status"] == "complete"
+    assert metrics["status"] == "complete"
+    assert metrics["total_screened"] == 3
+    assert metrics["n_actives"] == 2
+    assert metrics["coverage"] == 0.666667
     assert metrics["unscored_diagnostics"]["active_unscored_entries"] == 1
     assert metrics["unscored_diagnostics"]["active_unscored_reason_counts"] == {"meeko_failed": 1}
 
@@ -1023,10 +1055,12 @@ def test_benchmark_cli_run_cell_fails_when_active_missing(tmp_path: Path):
 
     failure = json.loads((cell / "failure_summary.json").read_text(encoding="utf-8"))
     metrics = json.loads((cell / "metrics_summary.json").read_text(encoding="utf-8"))
-    assert result.exit_code == 1
-    assert "active survival gate failed" in failure["failure_reason"].lower()
-    assert "1 active entry missing" in failure["failure_reason"]
-    assert metrics["status"] == "failed"
+    assert result.exit_code == 0
+    assert failure["status"] == "complete"
+    assert metrics["status"] == "complete"
+    assert metrics["total_screened"] == 3
+    assert metrics["n_actives"] == 2
+    assert metrics["coverage"] == 0.666667
     assert metrics["unscored_diagnostics"]["active_missing_entries"] == 1
 
 

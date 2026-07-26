@@ -739,6 +739,22 @@ def test_run_kaggle_uses_sanitized_dataset_slug(monkeypatch):
         return f"{kwargs['username']}/{kwargs['slug']}"
 
     monkeypatch.setattr(worker_mod, 'commit_dataset_from_blob_tokens', fake_commit_dataset_from_blob_tokens)
+    monkeypatch.setattr(worker_mod, '_wait_for_dataset', lambda _ref: None)
+    monkeypatch.setattr(
+        worker_mod,
+        '_download_dataset_file',
+        lambda *_args, **_kwargs: Path('team_notebook.ipynb'),
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        '_finalize_kernel_run',
+        lambda *args, **kwargs: {'status': 'complete'},
+    )
+    monkeypatch.setattr(
+        worker_mod,
+        'push_kernel',
+        lambda **kwargs: f"{kwargs['username']}/{kwargs['run_id']}",
+    )
     monkeypatch.setenv('KAGGLE_USERNAME', 'worker-user')
 
     rc = worker_mod.run_kaggle(argparse.Namespace(worker_job_id='wjob_1578f745788f4ec5'), FakeClient())

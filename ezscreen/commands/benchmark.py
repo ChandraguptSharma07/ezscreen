@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import csv
+import hashlib
 import json
 import platform
 import secrets
@@ -89,7 +90,22 @@ def _git_commit(cwd: Path) -> str:
     return result.stdout.strip()
 
 
-def _update_provenance(cell_dir: Path, *, actives_path: Path, scores_csv: Path, score_col: str | None = None) -> Path:
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _update_provenance(
+    cell_dir: Path,
+    *,
+    actives_path: Path,
+    scores_csv: Path,
+    score_col: str | None = None,
+    intended_compounds_path: Path | None = None,
+) -> Path:
     provenance_path = cell_dir / "provenance.json"
     provenance = _load_json(provenance_path)
     timestamps = provenance.get("timestamps")
@@ -119,6 +135,23 @@ def _update_provenance(cell_dir: Path, *, actives_path: Path, scores_csv: Path, 
     settings_snapshot = provenance["settings_snapshot"]
     settings_snapshot["benchmark_actives_path"] = str(actives_path)
     settings_snapshot["benchmark_scores_csv"] = str(scores_csv)
+    input_hashes = provenance.get("input_hashes_sha256")
+    if not isinstance(input_hashes, dict):
+        input_hashes = {}
+    input_hashes.update(
+        {
+            "actives": _sha256(actives_path),
+            "scores": _sha256(scores_csv),
+        }
+    )
+    provenance["input_hashes_sha256"] = input_hashes
+    if intended_compounds_path:
+        settings_snapshot["benchmark_intended_compounds_path"] = str(
+            intended_compounds_path
+        )
+        provenance["input_hashes_sha256"]["intended_compounds"] = _sha256(
+            intended_compounds_path
+        )
     if score_col:
         settings_snapshot["benchmark_score_col"] = score_col
     return _write_json(provenance_path, provenance)
@@ -243,20 +276,8 @@ def _active_unscored_diagnostics(actives_path: Path, scores_csv: Path) -> dict[s
         "active_missing_labels": missing_entries,
     }
 def _enforce_benchmark_active_survival(diagnostics: dict[str, object]) -> None:
-    unscored = int(diagnostics.get("active_unscored_entries") or 0)
-    missing = int(diagnostics.get("active_missing_entries") or 0)
-    if not (unscored or missing):
-        return
-    reasons = diagnostics.get("active_unscored_reason_counts")
-    reason_text = ""
-    if isinstance(reasons, dict) and reasons:
-        reason_text = f"; unscored reasons={dict(sorted(reasons.items()))}"
-    raise ValueError(
-        "Benchmark active survival gate failed: "
-        f"{unscored} active entr{'y' if unscored == 1 else 'ies'} unscored, "
-        f"{missing} active entr{'y' if missing == 1 else 'ies'} missing"
-        f"{reason_text}. Metrics are not trustworthy until all actives survive prep/docking output generation."
-    )
+    """Retain active failures in QC while metric ranking assigns worst rank."""
+    return None
 
 
 
@@ -358,6 +379,7 @@ def generate_benchmark_artifacts(
     provenance_path: Path | None = None,
     context_dir: Path | None = None,
     score_col: str | None = None,
+    intended_compounds_path: Path | None = None,
 ) -> dict[str, object]:
     actives_path = actives_path.expanduser().resolve()
     scores_csv = scores_csv.expanduser().resolve()
@@ -406,7 +428,12 @@ def generate_benchmark_artifacts(
                 )
             raise
 
-        result = run_benchmark(actives_path, scores_csv, score_col=score_col)
+        result = run_benchmark(
+            actives_path,
+            scores_csv,
+            score_col=score_col,
+            intended_compounds_path=intended_compounds_path,
+        )
         pose_diagnostics = pose_retention_diagnostics(actives_path, scores_csv, score_col=score_col)
         ranking_diagnostics = result.ranking_diagnostics if isinstance(result.ranking_diagnostics, dict) else {}
         flags = ranking_diagnostics.get("flags") if isinstance(ranking_diagnostics.get("flags"), list) else []
@@ -420,11 +447,32 @@ def generate_benchmark_artifacts(
         if gate_flag not in flags:
             flags.append(gate_flag)
         result.ranking_diagnostics = ranking_diagnostics
+        report_path.parent.mkdir(parents=True, exist_ok=True)
         write_benchmark_report(result, report_path)
         if provenance_path:
-            _update_provenance(provenance_path.parent, actives_path=actives_path, scores_csv=scores_csv, score_col=score_col)
+            _update_provenance(
+                provenance_path.parent,
+                actives_path=actives_path,
+                scores_csv=scores_csv,
+                score_col=score_col,
+                intended_compounds_path=intended_compounds_path,
+            )
         timestamp = datetime.now(timezone.utc).isoformat()
         metrics = {
+            "metric_contract_version": 2,
+            "metric_contract": {
+                "unit": "source_compound",
+                "source_aggregation": "best_score_across_variants_conformers_receptors",
+                "auc_ties": "half_credit",
+                "ef_boundary_ties": "expected_active_fraction",
+                "failed_intended_compounds": "shared_worst_rank",
+                "bedroc_alpha": 20.0,
+            },
+            'ef20': result.ef20,
+            'bedroc': result.bedroc,
+            'bedroc_alpha': 20.0,
+            'coverage': result.coverage,
+            'first_active_rank': result.first_active_rank,
             "status": "complete",
             "generated_at": timestamp,
             "actives_path": str(actives_path),
@@ -504,6 +552,18 @@ def run_cell_benchmark(
     failure_path = cell_dir / "failure_summary.json"
     provenance_path = cell_dir / "provenance.json"
 
+    intended_compounds_path = next(
+        (
+            path
+            for path in (
+                cell_dir / 'inputs' / 'intended_compounds.csv',
+                cell_dir / 'inputs' / 'intended_compounds.smi',
+                cell_dir / 'inputs' / 'library.smi',
+            )
+            if path.exists()
+        ),
+        None,
+    )
     return generate_benchmark_artifacts(
         actives_path=actives_path,
         scores_csv=scores_csv,
@@ -513,6 +573,7 @@ def run_cell_benchmark(
         provenance_path=provenance_path,
         context_dir=cell_dir,
         score_col=score_col,
+        intended_compounds_path=intended_compounds_path,
     )
 
 
@@ -597,8 +658,15 @@ def submit_kaggle_cell(
     accelerator: str = "nvidiaTeslaT4",
     engine: str = "unidock",
     search_mode: str = "balance",
+    enumerate_enabled: bool = False,
+    intended_compounds_path: Path | None = None,
     retry_limit: int = 3,
     kaggle_username: str | None = None,
+    kaggle_json_path: Path | None = None,
+    campaign_dir: Path | None = None,
+    campaign_account: str | None = None,
+    campaign_stage: str = "baseline",
+    planned_gpu_hours: float | None = None,
 ) -> dict[str, object]:
     """Submit a benchmark cell to Kaggle and archive results back into the cell.
 
@@ -627,29 +695,63 @@ def submit_kaggle_cell(
     work_dir = Path.home() / ".ezscreen" / "runs" / run_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    if not kaggle_username:
+    if not kaggle_username or kaggle_json_path is None:
         try:
             creds = auth.load_credentials()
-            with open(creds.get("kaggle_json_path", ""), encoding="utf-8") as f:
-                kaggle_username = json.load(f).get("username") or "user"
+            loaded_path = Path(str(creds.get("kaggle_json_path", ""))).expanduser()
+            if kaggle_json_path is None and loaded_path.exists():
+                kaggle_json_path = loaded_path
+            if not kaggle_username:
+                with open(loaded_path, encoding="utf-8") as f:
+                    kaggle_username = json.load(f).get("username") or "user"
         except Exception:
-            kaggle_username = "user"
+            kaggle_username = kaggle_username or "user"
+
+    campaign_path = campaign_dir.expanduser().resolve() if campaign_dir else None
+    if campaign_path is not None and float(planned_gpu_hours or 0.0) <= 0.0:
+        raise ValueError(
+            "Supervised Kaggle submissions require positive --planned-gpu-hours"
+        )
+
+    def observe_campaign_job(event: str, details: dict[str, object]) -> None:
+        if campaign_path is None:
+            return
+        from ezscreen.benchmark import supervisor
+
+        if event == "preparing":
+            supervisor.register_job(
+                campaign_path,
+                {
+                    "job_id": run_id,
+                    "status": "preparing",
+                    "account": campaign_account or str(kaggle_username),
+                    "stage": campaign_stage,
+                    "planned_gpu_hours": float(planned_gpu_hours or 0.0),
+                    **details,
+                },
+            )
+            return
+        updates = dict(details)
+        updates["status"] = "failed" if event in {"timeout", "error"} else event
+        supervisor.update_registered_job(campaign_path, run_id, **updates)
 
     cfg = config.load()
     cfg = cfg if isinstance(cfg, dict) else {}
     prep_section = cfg.get("prep", {})
     prep_cfg = prep_section if isinstance(prep_section, dict) else {}
     prep_cfg = dict(prep_cfg)
-    prep_cfg["enumerate_enabled"] = True
-    prep_cfg.setdefault("enumerate_protonation", True)
-    prep_cfg.setdefault("enumerate_tautomers", True)
-    prep_cfg.setdefault("enumerate_stereo", False)
-    prep_cfg.setdefault("enumerate_ring", False)
+    prep_cfg["enumerate_enabled"] = enumerate_enabled
+    prep_cfg["enumerate_protonation"] = bool(enumerate_enabled)
+    prep_cfg["enumerate_tautomers"] = bool(enumerate_enabled)
+    prep_cfg["enumerate_stereo"] = False
+    prep_cfg["enumerate_ring"] = False
     try:
         max_variants = int(prep_cfg.get("max_variants_per_ligand", 4))
     except (TypeError, ValueError):
         max_variants = 4
-    prep_cfg["max_variants_per_ligand"] = max(2, max_variants)
+    prep_cfg["max_variants_per_ligand"] = (
+        max(2, max_variants) if enumerate_enabled else 1
+    )
 
     shard_result = ligand_prep.shard_raw(
         input_path=ligands,
@@ -659,6 +761,52 @@ def submit_kaggle_cell(
     shard_paths = [Path(path) for path in shard_result["shard_paths"]]
     if not shard_paths:
         raise RuntimeError("Benchmark ligand library produced no raw shards")
+
+    inputs_dir = cell_dir / "inputs"
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    receptor_archive = inputs_dir / "submitted_receptor.pdbqt"
+    library_archive = inputs_dir / f"submitted_library{ligands.suffix.lower()}"
+    shutil.copy2(receptor_pdbqt, receptor_archive)
+    shutil.copy2(ligands, library_archive)
+
+    intended_archive = inputs_dir / "intended_compounds.csv"
+    if intended_compounds_path is not None:
+        intended_compounds_path = intended_compounds_path.expanduser().resolve()
+        if not intended_compounds_path.exists():
+            raise FileNotFoundError(
+                f"Intended-compound manifest not found: {intended_compounds_path}"
+            )
+        if intended_compounds_path != intended_archive.resolve():
+            shutil.copy2(intended_compounds_path, intended_archive)
+    else:
+        intended_rows: list[dict[str, str]] = []
+        for shard_path in shard_paths:
+            if shard_path.suffix.lower() not in {".smi", ".ism"}:
+                raise ValueError(
+                    "Non-SMILES benchmark inputs require --intended-compounds so "
+                    "failed source compounds remain in the metric denominator"
+                )
+            for line in shard_path.read_text(encoding="utf-8").splitlines():
+                parts = line.split(maxsplit=1)
+                if not parts:
+                    continue
+                smiles = parts[0]
+                name = parts[1].strip() if len(parts) > 1 else ""
+                source_id = name or f"source_{len(intended_rows) + 1:08d}"
+                intended_rows.append(
+                    {
+                        "source_compound_id": source_id,
+                        "name": name,
+                        "smiles": smiles,
+                    }
+                )
+        with intended_archive.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle,
+                fieldnames=["source_compound_id", "name", "smiles"],
+            )
+            writer.writeheader()
+            writer.writerows(intended_rows)
 
     notebook_src = kaggle_runner.render_vina_notebook(
         run_id=run_id,
@@ -689,6 +837,8 @@ def submit_kaggle_cell(
         retry_limit=retry_limit,
         accelerator=accelerator,
         engine=engine,
+        kaggle_json_path=kaggle_json_path,
+        job_observer=observe_campaign_job if campaign_path is not None else None,
     )
     if result.get("status") != "complete":
         _write_json(
@@ -721,6 +871,7 @@ def submit_kaggle_cell(
             "accelerator_requested": accelerator,
             "engine": engine,
             "prep_on_kaggle": True,
+            "enumerate_enabled": enumerate_enabled,
             "shard_count": len(shard_paths),
         }
     )
@@ -729,7 +880,22 @@ def submit_kaggle_cell(
     if not isinstance(settings_snapshot, dict):
         settings_snapshot = {}
     settings_snapshot["benchmark_prep_cfg"] = prep_cfg
+    settings_snapshot["benchmark_box_center"] = center
+    settings_snapshot["benchmark_box_size"] = size
+    settings_snapshot["benchmark_search_mode"] = search_mode
     provenance["settings_snapshot"] = settings_snapshot
+    input_hashes = provenance.get("input_hashes_sha256")
+    if not isinstance(input_hashes, dict):
+        input_hashes = {}
+    input_hashes.update(
+        {
+            "submitted_receptor": _sha256(receptor_archive),
+            "submitted_library": _sha256(library_archive),
+            "intended_compounds": _sha256(intended_archive),
+            "rendered_notebook": _sha256(notebook_path),
+        }
+    )
+    provenance["input_hashes_sha256"] = input_hashes
     _write_json(cell_dir / "provenance.json", provenance)
 
     actives_for_metrics = actives_path if actives_path else cell_dir / "inputs" / "actives.smi"

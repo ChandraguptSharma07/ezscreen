@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -57,6 +58,30 @@ def _notify(run_id: str, status: str) -> None:
 
 def _classify_error(msg: str) -> str:
     m = msg.lower()
+    if (
+        "make: ***" in m
+        or "compilation terminated" in m
+        or "linker command failed" in m
+        or (
+            re.search(r"\[[^\]]*build[^\]]*\.log\]", m) is not None
+            and "error:" in m
+        )
+    ):
+        return "build_failure"
+    if any(
+        marker in m
+        for marker in (
+            "http error 429",
+            "http error 500",
+            "http error 502",
+            "http error 503",
+            "http error 504",
+            "bad gateway",
+            "connection reset",
+            "temporary failure",
+        )
+    ):
+        return "transient_network"
     if "preempt" in m or "interrupt" in m:
         return "preempted"
     if "out of memory" in m or "oom" in m or "cuda out" in m:
@@ -143,7 +168,7 @@ def poll_until_done(
                     console.print(f"\n  [red]Kaggle failureMessage:[/red] {errmsg}")
                 console.print("\n  [dim]Fetching notebook logs...[/dim]")
                 _fetch_and_show_logs(kernel_ref)
-                if error_type in ("preempted", "gpu_oom") and retries < retry_limit:
+                if error_type in ("preempted", "gpu_oom", "transient_network") and retries < retry_limit:
                     retries += 1
                     console.print(f"\n  [yellow]⟳ Retry {retries}/{retry_limit} — {error_type}[/yellow]")
                     return {"status": "retry", "error_type": error_type, "retry_count": retries}

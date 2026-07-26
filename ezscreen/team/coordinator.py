@@ -61,7 +61,7 @@ def start_team_job(
     shard_paths: list[Path],
     notebook_path: Path,
     engine: str,
-    accelerator: str,
+    accelerator: str = "nvidiaTeslaP100",
     team_member_assignments: list[dict[str, Any]] | None = None,
     receptor_files: list[Path] | None = None,
 ) -> dict[str, Any]:

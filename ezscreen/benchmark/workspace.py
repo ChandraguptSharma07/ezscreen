@@ -5,6 +5,12 @@ import json
 import shutil
 
 _DEFAULT_METRICS_SUMMARY = {
+    "metric_contract_version": 2,
+    'ef20': None,
+    'bedroc': None,
+    'bedroc_alpha': 20.0,
+    'coverage': None,
+    'first_active_rank': None,
     "status": "pending",
     "generated_at": "",
     "actives_path": "",
