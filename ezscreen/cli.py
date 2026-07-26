@@ -347,6 +347,36 @@ def benchmark_submit_kaggle_cell(
     accelerator: str = typer.Option("nvidiaTeslaT4", "--accelerator", help="Kaggle accelerator metadata value"),
     engine: str = typer.Option("unidock", "--engine", help="Kaggle docking engine"),
     search_mode: str = typer.Option("balance", "--search-mode", help="Kaggle notebook search mode"),
+    enumerate_enabled: bool = typer.Option(
+        False,
+        "--enumerate/--no-enumerate",
+        help="Enumerate variants; disabled for the paper baseline",
+    ),
+    intended_compounds: Path = typer.Option(
+        None,
+        "--intended-compounds",
+        help="Source-compound denominator manifest; required for non-SMILES inputs",
+    ),
+    campaign_dir: Path = typer.Option(
+        None,
+        "--campaign-dir",
+        help="Campaign supervised by campaign_state.json",
+    ),
+    campaign_account: str = typer.Option(
+        None,
+        "--campaign-account",
+        help="Non-secret Kaggle account label for quota accounting",
+    ),
+    campaign_stage: str = typer.Option(
+        "baseline",
+        "--campaign-stage",
+        help="Quota allocation stage",
+    ),
+    planned_gpu_hours: float = typer.Option(
+        None,
+        "--planned-gpu-hours",
+        help="Required positive quota reservation for supervised submissions",
+    ),
 ) -> None:
     """Submit one benchmark cell to Kaggle, then archive outputs and compute metrics."""
     from ezscreen.commands import benchmark as _benchmark
@@ -364,6 +394,12 @@ def benchmark_submit_kaggle_cell(
             accelerator=accelerator,
             engine=engine,
             search_mode=search_mode,
+            enumerate_enabled=enumerate_enabled,
+            intended_compounds_path=intended_compounds,
+            campaign_dir=campaign_dir,
+            campaign_account=campaign_account,
+            campaign_stage=campaign_stage,
+            planned_gpu_hours=planned_gpu_hours,
         )
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         console.print(f"[red]{exc}[/red]")
@@ -486,6 +522,753 @@ def benchmark_summarize(
     console.print(f"  failures   -> {result['failure_path']}")
     console.print(f"  throughput -> {result['throughput_path']}")
     console.print(f"  variance   -> {result['variance_path']}")
+
+
+@benchmark_app.command("supervise")
+def benchmark_supervise(
+    campaign_dir: Path = typer.Argument(
+        ..., help="Path to a benchmark campaign directory"
+    ),
+    once: bool = typer.Option(
+        False, "--once", help="Poll once, persist state, then exit"
+    ),
+    poll_seconds: int = typer.Option(
+        30, "--poll-seconds", min=1, help="Seconds between polling cycles"
+    ),
+) -> None:
+    """Supervise Kaggle benchmark jobs with restart-safe quota and recovery state."""
+    from ezscreen.benchmark.supervisor import supervise_campaign
+
+    try:
+        result = supervise_campaign(
+            campaign_dir,
+            once=once,
+            poll_seconds=poll_seconds,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    state = result["state"]
+    quota = result["quota"]
+    console.print(
+        f"[green]Benchmark supervisor[/green] status={state.get('status')}"
+    )
+    console.print(
+        f"  planned={quota.get('planned_gpu_hours', 0)} GPU-h "
+        f"observed={quota.get('observed_gpu_hours', 0)} GPU-h"
+    )
+
+
+@benchmark_app.command("submit-notebook")
+def benchmark_submit_notebook(
+    campaign_dir: Path = typer.Argument(..., help="Benchmark campaign directory"),
+    notebook: Path = typer.Argument(..., help="Rendered notebook to submit"),
+    inputs: list[Path] = typer.Option(
+        ..., "--input", help="Immutable notebook input; repeat for multiple files"
+    ),
+    run_id: str = typer.Option(..., "--run-id", help="Unique Kaggle kernel id"),
+    job_id: str = typer.Option(None, "--job-id", help="Campaign job id"),
+    stage: str = typer.Option("smoke", "--stage", help="Campaign quota stage"),
+    backend: str = typer.Option(
+        "cpu", "--backend", help="Compute backend: cpu, p100, or t4x2"
+    ),
+    account: str = typer.Option(
+        None, "--account", help="Saved Kaggle account label; auto-selects if omitted"
+    ),
+    planned_gpu_hours: float = typer.Option(
+        0.0, "--planned-gpu-hours", help="GPU reservation; must be zero for CPU"
+    ),
+    resume_blocked: bool = typer.Option(
+        False,
+        "--resume-blocked",
+        help="Resume an explicitly authorized blocked campaign repair",
+    ),
+    dataset_ref: str = typer.Option(
+        None,
+        "--dataset-ref",
+        help="Reuse an already-mounted immutable Kaggle owner/slug dataset",
+    ),
+    supersedes: list[str] = typer.Option(
+        None,
+        "--supersedes",
+        help="Prior campaign job replaced by this retry; repeat as needed",
+    ),
+    finalizer: str = typer.Option(
+        None,
+        "--finalizer",
+        help="Post-recovery finalizer: bayesbind-vina or bayesbind-gnina",
+    ),
+    intended_csv: Path = typer.Option(
+        None,
+        "--intended-csv",
+        help="Frozen intended compounds CSV required by BayesBind finalizers",
+    ),
+) -> None:
+    """Submit an auditable notebook using the same backend path as users."""
+    from ezscreen.benchmark.kaggle_notebook import submit_notebook
+
+    try:
+        result = submit_notebook(
+            campaign_dir,
+            notebook,
+            inputs,
+            run_id=run_id,
+            job_id=job_id,
+            stage=stage,
+            backend=backend,
+            account_name=account,
+            planned_gpu_hours=planned_gpu_hours,
+            resume_blocked=resume_blocked,
+            dataset_ref=dataset_ref,
+            supersedes_job_ids=supersedes,
+            finalizer=finalizer,
+            intended_csv=intended_csv,
+        )
+    except (ValueError, FileNotFoundError, RuntimeError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]Benchmark notebook submitted[/green] "
+        f"{result['kernel_ref']} backend={result['backend']}"
+    )
+
+
+@benchmark_app.command("recover-smina")
+def benchmark_recover_smina(
+    output_dir: Path = typer.Argument(
+        ..., help="Directory containing smina logs/ and poses/"
+    ),
+    expected_attempts: int = typer.Option(
+        None, "--expected-attempts", min=1, help="Strict expected docking count"
+    ),
+) -> None:
+    """Recover auditable smina scores from normal log and pose outputs."""
+    from ezscreen.benchmark.smina_output import recover_smina_directory
+
+    try:
+        result = recover_smina_directory(
+            output_dir, expected_attempts=expected_attempts
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]Recovered smina outputs[/green] "
+        f"scored={result['scored']}/{result['expected_attempts']} "
+        f"gate_pass={result['gate_pass']}"
+    )
+
+
+@benchmark_app.command("freeze-bayesbind")
+def benchmark_freeze_bayesbind(
+    campaign_dir: Path = typer.Argument(..., help="Benchmark campaign directory"),
+    extracted_dir: Path = typer.Argument(
+        ..., help="Extracted official BayesBindV1.5 directory or its parent"
+    ),
+    archive: Path = typer.Option(
+        None, "--archive", help="Official BayesBindV1.5.tar.gz for hash verification"
+    ),
+    random_limit: int = typer.Option(
+        1000, "--random-limit", min=1, help="Paper-used random rows per target"
+    ),
+    active_limit: int = typer.Option(
+        1000, "--active-limit", min=1, help="Paper-used measured rows per target"
+    ),
+    active_cutoff: float = typer.Option(
+        5.0, "--active-cutoff", help="Paper pChEMBL active cutoff"
+    ),
+) -> None:
+    """Freeze paper rows and validity-corrected BayesBind source compounds."""
+    from ezscreen.benchmark.bayesbind_paper import freeze_bayesbind
+
+    try:
+        result = freeze_bayesbind(
+            campaign_dir,
+            extracted_dir,
+            archive_path=archive,
+            random_limit=random_limit,
+            active_limit=active_limit,
+            active_cutoff=active_cutoff,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind protocol frozen[/green] "
+        f"targets={result['target_count']} "
+        f"paper_rows={result['paper_intended_rows']} "
+        f"source_compounds={result['source_compounds']} "
+        f"label_conflicts={result['cross_label_conflicts']}"
+    )
+
+@benchmark_app.command("extract-bayesbind-ligands")
+def benchmark_extract_bayesbind_ligands(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    archive: Path = typer.Option(
+        None, "--archive", help="Official BigBindV1.5.tar.gz path; defaults to campaign inputs"
+    ),
+    inventory: Path = typer.Option(
+        None, "--inventory", help="BigBind member inventory JSONL; defaults to campaign archive_manifests"
+    ),
+    output_dir: Path = typer.Option(
+        None, "--output-dir", help="Extraction/provenance output directory"
+    ),
+) -> None:
+    """Resolve and selectively extract exact BayesBind ligand SDF bytes."""
+    from ezscreen.benchmark.bayesbind_paper import extract_exact_bayesbind_ligands
+
+    try:
+        result = extract_exact_bayesbind_ligands(
+            campaign_dir,
+            archive_path=archive,
+            inventory_path=inventory,
+            output_dir=output_dir,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind exact ligands extracted[/green] "
+        f"paper_rows={result['paper_row_count']} "
+        f"unique_ligands={result['unique_lig_file_count']}"
+    )
+    console.print(f"  manifest -> {result['manifest_path']}")
+
+@benchmark_app.command("render-bayesbind-vina")
+def benchmark_render_bayesbind_vina(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    target_id: str = typer.Argument(..., help="Exact target id from targets.json"),
+    output_notebook: Path = typer.Argument(..., help="Rendered Kaggle notebook path"),
+    run_id: str = typer.Option(..., "--run-id", help="Unique auditable run id"),
+    sample_size: int = typer.Option(
+        None, "--sample-size", min=2, help="Deterministic smoke/calibration subset; omit for full target"
+    ),
+    sample_seed: int = typer.Option(42, "--sample-seed", help="Deterministic sample and docking seed"),
+    exact_sdf: bool = typer.Option(
+        False,
+        "--exact-sdf/--reconstructed-smiles",
+        help="Use selectively extracted exact BigBind SDF bytes instead of SMILES reconstruction",
+    ),
+    ligand_workers: int = typer.Option(
+        1,
+        "--ligand-workers",
+        min=1,
+        help="Independent Vina ligand subprocesses; each keeps --cpu 1",
+    ),
+) -> None:
+    """Stage a paper-protocol CPU Vina notebook through the public workflow."""
+    from ezscreen.benchmark.bayesbind_paper import stage_vina_notebook
+
+    try:
+        result = stage_vina_notebook(
+            campaign_dir,
+            target_id,
+            output_notebook,
+            run_id=run_id,
+            sample_size=sample_size,
+            sample_seed=sample_seed,
+            use_exact_sdf=exact_sdf,
+            ligand_workers=ligand_workers,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind Vina notebook staged[/green] "
+        f"target={result['target_id']} compounds={result['sample_size']} "
+        f"actives={result['active_count']} random={result['random_count']}"
+    )
+    console.print(f"  notebook -> {result['notebook']}")
+    console.print(f"  manifest -> {result['manifest']}")
+
+
+@benchmark_app.command("freeze-bayesbind-full-run-plan")
+def benchmark_freeze_bayesbind_full_run_plan(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    calibration_output_dir: Path = typer.Argument(..., help="Finalized calibration output directory"),
+    calibration_stage_manifest: Path = typer.Argument(..., help="Calibration stage_manifest.json"),
+    method: str = typer.Option("vina", "--method", help="Method to plan: vina or gnina"),
+    target_id: list[str] = typer.Option(
+        None,
+        "--target-id",
+        help="Target id to include; repeat as needed, omit for all frozen targets",
+    ),
+    output_path: Path = typer.Option(
+        None,
+        "--output-path",
+        help="Plan JSON output path; defaults under campaign full_run_plans/",
+    ),
+    account_count: int = typer.Option(
+        None,
+        "--account-count",
+        min=1,
+        help="Override quota account count",
+    ),
+    max_notebooks_per_account: int = typer.Option(
+        None,
+        "--max-notebooks-per-account",
+        min=1,
+        help="Override max concurrent notebooks per account",
+    ),
+    safety_factor: float = typer.Option(
+        1.25,
+        "--safety-factor",
+        min=1.0,
+        help="Runtime multiplier applied to measured calibration seconds/compound",
+    ),
+    max_shard_wall_hours: float = typer.Option(
+        11.0,
+        "--max-shard-wall-hours",
+        min=0.1,
+        help="Maximum estimated walltime for each planned notebook shard",
+    ),
+) -> None:
+    """Freeze calibration-derived full-target shard and quota plan."""
+    from ezscreen.benchmark.bayesbind_paper import freeze_bayesbind_full_run_plan
+
+    try:
+        result = freeze_bayesbind_full_run_plan(
+            campaign_dir,
+            calibration_output_dir,
+            calibration_stage_manifest,
+            method=method,
+            target_ids=target_id,
+            output_path=output_path,
+            account_count=account_count,
+            max_notebooks_per_account=max_notebooks_per_account,
+            safety_factor=safety_factor,
+            max_shard_wall_hours=max_shard_wall_hours,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    quota = result["quota_gate"]
+    planning = result["planning"]
+    console.print(
+        f"[green]BayesBind full-run plan frozen[/green] "
+        f"method={result['method']} status={result['status']} "
+        f"targets={planning['target_count']} notebooks={planning['total_notebooks']} "
+        f"planned_gpu={quota['planned_gpu_hours']:.3f}h"
+    )
+    console.print(f"  plan -> {result['plan_path']}")
+
+
+@benchmark_app.command("render-bayesbind-plan-shard")
+def benchmark_render_bayesbind_plan_shard(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    plan_path: Path = typer.Argument(..., help="Ready full-run plan JSON"),
+    target_id: str = typer.Argument(..., help="Target id present in the plan"),
+    shard_index: int = typer.Argument(..., min=1, help="1-based shard index from the plan"),
+    output_notebook: Path = typer.Option(
+        None,
+        "--output-notebook",
+        help="Rendered notebook path; defaults under campaign notebooks/",
+    ),
+    ligand_workers: int = typer.Option(
+        None,
+        "--ligand-workers",
+        min=1,
+        help="Override Vina ligand workers for this shard",
+    ),
+    gnina_workers: int = typer.Option(
+        None,
+        "--gnina-workers",
+        min=1,
+        help="Override GNINA workers for this shard",
+    ),
+) -> None:
+    """Render one exact-SDF shard from a frozen BayesBind full-run plan."""
+    from ezscreen.benchmark.bayesbind_paper import stage_bayesbind_plan_shard
+
+    try:
+        result = stage_bayesbind_plan_shard(
+            campaign_dir,
+            plan_path,
+            target_id,
+            shard_index,
+            output_notebook=output_notebook,
+            ligand_workers=ligand_workers,
+            gnina_workers=gnina_workers,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind planned shard staged[/green] "
+        f"method={result['method']} target={result['target_id']} "
+        f"shard={result['shard_index']} compounds={result['sample_size']}"
+    )
+    console.print(f"  notebook -> {result['notebook']}")
+    console.print(f"  manifest -> {result['manifest']}")
+
+
+@benchmark_app.command("submit-bayesbind-plan-shards")
+def benchmark_submit_bayesbind_plan_shards(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    plan_path: Path = typer.Argument(..., help="Ready full-run plan JSON"),
+    target_id: list[str] = typer.Option(
+        None,
+        "--target-id",
+        help="Target id to submit; repeat as needed, omit for all plan targets",
+    ),
+    shard_index: list[int] = typer.Option(
+        None,
+        "--shard-index",
+        min=1,
+        help="Shard index to submit; repeat as needed, omit for all selected target shards",
+    ),
+    backend: str = typer.Option(
+        None,
+        "--backend",
+        help="Override backend; defaults cpu for Vina, t4x2 for GNINA",
+    ),
+    account_name: str = typer.Option(
+        None,
+        "--account",
+        help="Kaggle account label; omit for first healthy account",
+    ),
+    stage: str = typer.Option("baseline", "--stage", help="Supervisor quota stage label"),
+    max_submissions: int = typer.Option(
+        None,
+        "--max-submissions",
+        min=1,
+        help="Submit only the first N selected shards",
+    ),
+    resume_blocked: bool = typer.Option(
+        False,
+        "--resume-blocked",
+        help="Resume a blocked campaign before first submission",
+    ),
+) -> None:
+    """Stage and submit exact-SDF BayesBind shards from a frozen plan."""
+    from ezscreen.benchmark.bayesbind_paper import submit_bayesbind_plan_shards
+
+    try:
+        result = submit_bayesbind_plan_shards(
+            campaign_dir,
+            plan_path,
+            target_ids=target_id,
+            shard_indices=shard_index,
+            backend=backend,
+            account_name=account_name,
+            stage=stage,
+            max_submissions=max_submissions,
+            resume_blocked=resume_blocked,
+        )
+    except (RuntimeError, ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind planned shards submitted[/green] "
+        f"method={result['method']} backend={result['backend']} "
+        f"count={result['submitted_count']} planned_gpu={result['planned_gpu_hours']:.3f}h"
+    )
+
+
+@benchmark_app.command("finalize-bayesbind-plan-target")
+def benchmark_finalize_bayesbind_plan_target(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    plan_path: Path = typer.Argument(..., help="Ready full-run plan JSON"),
+    target_id: str = typer.Argument(..., help="Target id to finalize from completed plan shards"),
+    output_dir: Path = typer.Option(
+        None,
+        "--output-dir",
+        help="Target-level output directory; defaults under campaign final_results/",
+    ),
+) -> None:
+    """Merge completed BayesBind plan shards into target-level metrics."""
+    from ezscreen.benchmark.bayesbind_paper import finalize_bayesbind_plan_target
+
+    try:
+        result = finalize_bayesbind_plan_target(
+            campaign_dir,
+            plan_path,
+            target_id,
+            output_dir=output_dir,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    counts = result["counts"]
+    console.print(
+        f"[green]BayesBind plan target finalized[/green] "
+        f"method={result['method']} target={result['target_id']} "
+        f"coverage={result['coverage']:.3f} scored={counts['scored']} failed={counts['failed']}"
+    )
+    console.print(f"  metrics -> {result['metrics_path']}")
+
+
+@benchmark_app.command("preflight-bayesbind-execution")
+def benchmark_preflight_bayesbind_execution(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    method: str = typer.Option("vina", "--method", help="Method to preflight: vina or gnina"),
+    expected_target_count: int = typer.Option(
+        25,
+        "--expected-target-count",
+        min=1,
+        help="Expected target count for exact BayesBind protocol",
+    ),
+    plan_path: Path = typer.Option(
+        None,
+        "--plan-path",
+        help="Full-run plan JSON to preflight; defaults to newest ready method plan",
+    ),
+    output_path: Path = typer.Option(
+        None,
+        "--output-path",
+        help="Preflight JSON output path; defaults under campaign preflight/",
+    ),
+    minimum_free_gb_warning: float = typer.Option(
+        50.0,
+        "--minimum-free-gb-warning",
+        min=0.0,
+        help="Warn when campaign disk free space is below this GiB",
+    ),
+) -> None:
+    """Report exact BayesBind execution readiness without using credentials."""
+    from ezscreen.benchmark.bayesbind_paper import preflight_bayesbind_execution
+
+    try:
+        result = preflight_bayesbind_execution(
+            campaign_dir,
+            method=method,
+            expected_target_count=expected_target_count,
+            output_path=output_path,
+            minimum_free_gb_warning=minimum_free_gb_warning,
+            plan_path=plan_path,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind execution preflight written[/green] "
+        f"method={result['method']} status={result['status']} "
+        f"issues={len(result['issues'])} warnings={len(result['warnings'])}"
+    )
+    console.print(f"  next -> {result['next_action']}")
+    console.print(f"  preflight -> {result['preflight_path']}")
+
+
+@benchmark_app.command("audit-bayesbind-campaign")
+def benchmark_audit_bayesbind_campaign(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    plan_path: Path = typer.Argument(..., help="Ready full-run plan JSON"),
+    method: str = typer.Option(None, "--method", help="Expected method; defaults from plan"),
+    output_path: Path = typer.Option(
+        None,
+        "--output-path",
+        help="Audit JSON output path; defaults under final_results/",
+    ),
+    require_official_comparison: bool = typer.Option(
+        False,
+        "--require-official-comparison",
+        help="Require per-target official comparison JSON files to be ready",
+    ),
+    expected_target_count: int = typer.Option(
+        25,
+        "--expected-target-count",
+        min=1,
+        help="Expected number of plan targets for exact BayesBind protocol",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Exit nonzero when audit is not ready",
+    ),
+) -> None:
+    """Audit finalized BayesBind target outputs against a frozen full-run plan."""
+    from ezscreen.benchmark.bayesbind_paper import audit_bayesbind_campaign_results
+
+    try:
+        result = audit_bayesbind_campaign_results(
+            campaign_dir,
+            plan_path,
+            method=method,
+            output_path=output_path,
+            require_official_comparison=require_official_comparison,
+            expected_target_count=expected_target_count,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind campaign audit written[/green] "
+        f"method={result['method']} status={result['status']} "
+        f"targets={result['ready_target_count']}/{result['target_count']} "
+        f"issues={len(result['issues'])}"
+    )
+    console.print(f"  audit -> {result['audit_path']}")
+    if strict and result["status"] != "ready":
+        raise typer.Exit(1)
+
+
+@benchmark_app.command("compare-bayesbind-official")
+def benchmark_compare_bayesbind_official(
+    output_dir: Path = typer.Argument(..., help="Finalized rerun output directory"),
+    intended_csv: Path = typer.Argument(..., help="Frozen intended source-compound CSV"),
+    official_dir: Path = typer.Argument(..., help="Recovered official baseline reference directory"),
+    method: str = typer.Option("vina", "--method", help="Official method: vina or gnina"),
+    output_path: Path = typer.Option(
+        None,
+        "--output-path",
+        help="Comparison JSON output path; defaults into output_dir",
+    ),
+) -> None:
+    """Compare finalized BayesBind rerun outputs with official reference evidence."""
+    from ezscreen.benchmark.bayesbind_paper import compare_bayesbind_rerun_to_official
+
+    try:
+        result = compare_bayesbind_rerun_to_official(
+            output_dir,
+            intended_csv,
+            official_dir,
+            method=method,
+            output_path=output_path,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    counts = result["counts"]
+    console.print(
+        f"[green]BayesBind official comparison written[/green] "
+        f"target={result['target_id']} status={result['status']} "
+        f"paired={counts['paired_scored']} missing_rerun={counts['rerun_missing_intended']} "
+        f"missing_official={counts['official_missing_intended']}"
+    )
+    console.print(f"  comparison -> {result['comparison_path']}")
+
+
+@benchmark_app.command("recover-bayesbind-official-baseline")
+def benchmark_recover_bayesbind_official_baseline(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    method: str = typer.Option("vina", "--method", help="Official baseline method: vina or gnina"),
+    target_id: list[str] = typer.Option(
+        None,
+        "--target-id",
+        help="Target id to recover; repeat as needed, omit for all frozen targets",
+    ),
+    archive: Path = typer.Option(
+        None,
+        "--archive",
+        help="Official BayesBindBaselinesV1.5 archive path",
+    ),
+    inventory: Path = typer.Option(
+        None,
+        "--inventory",
+        help="Official baseline member inventory JSONL",
+    ),
+    output_dir: Path = typer.Option(
+        None,
+        "--output-dir",
+        help="Reference output directory",
+    ),
+) -> None:
+    """Recover and compare official BayesBind baseline score evidence."""
+    from ezscreen.benchmark.bayesbind_paper import recover_official_bayesbind_baseline
+
+    try:
+        result = recover_official_bayesbind_baseline(
+            campaign_dir,
+            method=method,
+            archive_path=archive,
+            inventory_path=inventory,
+            output_dir=output_dir,
+            target_ids=target_id,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    totals = result["totals"]
+    console.print(
+        f"[green]BayesBind official baseline recovered[/green] "
+        f"method={result['method']} status={result['status']} "
+        f"targets={totals['target_count']} rows={totals['official_result_rows']} "
+        f"unmatched={totals['source_unmatched']} missing_poses={totals['pose_members_missing']}"
+    )
+    console.print(f"  manifest -> {result['manifest_path']}")
+
+
+@benchmark_app.command("finalize-bayesbind-vina")
+def benchmark_finalize_bayesbind_vina(
+    output_dir: Path = typer.Argument(..., help="Recovered Kaggle output directory"),
+    intended_csv: Path = typer.Argument(..., help="Exact intended source-compound CSV"),
+) -> None:
+    """Calculate validity-corrected target metrics from recovered Vina outputs."""
+    from ezscreen.benchmark.bayesbind_paper import finalize_vina_output
+
+    try:
+        result = finalize_vina_output(output_dir, intended_csv)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind Vina output finalized[/green] "
+        f"target={result['target_id']} coverage={result['coverage']:.3f} "
+        f"EF1={result['ef1']:.3f} AUC={result['roc_auc']:.4f}"
+    )
+
+
+
+@benchmark_app.command("render-bayesbind-gnina")
+def benchmark_render_bayesbind_gnina(
+    campaign_dir: Path = typer.Argument(..., help="Frozen BayesBind campaign directory"),
+    target_id: str = typer.Argument(..., help="Exact target id from targets.json"),
+    output_notebook: Path = typer.Argument(..., help="Rendered Kaggle notebook path"),
+    run_id: str = typer.Option(..., "--run-id", help="Unique auditable run id"),
+    sample_size: int = typer.Option(
+        None, "--sample-size", min=2, help="Deterministic smoke/calibration subset; omit for full target"
+    ),
+    sample_seed: int = typer.Option(42, "--sample-seed", help="Deterministic sample seed"),
+    gnina_workers: int = typer.Option(
+        1,
+        "--gnina-workers",
+        min=1,
+        help="Independent GNINA ligand subprocesses; default 1 for GPU stability",
+    ),
+) -> None:
+    """Stage a paper-comparator GNINA full-docking notebook."""
+    from ezscreen.benchmark.bayesbind_paper import stage_gnina_notebook
+
+    try:
+        result = stage_gnina_notebook(
+            campaign_dir,
+            target_id,
+            output_notebook,
+            run_id=run_id,
+            sample_size=sample_size,
+            sample_seed=sample_seed,
+            gnina_workers=gnina_workers,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind GNINA notebook staged[/green] "
+        f"target={result['target_id']} compounds={result['sample_size']} "
+        f"actives={result['active_count']} random={result['random_count']}"
+    )
+    console.print(f"  notebook -> {result['notebook']}")
+    console.print(f"  manifest -> {result['manifest']}")
+
+
+@benchmark_app.command("finalize-bayesbind-gnina")
+def benchmark_finalize_bayesbind_gnina(
+    output_dir: Path = typer.Argument(..., help="Recovered Kaggle output directory"),
+    intended_csv: Path = typer.Argument(..., help="Exact intended source-compound CSV"),
+) -> None:
+    """Calculate validity-corrected target metrics from recovered GNINA outputs."""
+    from ezscreen.benchmark.bayesbind_paper import finalize_gnina_output
+
+    try:
+        result = finalize_gnina_output(output_dir, intended_csv)
+    except (ValueError, FileNotFoundError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    console.print(
+        f"[green]BayesBind GNINA output finalized[/green] "
+        f"target={result['target_id']} coverage={result['coverage']:.3f} "
+        f"EF1={result['ef1']:.3f} AUC={result['roc_auc']:.4f}"
+    )
 
 
 @team_app.command("serve")
@@ -989,4 +1772,3 @@ def team_disconnect_worker() -> None:
     state["github_repo"] = ""
     save_local_state(state)
     console.print(f"[green]Worker disconnected[/green] {result['member_id']}")
-
