@@ -93,7 +93,7 @@ _ENGINES: dict[str, EngineProfile] = {
         default_scoring="vina",
         supports_cnn=False,
         native_score_type="vina_kcal_mol",
-        implemented=False,
+        implemented=True,
         note="Local CPU baseline; no Kaggle account needed.",
     ),
     "smina": EngineProfile(

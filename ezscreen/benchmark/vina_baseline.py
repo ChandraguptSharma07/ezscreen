@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-import csv
 import json
-import math
-from pathlib import Path
 import secrets
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 
@@ -52,10 +50,29 @@ def render_vina_full_redock_notebook(
     num_modes: int = 1,
     cpu: int = 4,
     seed: int = 42,
+    vina_version: str = "1.2.7",
+    vina_binary_filename: str | None = None,
+    vina_binary_sha256: str | None = None,
+    receptor_filename: str = "receptor.pdbqt",
+    receptor_prep: str = "pdbqt",
+    center_ligand: bool = False,
+    ligand_box_padding: float | None = None,
+    ligand_box_lexicographic: bool = False,
+    ligand_input_mode: str = "smiles",
+    meeko_hydrate: bool = False,
+    vina_use_executable_defaults: bool = False,
+    sdf_archive_filenames: list[str] | None = None,
+    ligand_workers: int = 1,
 ) -> str:
     """Render a Kaggle notebook for same-prep full AutoDock Vina redocking."""
+    if receptor_prep not in {"pdbqt", "openbabel"}:
+        raise ValueError("receptor_prep must be pdbqt or openbabel")
+    if ligand_input_mode not in {"smiles", "sdf_manifest"}:
+        raise ValueError("ligand_input_mode must be smiles or sdf_manifest")
     cfg = _prep_config(prep_cfg)
     shards_py = repr(list(shard_filenames))
+    sdf_archives_py = repr(list(sdf_archive_filenames or []))
+    workers = max(1, int(ligand_workers))
     center_py = repr([float(v) for v in box_center])
     size_py = repr([float(v) for v in box_size])
     cfg_json = json.dumps(cfg, sort_keys=True)
@@ -64,7 +81,7 @@ def render_vina_full_redock_notebook(
 # Run ID   : {run_id}
 # Notebook : {notebook_index + 1} of {total_notebooks}
 # Shards   : {', '.join(shard_filenames)}
-# Engine   : autodock-vina-full-redock
+# Engine   : autodock-vina-{vina_version}-full-redock
 """
 
     install = r"""
@@ -82,12 +99,27 @@ def _run(cmd, *, timeout=None):
         raise RuntimeError(f"Command failed: {cmd}\n{result.stderr[-800:]}")
     return result
 
-VINA = pathlib.Path("/kaggle/working/vina_1.2.7_linux_x86_64")
+VINA_VERSION = __VINA_VERSION__
+VINA_URL = __VINA_URL__
+VINA_INPUT_FILENAME = __VINA_INPUT_FILENAME__
+VINA_EXPECTED_SHA256 = __VINA_EXPECTED_SHA256__
+VINA = pathlib.Path(f"/kaggle/working/vina_{VINA_VERSION}_linux_x86_64")
 if not VINA.exists():
-    urllib.request.urlretrieve(
-        "https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/v1.2.7/vina_1.2.7_linux_x86_64",
-        VINA,
-    )
+    if VINA_INPUT_FILENAME:
+        import hashlib
+        hits = list(pathlib.Path("/kaggle/input").rglob(VINA_INPUT_FILENAME))
+        if not hits:
+            raise FileNotFoundError(VINA_INPUT_FILENAME)
+        if VINA_EXPECTED_SHA256:
+            digest = hashlib.sha256(hits[0].read_bytes()).hexdigest()
+            if digest.lower() != VINA_EXPECTED_SHA256.lower():
+                raise RuntimeError(f"Vina binary SHA256 mismatch: {digest}")
+        shutil.copy2(hits[0], VINA)
+    else:
+        urllib.request.urlretrieve(
+            VINA_URL,
+            VINA,
+        )
     VINA.chmod(VINA.stat().st_mode | stat.S_IEXEC)
 version = subprocess.run([str(VINA), "--version"], capture_output=True, text=True)
 print("vina:", (version.stdout or version.stderr).strip())
@@ -96,13 +128,29 @@ try:
 except ImportError:
     _run("pip install rdkit -q", timeout=1200)
 _run("pip install meeko gemmi -q", timeout=1200)
+if __RECEPTOR_PREP__ == "openbabel":
+    _run("pip install openbabel-wheel==3.1.1.22 -q", timeout=1200)
 """
+    install = (
+        install.replace("__VINA_VERSION__", repr(vina_version))
+        .replace(
+            "__VINA_URL__",
+            repr(
+                f"https://github.com/ccsb-scripps/AutoDock-Vina/releases/download/"
+                f"v{vina_version}/vina_{vina_version}_linux_x86_64"
+            ),
+        )
+        .replace("__VINA_INPUT_FILENAME__", repr(vina_binary_filename))
+        .replace("__VINA_EXPECTED_SHA256__", repr(vina_binary_sha256))
+        .replace("__RECEPTOR_PREP__", repr(receptor_prep))
+    )
 
     locate = f"""
-import json, pathlib, shutil
+import hashlib, json, pathlib, shutil, subprocess, tarfile
 
 RUN_ID = {run_id!r}
 SHARD_FILENAMES = {shards_py}
+SDF_ARCHIVE_FILENAMES = {sdf_archives_py}
 BOX_CENTER = {center_py}
 BOX_SIZE = {size_py}
 PH = {float(ph)!r}
@@ -111,14 +159,73 @@ EXHAUSTIVENESS = {int(exhaustiveness)!r}
 NUM_MODES = {int(num_modes)!r}
 CPU = {int(cpu)!r}
 BASE_SEED = {int(seed)!r}
+RECEPTOR_FILENAME = {receptor_filename!r}
+RECEPTOR_PREP = {receptor_prep!r}
+CENTER_LIGAND = {bool(center_ligand)!r}
+LIGAND_BOX_PADDING = {None if ligand_box_padding is None else float(ligand_box_padding)!r}
+LIGAND_BOX_LEXICOGRAPHIC = {bool(ligand_box_lexicographic)!r}
+LIGAND_INPUT_MODE = {ligand_input_mode!r}
+MEEKO_HYDRATE = {bool(meeko_hydrate)!r}
+VINA_USE_EXECUTABLE_DEFAULTS = {bool(vina_use_executable_defaults)!r}
+LIGAND_WORKERS = {workers!r}
 
 input_root = pathlib.Path("/kaggle/input")
 preview = [str(p) for p in list(input_root.rglob("*"))[:30]]
-receptor_hits = list(input_root.rglob("receptor.pdbqt"))
+
+def _file_sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+receptor_hits = list(input_root.rglob(RECEPTOR_FILENAME))
 if not receptor_hits:
-    pathlib.Path("/kaggle/working/error.json").write_text(json.dumps({{"cell": "inputs", "message": "receptor.pdbqt not found", "preview": preview}}))
-    raise FileNotFoundError("receptor.pdbqt")
-RECEPTOR_PATH = receptor_hits[0]
+    pathlib.Path("/kaggle/working/error.json").write_text(json.dumps({{"cell": "inputs", "message": "receptor not found", "receptor_filename": RECEPTOR_FILENAME, "preview": preview}}))
+    raise FileNotFoundError(RECEPTOR_FILENAME)
+RECEPTOR_SOURCE = receptor_hits[0]
+if RECEPTOR_PREP == "openbabel":
+    RECEPTOR_PATH = pathlib.Path("/kaggle/working/receptor.pdbqt")
+    receptor_stdout = pathlib.Path("/kaggle/working/receptor_prep_stdout.log")
+    receptor_stderr = pathlib.Path("/kaggle/working/receptor_prep_stderr.log")
+    receptor_manifest = pathlib.Path("/kaggle/working/receptor_prep_manifest.json")
+    obabel = shutil.which("obabel")
+    if not obabel:
+        raise FileNotFoundError("openbabel-wheel did not provide obabel")
+    obabel_version = subprocess.run([obabel, "-V"], capture_output=True, text=True, timeout=60)
+    receptor_command = [obabel, "-xr", "-ipdb", str(RECEPTOR_SOURCE), "-opdbqt", "-O", str(RECEPTOR_PATH), "-p", "7"]
+    result = subprocess.run(
+        receptor_command,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    receptor_stdout.write_text(result.stdout)
+    receptor_stderr.write_text(result.stderr)
+    receptor_prep_payload = {{
+        "run_id": RUN_ID,
+        "tool": "Open Babel",
+        "pinned_distribution": "openbabel-wheel==3.1.1.22",
+        "version_stdout": obabel_version.stdout.strip(),
+        "version_stderr": obabel_version.stderr.strip(),
+        "command": receptor_command,
+        "returncode": result.returncode,
+        "source_path": str(RECEPTOR_SOURCE),
+        "source_bytes": RECEPTOR_SOURCE.stat().st_size,
+        "source_sha256": _file_sha256(RECEPTOR_SOURCE),
+        "output_path": str(RECEPTOR_PATH),
+        "output_bytes": RECEPTOR_PATH.stat().st_size if RECEPTOR_PATH.exists() else None,
+        "output_sha256": _file_sha256(RECEPTOR_PATH) if RECEPTOR_PATH.exists() else None,
+        "stdout_log": str(receptor_stdout),
+        "stdout_sha256": _file_sha256(receptor_stdout),
+        "stderr_log": str(receptor_stderr),
+        "stderr_sha256": _file_sha256(receptor_stderr),
+    }}
+    receptor_manifest.write_text(json.dumps(receptor_prep_payload, indent=2))
+    if result.returncode != 0 or not RECEPTOR_PATH.exists():
+        raise RuntimeError(f"Open Babel receptor prep failed: {{result.stderr[-800:]}}")
+else:
+    RECEPTOR_PATH = RECEPTOR_SOURCE
 LIGAND_PATHS = []
 missing = []
 for fn in SHARD_FILENAMES:
@@ -130,14 +237,54 @@ for fn in SHARD_FILENAMES:
 if not LIGAND_PATHS:
     pathlib.Path("/kaggle/working/error.json").write_text(json.dumps({{"cell": "inputs", "message": "no shard files found", "missing": missing, "preview": preview}}))
     raise FileNotFoundError("no shard files found")
-print("receptor:", RECEPTOR_PATH)
+EXACT_SDF_ROOT = pathlib.Path("/kaggle/working/exact_sdfs")
+EXACT_SDF_ROOT.mkdir(exist_ok=True)
+SDF_ARCHIVE_PATHS = []
+SDF_EXTRACTED_ROOTS = []
+for fn in SDF_ARCHIVE_FILENAMES:
+    hits = list(input_root.rglob(fn))
+    if len(hits) == 1:
+        SDF_ARCHIVE_PATHS.append(hits[0])
+        continue
+    if len(hits) > 1:
+        raise FileNotFoundError(f"SDF archive matched {{len(hits)}} files: {{fn}}")
+    extracted_name = pathlib.Path(fn).with_suffix("").name
+    roots = [p for p in input_root.rglob(extracted_name) if p.is_dir()]
+    if len(roots) != 1:
+        pathlib.Path("/kaggle/working/error.json").write_text(json.dumps({{"cell": "inputs", "message": "SDF archive or extracted directory match violation", "archive_filename": fn, "archive_match_count": 0, "extracted_name": extracted_name, "extracted_match_count": len(roots), "preview": preview}}, indent=2))
+        raise FileNotFoundError(f"SDF archive matched 0 files and extracted directory matched {{len(roots)}} dirs: {{fn}}")
+    SDF_EXTRACTED_ROOTS.append(roots[0])
+for archive_path in SDF_ARCHIVE_PATHS:
+    with tarfile.open(archive_path, "r:*") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            member_path = pathlib.PurePosixPath(member.name)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"Unsafe SDF archive member: {{member.name}}")
+            target_path = EXACT_SDF_ROOT / pathlib.Path(*member_path.parts)
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            source = archive.extractfile(member)
+            if source is None:
+                raise ValueError(f"Unreadable SDF archive member: {{member.name}}")
+            target_path.write_bytes(source.read())
+for root in SDF_EXTRACTED_ROOTS:
+    for source_path in root.rglob("*.sdf"):
+        rel = source_path.relative_to(root)
+        target_path = EXACT_SDF_ROOT / rel
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target_path)
+print("receptor source:", RECEPTOR_SOURCE)
+print("receptor prepared:", RECEPTOR_PATH)
 print("shards:", [str(p) for p in LIGAND_PATHS])
 print("missing shards ignored:", missing)
+print("sdf archives:", [str(p) for p in SDF_ARCHIVE_PATHS])
+print("sdf extracted roots:", [str(p) for p in SDF_EXTRACTED_ROOTS])
 print("free disk GB:", round(shutil.disk_usage("/kaggle/working").free / 1e9, 2))
 """
 
     prep = r"""
-import csv, math, pathlib, re, subprocess, tempfile
+import csv, hashlib, math, pathlib, re, subprocess, tempfile
 from rdkit import Chem
 from rdkit.Chem import AllChem, AddHs
 from rdkit.Chem.Descriptors import MolWt
@@ -150,6 +297,7 @@ PDBQT_DIR.mkdir(exist_ok=True)
 MAX_HEAVY_ATOMS = int(PREP_CFG.get("max_heavy_atoms", 70))
 MAX_MW = float(PREP_CFG.get("max_mw", 700.0))
 MAX_ROT_BONDS = int(PREP_CFG.get("max_rotatable_bonds", 20))
+ENABLE_GPU_SIZE_FILTER = bool(PREP_CFG.get("enable_gpu_size_filter", True))
 MMFF_MAX_ITERS = int(PREP_CFG.get("mmff_max_iters", 0))
 FORCE_FIELD = str(PREP_CFG.get("force_field", "MMFF94")).upper()
 AUTODOCK_ATOMIC_NUMS = frozenset({1, 6, 7, 8, 9, 12, 15, 16, 17, 20, 25, 26, 30, 35, 53})
@@ -185,7 +333,33 @@ def _conformer_qc(mol_h):
                 return "steric_clash"
     return ""
 
-def _entries_from_path(path):
+def _effective_box_from_conformer(mol_h):
+    conf = mol_h.GetConformer()
+    xyz = [conf.GetAtomPosition(i) for i in range(conf.GetNumAtoms())]
+    mins = [min(getattr(p, axis) for p in xyz) for axis in ("x", "y", "z")]
+    maxs = [max(getattr(p, axis) for p in xyz) for axis in ("x", "y", "z")]
+    if CENTER_LIGAND:
+        centroid = [sum(getattr(p, axis) for p in xyz) / len(xyz) for axis in ("x", "y", "z")]
+        for atom_idx, point in enumerate(xyz):
+            conf.SetAtomPosition(
+                atom_idx,
+                (
+                    point.x + BOX_CENTER[0] - centroid[0],
+                    point.y + BOX_CENTER[1] - centroid[1],
+                    point.z + BOX_CENTER[2] - centroid[2],
+                ),
+            )
+    effective_box = list(BOX_SIZE)
+    if LIGAND_BOX_PADDING is not None:
+        ligand_box = [maxs[axis] - mins[axis] + 2.0 * LIGAND_BOX_PADDING for axis in range(3)]
+        effective_box = (
+            list(max(tuple(ligand_box), tuple(BOX_SIZE)))
+            if LIGAND_BOX_LEXICOGRAPHIC
+            else [max(ligand_box[i], BOX_SIZE[i]) for i in range(3)]
+        )
+    return effective_box
+
+def _smiles_entries_from_path(path):
     suffix = path.suffix.lower()
     if suffix not in {".smi", ".smiles", ".ism"}:
         raise RuntimeError(f"Vina baseline notebook expects SMILES shards from shard_raw; got {path.name}")
@@ -194,24 +368,78 @@ def _entries_from_path(path):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        parts = line.split("\t", 1)
+        parts = line.split("	", 1)
         if len(parts) == 1:
             parts = line.split(None, 1)
         rows.append((parts[0], parts[1].strip() if len(parts) > 1 else ""))
     return rows
 
-entries = []
-for shard_path in LIGAND_PATHS:
-    prefix = re.sub(r"[^A-Za-z0-9]+", "_", shard_path.stem).strip("_") or "shard"
-    entries.extend((smi, name, prefix) for smi, name in _entries_from_path(shard_path))
+def _read_first_sdf(path):
+    supplier = Chem.SDMolSupplier(str(path), sanitize=False, removeHs=False)
+    mol = next((mol for mol in supplier if mol is not None), None)
+    if mol is None:
+        raise ValueError(f"no readable SDF molecule: {path.name}")
+    try:
+        Chem.SanitizeMol(mol)
+    except Exception:
+        pass
+    if mol.GetNumConformers() < 1:
+        raise ValueError(f"SDF lacks conformer: {path.name}")
+    return mol
 
-if PREP_CFG.get("enumerate_enabled", True) and entries:
+def _sdf_entries_from_manifest(path):
+    rows = []
+    for record in csv.DictReader(path.open(newline="")):
+        sdf_filename = record.get("sdf_filename") or record.get("sdf_path") or ""
+        if not sdf_filename:
+            raise ValueError(f"SDF manifest row lacks sdf_filename in {path.name}")
+        hits = list(EXACT_SDF_ROOT.rglob(pathlib.PurePosixPath(sdf_filename).name))
+        if not hits:
+            hits = list(input_root.rglob(pathlib.PurePosixPath(sdf_filename).name))
+        if not hits:
+            hits = list(EXACT_SDF_ROOT.rglob(sdf_filename.replace("\\", "/")))
+        if not hits:
+            hits = list(input_root.rglob(sdf_filename.replace("\\", "/")))
+        if not hits:
+            raise FileNotFoundError(f"SDF from manifest not found: {sdf_filename}")
+        if len(hits) != 1:
+            raise ValueError(f"SDF from manifest matched {len(hits)} files: {sdf_filename}")
+        sdf_path = hits[0]
+        data = sdf_path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        expected_digest = record.get("sdf_sha256") or ""
+        if expected_digest and digest != expected_digest:
+            raise ValueError(f"SDF hash drift for {record.get('source_compound_id') or sdf_filename}: {digest}")
+        rows.append(
+            {
+                "name": record.get("source_compound_id") or record.get("name") or sdf_path.stem,
+                "input_smiles": record.get("canonical_smiles") or record.get("smiles") or "",
+                "lig_file": record.get("lig_file") or "",
+                "sdf_path": str(sdf_path),
+                "sdf_sha256": digest,
+                "mol": _read_first_sdf(sdf_path),
+            }
+        )
+    return rows
+
+if LIGAND_INPUT_MODE == "sdf_manifest":
+    manifest_entries = []
+    for manifest_path in LIGAND_PATHS:
+        manifest_entries.extend(_sdf_entries_from_manifest(manifest_path))
+    entries = manifest_entries
+else:
+    entries = []
+    for shard_path in LIGAND_PATHS:
+        prefix = re.sub(r"[^A-Za-z0-9]+", "_", shard_path.stem).strip("_") or "shard"
+        entries.extend({"smiles": smi, "name": name, "prefix": prefix} for smi, name in _smiles_entries_from_path(shard_path))
+
+if LIGAND_INPUT_MODE == "smiles" and PREP_CFG.get("enumerate_enabled", True) and entries:
     try:
         import subprocess
         _run("pip install gypsum-dl -q", timeout=1200)
         with tempfile.TemporaryDirectory() as td:
             src = pathlib.Path(td) / "in.smi"
-            src.write_text("\n".join(f"{s}\tsrc{i}" for i, (s, _n, _p) in enumerate(entries)))
+            src.write_text("\n".join(f"{entry['smiles']}	src{i}" for i, entry in enumerate(entries)))
             out = pathlib.Path(td) / "out"
             out.mkdir()
             args = [
@@ -240,75 +468,102 @@ if PREP_CFG.get("enumerate_enabled", True) and entries:
                     key = nm.split("_")[0] if nm.startswith("src") else nm
                     by_src.setdefault(key, []).append(Chem.MolToSmiles(mol))
             expanded = []
-            for i, (s, n, p) in enumerate(entries):
-                variants = by_src.get(f"src{i}") or [s]
+            for i, entry in enumerate(entries):
+                variants = by_src.get(f"src{i}") or [entry["smiles"]]
                 seen = []
-                for v in variants:
-                    if v and v not in seen:
-                        seen.append(v)
+                for variant in variants:
+                    if variant and variant not in seen:
+                        seen.append(variant)
                 if len(seen) <= 1:
-                    expanded.append((s, n, p))
+                    expanded.append(entry)
                 else:
-                    for k, v in enumerate(seen, 1):
-                        expanded.append((v, f"{n}_v{k}" if n else f"v{k}", p))
+                    for k, variant in enumerate(seen, 1):
+                        new_entry = dict(entry)
+                        new_entry["smiles"] = variant
+                        new_entry["name"] = f"{entry['name']}_v{k}" if entry["name"] else f"v{k}"
+                        expanded.append(new_entry)
             print(f"enumeration: {len(entries)} -> {len(expanded)} entries")
             entries = expanded
     except Exception as exc:
         print("enumeration failed; using original entries:", exc)
 
-preparer = MoleculePreparation()
+preparer = MoleculePreparation(hydrate=MEEKO_HYDRATE)
 pdbqt_files = []
 index_rows = []
 filtered_rows = []
 failed_prep_rows = []
 prep_passed = 0
-for smiles, mol_name, lig_prefix in entries:
-    mol = Chem.MolFromSmiles(smiles)
-    if mol is None:
-        failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "invalid_smiles"})
-        continue
-    frags = Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
-    fragment_note = ""
-    if len(frags) > 1:
-        mol = sorted(frags, key=lambda f: (CalcNumHeavyAtoms(f), f.GetNumAtoms(), MolWt(f)), reverse=True)[0]
-        fragment_note = "largest_fragment"
-    dock_smiles = Chem.MolToSmiles(mol)
-    if CalcNumHeavyAtoms(mol) > MAX_HEAVY_ATOMS or MolWt(mol) > MAX_MW or CalcNumRotatableBonds(mol) > MAX_ROT_BONDS:
-        filtered_rows.append({"name": mol_name, "smiles": dock_smiles})
-        continue
-    if any(a.GetAtomicNum() not in AUTODOCK_ATOMIC_NUMS for a in mol.GetAtoms()):
-        failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "unsupported_atoms"})
-        continue
+for entry_index, entry in enumerate(entries):
+    smiles = entry.get("smiles") or entry.get("input_smiles") or ""
+    mol_name = entry.get("name") or ""
+    lig_prefix = entry.get("prefix") or "exact_sdf"
     try:
-        mol_h = AddHs(mol)
-        params = AllChem.ETKDGv3()
-        params.randomSeed = 42
-        if AllChem.EmbedMolecule(mol_h, params) == -1:
-            failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "embed_failed"})
-            continue
-        if FORCE_FIELD == "UFF":
-            AllChem.UFFOptimizeMolecule(mol_h, maxIters=MMFF_MAX_ITERS)
+        if LIGAND_INPUT_MODE == "sdf_manifest":
+            mol = entry["mol"]
+            dock_smiles = smiles or Chem.MolToSmiles(Chem.RemoveHs(mol))
+            mol_h = AddHs(mol, addCoords=True)
+            prep_note = "released_sdf_addhs_addcoords"
         else:
-            AllChem.MMFFOptimizeMolecule(mol_h, mmffVariant=("MMFF94s" if FORCE_FIELD == "MMFF94S" else "MMFF94"), maxIters=MMFF_MAX_ITERS)
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "invalid_smiles"})
+                continue
+            frags = Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
+            prep_note = ""
+            if len(frags) > 1:
+                mol = sorted(frags, key=lambda f: (CalcNumHeavyAtoms(f), f.GetNumAtoms(), MolWt(f)), reverse=True)[0]
+                prep_note = "largest_fragment"
+            dock_smiles = Chem.MolToSmiles(mol)
+            if ENABLE_GPU_SIZE_FILTER and (
+                CalcNumHeavyAtoms(mol) > MAX_HEAVY_ATOMS
+                or MolWt(mol) > MAX_MW
+                or CalcNumRotatableBonds(mol) > MAX_ROT_BONDS
+            ):
+                filtered_rows.append({"name": mol_name, "smiles": dock_smiles})
+                continue
+            mol_h = AddHs(mol)
+            params = AllChem.ETKDGv3()
+            params.randomSeed = 42
+            if AllChem.EmbedMolecule(mol_h, params) == -1:
+                failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "embed_failed"})
+                continue
+            if FORCE_FIELD == "UFF":
+                AllChem.UFFOptimizeMolecule(mol_h, maxIters=MMFF_MAX_ITERS)
+            else:
+                AllChem.MMFFOptimizeMolecule(mol_h, mmffVariant=("MMFF94s" if FORCE_FIELD == "MMFF94S" else "MMFF94"), maxIters=MMFF_MAX_ITERS)
+        if any(a.GetAtomicNum() not in AUTODOCK_ATOMIC_NUMS for a in mol_h.GetAtoms()):
+            failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "unsupported_atoms"})
+            continue
+        effective_box = _effective_box_from_conformer(mol_h)
         qc = _conformer_qc(mol_h)
         setups = preparer.prepare(mol_h)
         pdbqt, ok, _ = PDBQTWriterLegacy.write_string(setups[0])
         if not ok:
             failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "pdbqt_write_failed"})
             continue
-    except Exception:
-        failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": "meeko_failed"})
+    except Exception as exc:
+        failed_prep_rows.append({"name": mol_name, "smiles": smiles, "reason": f"meeko_failed:{type(exc).__name__}"})
         continue
     lig_id = f"{lig_prefix}_lig_{prep_passed:05d}"
     clean = "\n".join(ln for ln in (f"REMARK lig_id {lig_id}\n" + pdbqt).splitlines() if ln.strip() != "END")
     path = PDBQT_DIR / f"{lig_id}.pdbqt"
     path.write_text(clean)
     pdbqt_files.append(str(path))
-    index_rows.append({"ligand": lig_id, "name": mol_name, "smiles": dock_smiles, "input_smiles": smiles, "conformer_qc": qc, "prep_note": fragment_note})
+    index_rows.append({
+        "ligand": lig_id, "name": mol_name, "smiles": dock_smiles,
+        "input_smiles": smiles, "conformer_qc": qc, "prep_note": prep_note,
+        "exact_lig_file": entry.get("lig_file", ""),
+        "exact_sdf_sha256": entry.get("sdf_sha256", ""),
+        "box_size_x": effective_box[0], "box_size_y": effective_box[1],
+        "box_size_z": effective_box[2],
+    })
     prep_passed += 1
 
 with open("/kaggle/working/index.csv", "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles", "input_smiles", "conformer_qc", "prep_note"])
+    writer = csv.DictWriter(f, fieldnames=[
+        "ligand", "name", "smiles", "input_smiles", "conformer_qc", "prep_note",
+        "exact_lig_file", "exact_sdf_sha256", "box_size_x", "box_size_y", "box_size_z",
+    ])
     writer.writeheader()
     writer.writerows(index_rows)
 if filtered_rows:
@@ -329,6 +584,7 @@ print(f"prep done: {len(pdbqt_files)} dockable, {len(filtered_rows)} filtered, {
 
     dock = r"""
 import csv, json, math, pathlib, re, shutil, subprocess, time, zlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from rdkit import Chem
 from rdkit.Chem import SDWriter
 
@@ -369,58 +625,75 @@ def _pose_to_sdf(pdbqt_path, info, score):
         print(f"pose conversion failed for {info['ligand']}: {exc}")
         return False
 
-start = time.perf_counter()
-for idx, lig in enumerate(pdbqt_files, 1):
+def _dock_one(lig):
     lig_path = pathlib.Path(lig)
     lig_id = lig_path.stem
     out_path = DOCKED / f"{lig_id}_out.pdbqt"
+    info = dict(index_by_lig.get(lig_id, {}))
+    info.setdefault("ligand", lig_id)
+    effective_box = [
+        float(info.get("box_size_x", BOX_SIZE[0])),
+        float(info.get("box_size_y", BOX_SIZE[1])),
+        float(info.get("box_size_z", BOX_SIZE[2])),
+    ]
     cmd = [
         str(VINA), "--receptor", str(RECEPTOR_PATH), "--ligand", str(lig_path), "--out", str(out_path),
         "--center_x", str(BOX_CENTER[0]), "--center_y", str(BOX_CENTER[1]), "--center_z", str(BOX_CENTER[2]),
-        "--size_x", str(BOX_SIZE[0]), "--size_y", str(BOX_SIZE[1]), "--size_z", str(BOX_SIZE[2]),
-        "--exhaustiveness", str(EXHAUSTIVENESS), "--num_modes", str(NUM_MODES), "--cpu", str(CPU),
-        "--seed", str(_stable_seed(lig_id)),
+        "--size_x", str(effective_box[0]), "--size_y", str(effective_box[1]), "--size_z", str(effective_box[2]),
+        "--cpu", str(CPU),
     ]
+    if not VINA_USE_EXECUTABLE_DEFAULTS:
+        cmd += ["--exhaustiveness", str(EXHAUSTIVENESS), "--num_modes", str(NUM_MODES), "--seed", str(_stable_seed(lig_id))]
     t0 = time.perf_counter()
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     except Exception as exc:
-        failed_rows.append({"ligand": lig_id, "name": index_by_lig.get(lig_id, {}).get("name", ""), "smiles": index_by_lig.get(lig_id, {}).get("smiles", ""), "raw_score": "", "reason": f"vina_exception:{type(exc).__name__}"})
-        continue
+        return {"ok": False, "ligand": lig_id, "name": info.get("name", ""), "smiles": info.get("smiles", ""), "raw_score": "", "reason": f"vina_exception:{type(exc).__name__}", "message": str(exc)[-500:]}
     seconds = round(time.perf_counter() - t0, 3)
     if result.returncode != 0 or not out_path.exists() or out_path.stat().st_size == 0:
-        failed_rows.append({"ligand": lig_id, "name": index_by_lig.get(lig_id, {}).get("name", ""), "smiles": index_by_lig.get(lig_id, {}).get("smiles", ""), "raw_score": "", "reason": "vina_failed"})
-        if len(failed_rows) <= 3:
-            print(f"{lig_id} failed: {result.stderr[-500:] or result.stdout[-500:]}")
-        continue
+        return {"ok": False, "ligand": lig_id, "name": info.get("name", ""), "smiles": info.get("smiles", ""), "raw_score": "", "reason": "vina_failed", "message": result.stderr[-500:] or result.stdout[-500:]}
     text = out_path.read_text(errors="replace")
     raw = _parse_score(text)
     try:
         score = float(raw)
     except ValueError:
-        failed_rows.append({"ligand": lig_id, "name": index_by_lig.get(lig_id, {}).get("name", ""), "smiles": index_by_lig.get(lig_id, {}).get("smiles", ""), "raw_score": raw, "reason": "unparseable_score"})
-        continue
+        return {"ok": False, "ligand": lig_id, "name": info.get("name", ""), "smiles": info.get("smiles", ""), "raw_score": raw, "reason": "unparseable_score", "message": ""}
     if not math.isfinite(score):
-        failed_rows.append({"ligand": lig_id, "name": index_by_lig.get(lig_id, {}).get("name", ""), "smiles": index_by_lig.get(lig_id, {}).get("smiles", ""), "raw_score": raw, "reason": "non_finite_score"})
-        continue
-    info = dict(index_by_lig.get(lig_id, {}))
-    info.setdefault("ligand", lig_id)
-    has_pose = _pose_to_sdf(out_path, info, score)
-    rows.append({
-        "ligand": lig_id, "score": score, "name": info.get("name", ""), "smiles": info.get("smiles", ""),
-        "engine": "vina-local", "seconds": seconds, "pose_retained": "1" if has_pose else "0",
-    })
-    if idx % 25 == 0 or idx == len(pdbqt_files):
-        progress = {
-            "run_id": RUN_ID, "processed": idx, "total": len(pdbqt_files), "scored": len(rows),
-            "failed": len(failed_rows), "elapsed_seconds": round(time.perf_counter() - start, 3),
-            "updated_at": datetime.now(timezone.utc).isoformat() if "datetime" in globals() else "",
-        }
-        pathlib.Path("/kaggle/working/progress.json").write_text(json.dumps(progress, indent=2))
-        print(progress)
+        return {"ok": False, "ligand": lig_id, "name": info.get("name", ""), "smiles": info.get("smiles", ""), "raw_score": raw, "reason": "non_finite_score", "message": ""}
+    return {"ok": True, "ligand": lig_id, "score": score, "out_path": str(out_path), "seconds": seconds, "info": info}
+
+start = time.perf_counter()
+processed = 0
+max_workers = min(max(1, int(LIGAND_WORKERS)), len(pdbqt_files))
+print(f"docking workers: {max_workers}; vina --cpu per ligand: {CPU}")
+with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    futures = [pool.submit(_dock_one, lig) for lig in pdbqt_files]
+    for future in as_completed(futures):
+        result = future.result()
+        processed += 1
+        if result.get("ok"):
+            info = dict(result["info"])
+            has_pose = _pose_to_sdf(pathlib.Path(result["out_path"]), info, result["score"])
+            rows.append({
+                "ligand": result["ligand"], "score": result["score"], "name": info.get("name", ""), "smiles": info.get("smiles", ""),
+                "engine": "vina-local", "seconds": result["seconds"], "pose_retained": "1" if has_pose else "0",
+            })
+        else:
+            failed_rows.append({k: result.get(k, "") for k in ["ligand", "name", "smiles", "raw_score", "reason"]})
+            if len(failed_rows) <= 3:
+                print(f"{result.get('ligand', '')} failed: {result.get('message', '')}")
+        if processed % 25 == 0 or processed == len(pdbqt_files):
+            progress = {
+                "run_id": RUN_ID, "processed": processed, "total": len(pdbqt_files), "scored": len(rows),
+                "failed": len(failed_rows), "elapsed_seconds": round(time.perf_counter() - start, 3),
+                "updated_at": datetime.now(timezone.utc).isoformat() if "datetime" in globals() else "",
+                "ligand_workers": max_workers, "vina_cpu_per_ligand": CPU,
+            }
+            pathlib.Path("/kaggle/working/progress.json").write_text(json.dumps(progress, indent=2))
+            print(progress)
 
 writer.close()
-rows.sort(key=lambda r: float(r["score"]))
+rows.sort(key=lambda r: (float(r["score"]), r["ligand"]))
 with open("/kaggle/working/scores.csv", "w", newline="") as f:
     fieldnames = ["ligand", "score", "name", "smiles", "engine", "seconds", "pose_retained"]
     out = csv.DictWriter(f, fieldnames=fieldnames)
@@ -432,12 +705,21 @@ if failed_rows:
         out.writeheader()
         out.writerows(failed_rows)
 summary = {
-    "run_id": RUN_ID, "engine": "autodock_vina_1.2.7_full_redock", "exhaustiveness": EXHAUSTIVENESS,
-    "num_modes": NUM_MODES, "cpu": CPU, "seed": BASE_SEED, "input_pdbqt_count": len(pdbqt_files),
+    "run_id": RUN_ID, "engine": f"autodock_vina_{VINA_VERSION}_full_redock",
+    "ligand_input_mode": LIGAND_INPUT_MODE,
+    "exhaustiveness": None if VINA_USE_EXECUTABLE_DEFAULTS else EXHAUSTIVENESS,
+    "num_modes": None if VINA_USE_EXECUTABLE_DEFAULTS else NUM_MODES,
+    "cpu": CPU, "seed": None if VINA_USE_EXECUTABLE_DEFAULTS else BASE_SEED,
+    "vina_search_options_provenance": "executable_defaults" if VINA_USE_EXECUTABLE_DEFAULTS else "explicit_rendered_options",
+    "meeko_hydrate": MEEKO_HYDRATE,
+    "ligand_workers": max_workers,
+    "vina_cpu_per_ligand": CPU,
+    "parallelism_provenance": "independent ligand subprocesses; Vina --cpu remains per ligand",
+    "input_pdbqt_count": len(pdbqt_files),
     "scored": len(rows), "failed_docking": len(failed_rows), "runtime_seconds": round(time.perf_counter() - start, 3),
 }
 pathlib.Path("/kaggle/working/vina_baseline_summary.json").write_text(json.dumps(summary, indent=2))
-pathlib.Path("/kaggle/working/results_meta.json").write_text(json.dumps({"score_type": "vina_kcal_mol", "score_col": "score", "engine": "vina-local"}, indent=2))
+pathlib.Path("/kaggle/working/results_meta.json").write_text(json.dumps({"score_type": "vina_kcal_mol", "score_col": "score", "engine": "vina-local", "ligand_input_mode": LIGAND_INPUT_MODE}, indent=2))
 shutil.rmtree(DOCKED, ignore_errors=True)
 shutil.rmtree(pathlib.Path("/kaggle/working/ligands"), ignore_errors=True)
 pathlib.Path("/kaggle/working/done.flag").write_text("ok\n")
@@ -540,10 +822,10 @@ def run_multi_account_vina_baseline(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from ezscreen import auth, checkpoint
+    from ezscreen.backends.kaggle import runner as kaggle_runner
     from ezscreen.backends.kaggle.dataset import upload_run_dataset
     from ezscreen.backends.kaggle.kernel import push_kernel
     from ezscreen.backends.kaggle.poller import poll_until_done
-    from ezscreen.backends.kaggle import runner as kaggle_runner
     from ezscreen.benchmark.kaggle_planning import (
         build_account_assignments,
         distribute_notebooks_across_accounts,

@@ -36,7 +36,7 @@ def test_implemented_engines_are_a_subset():
     everything = {e.key for e in engines.all_engines()}
     # UniDock-Pro's structure-based docking == UniDock, so it is not a distinct
     # engine; its value (LBVS/hybrid) is a future feature.
-    assert impl == {"unidock", "gnina", "diffdock"}
+    assert impl == {"unidock", "gnina", "diffdock", "vina-local"}
     assert impl < everything  # smina / unidock-pro declared but not offered
 
 
@@ -51,6 +51,14 @@ def test_diffdock_is_box_free():
     d = engines.get("diffdock")
     assert not d.requires_box
     assert d.scoring_functions == ()
+
+
+def test_cpu_vina_is_a_registered_backend():
+    cpu = engines.get("vina-local")
+    assert cpu.implemented
+    assert not cpu.requires_gpu
+    assert cpu.requires_box
+    assert cpu.default_scoring == "vina"
 
 
 def test_scoring_function_membership():
@@ -441,6 +449,55 @@ def test_run_screening_job_waits_for_sync_probe_before_submit(tmp_path, monkeypa
     assert steps == ["ready", "sync", "push"]
 
 
+def test_run_screening_job_observer_registers_before_push(tmp_path, monkeypatch):
+    from ezscreen.backends.kaggle import runner
+
+    receptor = tmp_path / "receptor.pdbqt"
+    receptor.write_text("RECEPTOR\n")
+    shard = tmp_path / "shard_0000.smi"
+    shard.write_text("CCO ligand\n")
+    notebook = tmp_path / "run.ipynb"
+    notebook.write_text("{}")
+    events = []
+
+    monkeypatch.setattr(runner, "upload_run_dataset", lambda **_kwargs: "user/data")
+    monkeypatch.setattr(runner, "_wait_for_dataset", lambda _ref: None)
+    monkeypatch.setattr(runner, "_wait_for_dataset_sync", lambda _ref: None)
+    monkeypatch.setattr(
+        runner,
+        "push_kernel",
+        lambda **_kwargs: events.append(("push", {})) or "user/kernel",
+    )
+    monkeypatch.setattr(
+        runner,
+        "poll_until_done",
+        lambda **_kwargs: {"status": "complete", "error_type": None},
+    )
+    monkeypatch.setattr(
+        runner,
+        "_download_output",
+        lambda _ref, work_dir, **_kwargs: work_dir / "output",
+    )
+
+    runner.run_screening_job(
+        run_id="ezs-observed",
+        receptor_pdbqt=receptor,
+        shard_paths=[shard],
+        notebook_path=notebook,
+        username="user",
+        work_dir=tmp_path / "run",
+        job_observer=lambda event, details: events.append((event, details)),
+    )
+
+    assert [event for event, _ in events] == [
+        "preparing",
+        "push",
+        "submitted",
+        "complete",
+    ]
+    assert events[2][1]["kernel_ref"] == "user/kernel"
+
+
 def test_multi_account_recovers_completed_kernel_after_poll_failure(tmp_path, monkeypatch):
     from ezscreen.backends.kaggle import runner
 
@@ -479,14 +536,10 @@ def test_run_screening_job_recovers_completed_kernel_after_poll_failure(
     from ezscreen.backends.kaggle import runner
 
     receptor = tmp_path / "receptor.pdbqt"
-    receptor.write_text("RECEPTOR
-")
-    (tmp_path / "receptor_prep.pdb").write_text("ATOM
-END
-")
+    receptor.write_text("RECEPTOR\n")
+    (tmp_path / "receptor_prep.pdb").write_text("ATOM\nEND\n")
     shard = tmp_path / "shard_0000.smi"
-    shard.write_text("CCO ligand
-")
+    shard.write_text("CCO ligand\n")
     notebook = tmp_path / "run.ipynb"
     notebook.write_text("{}")
     work_dir = tmp_path / "run"
