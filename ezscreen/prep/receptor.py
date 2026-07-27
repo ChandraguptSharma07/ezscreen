@@ -423,6 +423,7 @@ def _infer_element(atom_name: str, resname: str = "") -> str:
         return two
     return name[0].upper()
 
+
 def _ensure_element_column(lines: list[str]) -> list[str]:
     """Pad ATOM/HETATM lines to 80 chars and fill blank element column (76-78)."""
     out = []
@@ -674,7 +675,9 @@ def _pqr_residue_assignments(pqr_path: Path) -> dict[str, Any]:
     return {"assignments": assignments, "fallback_by_resseq": fallback_by_resseq}
 
 
-def _apply_pqr_residue_names_to_pdb(src: Path, pqr_path: Path, dst: Path) -> dict[str, Any]:
+def _apply_pqr_residue_names_to_pdb(
+    src: Path, pqr_path: Path, dst: Path
+) -> dict[str, Any]:
     parsed = _pqr_residue_assignments(pqr_path)
     assignments: dict[tuple[str, int, str], str] = parsed["assignments"]
     fallback_by_resseq: dict[int, str] = parsed["fallback_by_resseq"]
@@ -739,13 +742,14 @@ def _run_pdb2pqr_protonation(src: Path, dst: Path, ph: float) -> dict[str, Any]:
     console.print(
         f"  [dim]pdb2pqr/propka: assigning receptor protonation at pH {ph}...[/dim]"
     )
+
     def _trim_error_text(text: str, limit: int = 4000) -> str:
         text = text.strip()
         if not text:
             return ""
         marker = "Traceback (most recent call last):"
         if marker in text:
-            text = text[text.rfind(marker):]
+            text = text[text.rfind(marker) :]
         if len(text) <= limit:
             return text
         text = text[-limit:]
@@ -756,7 +760,9 @@ def _run_pdb2pqr_protonation(src: Path, dst: Path, ph: float) -> dict[str, Any]:
     def _error_detail(prefix: str = "") -> str:
         parts = [_trim_error_text(prefix)] if prefix.strip() else []
         if log_path.exists():
-            log_tail = _trim_error_text(log_path.read_text(errors="replace"), limit=2000)
+            log_tail = _trim_error_text(
+                log_path.read_text(errors="replace"), limit=2000
+            )
             if log_tail:
                 parts.append(log_tail)
         return "\n".join(p for p in parts if p).strip()
@@ -859,6 +865,12 @@ _MAX_VALENCE: dict[str, int] = {
     "P": 5,
 }
 
+_METAL_ELEMENTS: frozenset[str] = frozenset(
+    {"ZN", "MG", "MN", "FE", "CA", "NA", "K", "CU", "CO", "NI", "CD", "HG", "MO", "W"}
+)
+_METAL_DONOR_ELEMENTS: frozenset[str] = frozenset({"N", "O", "S"})
+_METAL_DONOR_DISTANCE_ANGSTROM = 3.0
+
 
 def _pdb_float(line: str, start: int, end: int) -> float:
     return float(line[start:end])
@@ -953,9 +965,9 @@ def _dihedral_degrees(
 
 def ramachandran_angles(pdb_path: Path) -> list[dict[str, Any]]:
     """Compute phi/psi backbone dihedrals for residues with complete neighbours."""
-    residues: dict[
-        tuple[str, int, str, str], dict[str, tuple[float, float, float]]
-    ] = {}
+    residues: dict[tuple[str, int, str, str], dict[str, tuple[float, float, float]]] = (
+        {}
+    )
     order: list[tuple[str, int, str, str]] = []
     for line in pdb_path.read_text(errors="ignore").splitlines():
         if not line.startswith("ATOM  "):
@@ -1042,6 +1054,94 @@ def _render_ramachandran_plot(angles: list[dict[str, Any]]) -> str | None:
 
 def _distance(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+
+def metal_site_qc(pdb_path: Path) -> dict[str, Any]:
+    """Report retained receptor metals and nearby protein donor atoms."""
+    atoms = _iter_pdb_atoms(pdb_path)
+    metals = [atom for atom in atoms if atom["element"] in _METAL_ELEMENTS]
+    metal_rows: list[dict[str, Any]] = []
+    for metal in metals:
+        donors = []
+        for atom in atoms:
+            if (
+                atom["record"] != "ATOM"
+                or atom["resname"] not in _STANDARD_AA
+                or atom["element"] not in _METAL_DONOR_ELEMENTS
+            ):
+                continue
+            distance = _distance(metal["xyz"], atom["xyz"])
+            if distance <= _METAL_DONOR_DISTANCE_ANGSTROM:
+                donors.append(
+                    {
+                        "chain": atom["chain"],
+                        "resseq": atom["resseq"],
+                        "icode": atom["icode"],
+                        "resname": atom["resname"],
+                        "atom": atom["name"],
+                        "element": atom["element"],
+                        "distance_angstrom": round(distance, 3),
+                    }
+                )
+        metal_rows.append(
+            {
+                "record": metal["record"],
+                "chain": metal["chain"],
+                "resseq": metal["resseq"],
+                "icode": metal["icode"],
+                "resname": metal["resname"],
+                "atom": metal["name"],
+                "element": metal["element"],
+                "nearby_protein_donors": sorted(
+                    donors,
+                    key=lambda donor: (
+                        donor["distance_angstrom"],
+                        donor["chain"],
+                        donor["resseq"],
+                        donor["atom"],
+                    ),
+                ),
+            }
+        )
+
+    elements = sorted({metal["element"] for metal in metal_rows})
+    if not elements:
+        status = "not_applicable"
+    elif elements == ["ZN"]:
+        status = "zinc_specialized_available"
+    else:
+        status = "element_specific_validation_needed"
+    return {
+        "metal_count": len(metal_rows),
+        "metal_elements": elements,
+        "metals": metal_rows,
+        "donor_cutoff_angstrom": _METAL_DONOR_DISTANCE_ANGSTROM,
+        "score_validation_status": status,
+    }
+
+
+def _prep_protocol_audit(source_pdb: Path, prepared_pdb: Path) -> dict[str, Any]:
+    source_metal_qc = metal_site_qc(source_pdb)
+    prepared_metal_qc = metal_site_qc(prepared_pdb)
+    source_elements = set(source_metal_qc["metal_elements"])
+    prepared_elements = set(prepared_metal_qc["metal_elements"])
+    removed_elements = sorted(source_elements - prepared_elements)
+    suggestions: list[str] = []
+    if removed_elements:
+        suggestions.append("metal_keep_remove")
+    if "ZN" in prepared_elements:
+        suggestions.extend(["zn_coordination_qc", "ad4zn_scoring"])
+    if prepared_elements - {"ZN"}:
+        suggestions.append("custom_metal_scoring_validation")
+    return {
+        "risk_level": "high" if source_elements or prepared_elements else "low",
+        "detected": {
+            "source_metal_elements": sorted(source_elements),
+            "retained_metal_elements": sorted(prepared_elements),
+            "removed_metal_elements": removed_elements,
+        },
+        "benchmark_ablation_suggestions": suggestions,
+    }
 
 
 def receptor_sanity_checks(pdb_path: Path) -> dict[str, Any]:
@@ -1314,6 +1414,19 @@ def prep_receptor(
     rama_angles = ramachandran_angles(primary_fixed)
     rama_plot = _render_ramachandran_plot(rama_angles)
     sanity = receptor_sanity_checks(primary_fixed)
+    prepared_metal_qc = metal_site_qc(primary_fixed)
+    prep_protocol_audit = _prep_protocol_audit(chain_filtered, primary_fixed)
+    if prepared_metal_qc["metal_count"]:
+        warnings.append(
+            {
+                "severity": "high",
+                "category": "metal_scoring_validation_required",
+                "affected_count": prepared_metal_qc["metal_count"],
+                "message": "Retained receptor metal(s) require target-specific scoring validation",
+                "action": "review metal-site QC and choose a user-selected validated scoring method",
+            }
+        )
+
     warnings.extend(_qc_warnings(sanity))
 
     try:
@@ -1326,7 +1439,11 @@ def prep_receptor(
     variant_entries: list[dict[str, Any]] = [
         {"name": "default", "pdb_path": primary_fixed, "pdbqt_path": primary_pdbqt}
     ]
-    if receptor_isomers == "single" and protonated is not None and protonated != primary_fixed:
+    if (
+        receptor_isomers == "single"
+        and protonated is not None
+        and protonated != primary_fixed
+    ):
         try:
             protonated_pdbqt, _ = _run_meeko_receptor(protonated, output_dir)
             variant_entries.append(
@@ -1389,6 +1506,8 @@ def prep_receptor(
                 "plot_png_base64": rama_plot,
             },
             "sanity_checks": sanity,
+            "metal_site_qc": prepared_metal_qc,
+            "prep_protocol_audit": prep_protocol_audit,
             "receptor_protonation": protonation,
             "receptor_variants": [
                 {

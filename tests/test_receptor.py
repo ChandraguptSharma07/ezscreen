@@ -10,6 +10,7 @@ from ezscreen.prep.receptor import (
     _pqr_atom_to_pdb_line,
     _run_pdb2pqr_protonation,
     heteroatom_inventory,
+    metal_site_qc,
     ramachandran_angles,
     receptor_sanity_checks,
 )
@@ -289,6 +290,45 @@ def test_receptor_sanity_checks_flags_missing_backbone_and_clash(tmp_path):
     assert qc["steric_clashes"][0]["distance"] == pytest.approx(0.2, abs=0.01)
 
 
+def test_metal_site_qc_reports_atom_coded_zinc_and_protein_donors(tmp_path):
+    pdb = tmp_path / "zinc_receptor.pdb"
+    pdb.write_text(
+        "\n".join(
+            [
+                _pdb_atom(1, "ZN", "ZN", "A", 500, (0.0, 0.0, 0.0), "ZN"),
+                _pdb_atom(2, "NE2", "HIS", "A", 383, (2.1, 0.0, 0.0), "N"),
+                _pdb_atom(3, "OE1", "GLU", "A", 411, (0.0, 2.2, 0.0), "O"),
+                _pdb_atom(4, "CA", "ALA", "A", 1, (0.0, 0.0, 2.2), "C"),
+                "END",
+            ]
+        )
+        + "\n"
+    )
+
+    qc = metal_site_qc(pdb)
+
+    assert qc["metal_elements"] == ["ZN"]
+    assert qc["score_validation_status"] == "zinc_specialized_available"
+    assert qc["metals"][0]["record"] == "ATOM"
+    assert [donor["atom"] for donor in qc["metals"][0]["nearby_protein_donors"]] == [
+        "NE2",
+        "OE1",
+    ]
+
+
+def test_metal_site_qc_marks_non_zinc_metals_unvalidated(tmp_path):
+    pdb = tmp_path / "calcium_receptor.pdb"
+    pdb.write_text(
+        _pdb_atom(1, "CA", "CA", "A", 700, (0.0, 0.0, 0.0), "CA") + "\nEND\n"
+    )
+
+    qc = metal_site_qc(pdb)
+
+    assert qc["metal_elements"] == ["CA"]
+    assert qc["score_validation_status"] == "element_specific_validation_needed"
+    assert qc["metals"][0]["nearby_protein_donors"] == []
+
+
 def test_pdb2pqr_protonation_assigns_titratable_states(tmp_path, monkeypatch):
     import subprocess
 
@@ -340,7 +380,6 @@ def test_pdb2pqr_protonation_falls_back_when_missing(tmp_path, monkeypatch):
     assert "not found" in result["error"]
 
 
-
 def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
     from ezscreen.prep import receptor as rec
 
@@ -380,7 +419,9 @@ def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
     )
 
 
-def test_prep_receptor_defers_single_state_when_local_propka_fails(tmp_path, monkeypatch):
+def test_prep_receptor_defers_single_state_when_local_propka_fails(
+    tmp_path, monkeypatch
+):
     from ezscreen.prep import receptor as rec
 
     src = tmp_path / "input.pdb"
@@ -433,7 +474,10 @@ def test_pdb2pqr_failure_includes_log_tail(tmp_path, monkeypatch):
     src.write_text("END\n")
     dst = tmp_path / "protonated.pdb"
 
-    monkeypatch.setattr("ezscreen.prep.receptor.shutil.which", lambda name: "pdb2pqr" if name == "pdb2pqr" else None)
+    monkeypatch.setattr(
+        "ezscreen.prep.receptor.shutil.which",
+        lambda name: "pdb2pqr" if name == "pdb2pqr" else None,
+    )
 
     def fake_run(cmd, **kwargs):
         (tmp_path / "protonated.log").write_text("PROPKA traceback detail\n")
@@ -445,4 +489,3 @@ def test_pdb2pqr_failure_includes_log_tail(tmp_path, monkeypatch):
 
     assert result["applied"] is False
     assert "PROPKA traceback detail" in result["error"]
-
