@@ -29,6 +29,7 @@ def test_unidock_is_vina_family_without_cnn():
     assert not u.supports_cnn
     assert u.native_score_type == "vina_kcal_mol"
     assert engines.default_scoring("unidock") == "vina"
+    assert engines.supports_scoring("unidock", "ad4")
 
 
 def test_implemented_engines_are_a_subset():
@@ -67,11 +68,10 @@ def test_scoring_function_membership():
     assert not engines.supports_scoring("autodock-gpu", "vina")
 
 
-def test_offered_engines_exclude_ad4_scoring():
-    # ad4 needs precomputed affinity maps, so it is not a drop-in scoring choice.
-    for e in engines.dockable_engines():
-        assert "ad4" not in e.scoring_functions
-        assert set(e.scoring_functions) in ({"vina", "vinardo"}, set())
+def test_ad4_is_offered_only_through_unidock_map_path():
+    assert engines.supports_scoring("unidock", "ad4")
+    assert not engines.supports_scoring("gnina", "ad4")
+    assert not engines.supports_scoring("vina-local", "ad4")
 
 
 def test_scoring_flag_threaded_into_docking_command():
@@ -89,7 +89,11 @@ def test_scoring_flag_threaded_into_docking_command():
             scoring="vinardo",
         )
         joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
-        assert "'--scoring', 'vinardo'" in joined, eng
+        assert "SCORING = 'vinardo'" in joined, eng
+        if eng == "unidock":
+            assert "'--scoring', SCORING" in joined
+        else:
+            assert "'--scoring', 'vinardo'" in joined
 
 
 def test_kaggle_prep_notebook_loads_openbabel_ligand_formats():
@@ -579,3 +583,25 @@ def test_run_screening_job_recovers_completed_kernel_after_poll_failure(
     assert result["output_dir"] == recovered
     assert result["error_type"] is None
     assert result["recovered_after_poll_failure"] is True
+
+def test_ad4_notebook_requires_validated_maps_and_uses_literal_exhaustiveness():
+    import json
+
+    from ezscreen.backends.kaggle import runner
+
+    src = runner.render_vina_notebook(
+        run_id="ezs-ad4",
+        shard_filenames=["s0.pdbqt"],
+        box_center=[1, 2, 3],
+        box_size=[20, 20, 20],
+        engine="unidock",
+        scoring="ad4",
+        ad4_maps_prefix="ace_receptor_TZ",
+        exhaustiveness=32,
+    )
+    joined = "\n".join("".join(c["source"]) for c in json.loads(src)["cells"])
+
+    assert "AD4 map receptor hash differs from selected receptor" in joined
+    assert "*(['--maps', str(AD4_MAPS_PREFIX)]" in joined
+    assert "cmd.extend([\x27--exhaustiveness\x27, str(EXHAUSTIVENESS)])" in joined
+    assert "ad4_map_runtime.json" in joined

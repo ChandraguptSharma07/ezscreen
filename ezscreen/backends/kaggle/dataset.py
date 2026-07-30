@@ -135,6 +135,7 @@ def upload_run_dataset(
     work_dir: Path,
     receptor_files: dict[str, Path] | None = None,
     receptor_pdb: Path | None = None,
+    extra_files: dict[str, Path] | None = None,
 ) -> str:
     """
     Upload receptor (skipped if SHA-256 matches) and ligand shards.
@@ -154,6 +155,11 @@ def upload_run_dataset(
     shutil.copy2(receptor_pdbqt, dataset_dir / "receptor.pdbqt")
     for name, path in (receptor_files or {}).items():
         if name == "receptor.pdbqt":
+            continue
+        manifest[str(path.resolve())] = sha256(path)
+        shutil.copy2(path, dataset_dir / name)
+    for name, path in (extra_files or {}).items():
+        if name in {"receptor.pdbqt", "receptor_fixed.pdb"}:
             continue
         manifest[str(path.resolve())] = sha256(path)
         shutil.copy2(path, dataset_dir / name)

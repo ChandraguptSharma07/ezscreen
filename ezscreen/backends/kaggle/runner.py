@@ -951,6 +951,7 @@ def render_vina_notebook(
     box_center: list[float] | None = None,
     box_size: list[float] | None = None,
     search_mode: str = "balance",
+    exhaustiveness: int | None = None,
     ph: float = 7.4,
     prep_on_kaggle: bool = True,
     accelerator: str = "nvidiaTeslaP100",
@@ -964,6 +965,7 @@ def render_vina_notebook(
     receptor_variant: str = "default",
     receptor_variants: list[dict[str, Any]] | None = None,
     receptor_pdb_filename: str = "receptor_fixed.pdb",
+    ad4_maps_prefix: str | None = None,
 ) -> str:
     """Render the docking notebook to source text for a single kernel.
 
@@ -1026,6 +1028,7 @@ def render_vina_notebook(
         shard_filenames=shard_filenames,
         ph=ph,
         search_mode=search_mode,
+        exhaustiveness=exhaustiveness or 0,
         prep_on_kaggle=prep_on_kaggle,
         max_heavy_atoms=int(prep_cfg.get("max_heavy_atoms", 70)),
         max_mw=float(prep_cfg.get("max_mw", 700.0)),
@@ -1044,6 +1047,7 @@ def render_vina_notebook(
         receptor_variant_specs_py=repr(_variant_specs),
         receptor_prepare_on_kaggle=any(v.get("prepare_on_kaggle") for v in _variant_specs),
         receptor_pdb_filename=receptor_pdb_filename,
+        ad4_maps_prefix=ad4_maps_prefix or "",
         gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
     )
 
@@ -1105,6 +1109,7 @@ def run_multi_account_screening(
     box_center: list[float] | None = None,
     box_size: list[float] | None = None,
     search_mode: str = "balance",
+    exhaustiveness: int | None = None,
     ph: float = 7.4,
     retry_limit: int = 3,
     accelerator: str = "nvidiaTeslaP100",
@@ -1113,6 +1118,8 @@ def run_multi_account_screening(
     enumerate_opts: dict | None = None,
     engine: str = "unidock",
     scoring: str = "vina",
+    extra_files: dict[str, Path] | None = None,
+    ad4_maps_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Submit all shards to multiple Kaggle accounts and merge results.
 
@@ -1135,6 +1142,17 @@ def run_multi_account_screening(
         receptor_pdbqts,
         receptor_variant_modes,
     )
+    if scoring == "ad4":
+        if engine != "unidock":
+            return {"status": "failed", "error_type": "ad4_requires_unidock"}
+        if not ad4_maps_prefix or not extra_files:
+            return {"status": "failed", "error_type": "ad4_map_bundle_required"}
+        if len(receptor_variants) != 1 or receptor_variants[0].get("name") != "default":
+            return {"status": "failed", "error_type": "ad4_requires_single_default_receptor"}
+        _extra_names = set(extra_files)
+        _ad4_required = {f"{ad4_maps_prefix}.maps.fld", "ad4_maps_manifest.json"}
+        if not _ad4_required <= _extra_names:
+            return {"status": "failed", "error_type": "ad4_map_bundle_incomplete"}
     if any(v.get("prepare_on_kaggle") for v in receptor_variants):
         if receptor_pdb is None or not Path(receptor_pdb).exists():
             return {
@@ -1225,6 +1243,7 @@ def run_multi_account_screening(
                     if not v.get("prepare_on_kaggle")
                 },
                 receptor_pdb=receptor_pdb,
+                extra_files=extra_files,
             )
             _wait_for_dataset(dataset_ref)
         spec["dataset_ref"] = dataset_ref
@@ -1271,6 +1290,7 @@ def run_multi_account_screening(
                 box_center=box_center,
                 box_size=box_size,
                 search_mode=search_mode,
+                exhaustiveness=exhaustiveness,
                 ph=ph,
                 prep_on_kaggle=prep_on_kaggle,
                 accelerator=accelerator,
@@ -1284,6 +1304,7 @@ def run_multi_account_screening(
                 receptor_variant=receptor_variant,
                 receptor_variants=nb_spec.get("receptor_variants"),
                 receptor_pdb_filename="receptor_fixed.pdb",
+                ad4_maps_prefix=ad4_maps_prefix,
             )
             nb_path = nb_dir / "notebook.ipynb"
             nb_path.write_text(nb_src)
