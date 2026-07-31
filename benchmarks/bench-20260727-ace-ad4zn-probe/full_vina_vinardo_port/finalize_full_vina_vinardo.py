@@ -112,6 +112,7 @@ def validate_command(command: list[str], mode: str) -> None:
         "--size_x": "36.8194",
         "--size_y": "41.835",
         "--size_z": "43.7048",
+        "--spacing": "0.375",
         "--scoring": mode,
         "--exhaustiveness": "32",
     }
@@ -269,6 +270,8 @@ def main() -> None:
                 raise RuntimeError(f"shard {shard}: range mismatch")
             if runtime["intended"] != bound["count"] or runtime["lower_is_better"] is not True:
                 raise RuntimeError(f"shard {shard}: protocol accounting mismatch")
+            if runtime.get("grid_spacing") != 0.375 or runtime.get("grid_point_cap") != 2_097_152:
+                raise RuntimeError(f"shard {shard}: GPU grid configuration mismatch")
             if runtime.get("prepared_identity_passed") is not True or identity.get("passed") is not True:
                 raise RuntimeError(f"shard {shard}: prepared identity gate failed")
             prepared = rows_from(archive, "prepared_manifest.csv")
@@ -370,6 +373,9 @@ def main() -> None:
                 "box_center": [40.7317, 32.8822, 47.3635],
                 "box_size": [36.8194, 41.835, 43.7048],
                 "exhaustiveness": 32,
+                "grid_spacing": 0.375,
+                "grid_point_cap": 2_097_152,
+                "unidock_commit": "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
                 "protocol_label": "UniDock accelerated ports; not AutoDock Vina-equivalent",
                 "ranking_policy": "finite scores ascending; failed records retained after scored records",
                 "shards": shard_audit,

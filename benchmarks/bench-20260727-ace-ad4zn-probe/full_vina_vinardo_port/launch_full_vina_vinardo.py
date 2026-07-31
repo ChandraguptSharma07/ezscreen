@@ -29,6 +29,18 @@ EXACT_RECEPTOR = ROOT / "benchmarks/bench-20260727-ace-ad4zn-probe/unidock_ad4_s
 PLANNED_HOURS_PER_SHARD = 4.0
 
 
+def preserve_prior_output(job_work: Path) -> Path | None:
+    output = job_work / "output"
+    if not output.exists():
+        return None
+    attempt = 1
+    while (job_work / f"raw_attempt_{attempt:02d}").exists():
+        attempt += 1
+    preserved = job_work / f"raw_attempt_{attempt:02d}"
+    output.rename(preserved)
+    return preserved
+
+
 def input_files() -> list[Path]:
     files = [SOURCE_MANIFEST, EXACT_RECEPTOR]
     missing = [str(path) for path in files if not path.is_file()]
@@ -118,6 +130,8 @@ def main() -> None:
                 )
                 continue
             job_work = WORK / run_id
+            preserved = preserve_prior_output(job_work)
+            retry_count = int(prior.get("retry_count") or 0) + 1 if prior else 0
             supervisor.register_job(
                 HERE,
                 {
@@ -139,6 +153,8 @@ def main() -> None:
                     "recovery_kind": "raw_kernel",
                     "dataset_ref": dataset_ref,
                     "dataset_reused": reused,
+                    "retry_count": retry_count,
+                    "prior_output_dir": str(preserved) if preserved else None,
                 },
             )
             with _KAGGLE_API_LOCK:

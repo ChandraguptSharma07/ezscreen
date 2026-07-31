@@ -16,6 +16,26 @@ sys.path.insert(0, str(AD4_DIR))
 import render_full_ad4_shards as ad4  # noqa: E402
 
 TOTAL, SHARDS = 1846, 12
+UNIDOCK_COMMIT = "ebde3b4a22c8b2c7b26e523cc15109aab815be21"
+GRID_POINT_CAP = 2_097_152
+
+GRID_BUFFER_PATCH = f'''
+    _unidock_commit = "{UNIDOCK_COMMIT}"
+    _run(f"git -C /tmp/unidock checkout --detach {{_unidock_commit}}")
+    _grid_cap_old, _grid_cap_new = "531441", "{GRID_POINT_CAP}"
+    _grid_header = _pl.Path("/tmp/unidock/unidock/src/cuda/kernel.h")
+    _vina_source = _pl.Path("/tmp/unidock/unidock/src/lib/vina.cpp")
+    _grid_text, _vina_text = _grid_header.read_text(), _vina_source.read_text()
+    _grid_count, _host_count = _grid_text.count(_grid_cap_old), _vina_text.count(_grid_cap_old)
+    if (_grid_count, _host_count) != (7, 1):
+        raise RuntimeError(f"unexpected UniDock grid-cap sites: {{(_grid_count, _host_count)}}")
+    _grid_header.write_text(_grid_text.replace(_grid_cap_old, _grid_cap_new))
+    _vina_source.write_text(
+        _vina_text.replace(_grid_cap_old, _grid_cap_new).replace("81^3", "128^3")
+    )
+    print({{"unidock_commit": _unidock_commit, "grid_point_cap": int(_grid_cap_new),
+           "device_patch_sites": _grid_count, "host_patch_sites": _host_count}})
+'''
 
 DOCK = r'''
 import json, pathlib, shutil, subprocess, time
@@ -38,6 +58,7 @@ for scoring in ("vina", "vinardo"):
         "--center_x", str(BOX_CENTER[0]), "--center_y", str(BOX_CENTER[1]),
         "--center_z", str(BOX_CENTER[2]), "--size_x", str(BOX_SIZE[0]),
         "--size_y", str(BOX_SIZE[1]), "--size_z", str(BOX_SIZE[2]),
+        "--spacing", "0.375",
         "--scoring", scoring, "--exhaustiveness", str(EXHAUSTIVENESS),
     ]
     print("Command: " + " ".join(command))
@@ -112,7 +133,8 @@ runtime = {
     "total_seconds": time.time() - STARTED, "lower_is_better": True,
     "protocol": "UniDock Vina and Vinardo accelerated ports; not Vina-equivalent",
     "box_center": BOX_CENTER, "box_size": BOX_SIZE,
-    "exhaustiveness": EXHAUSTIVENESS,
+    "exhaustiveness": EXHAUSTIVENESS, "grid_spacing": 0.375,
+    "grid_point_cap": 2097152,
 }
 pathlib.Path("/kaggle/working/runtime.json").write_text(json.dumps(runtime, indent=2) + "\n")
 output_names.append("runtime.json")
@@ -155,6 +177,10 @@ def render() -> None:
         "_note_optional_tool('obabel', 'used only for fallback ligand-format conversion')",
         "_apt_install('openbabel')\n_require_tools('obabel')",
     )
+    clone_line = "    _run('rm -rf /tmp/unidock && git clone --depth 1 https://github.com/dptech-corp/Uni-Dock /tmp/unidock')\n"
+    if install.count(clone_line) != 1:
+        raise RuntimeError("UniDock source-clone patch point missing")
+    install = install.replace(clone_line, clone_line + GRID_BUFFER_PATCH, 1)
     out = HERE / "notebooks"
     out.mkdir(parents=True, exist_ok=True)
     bounds = [(i * TOTAL // SHARDS, (i + 1) * TOTAL // SHARDS) for i in range(SHARDS)]
