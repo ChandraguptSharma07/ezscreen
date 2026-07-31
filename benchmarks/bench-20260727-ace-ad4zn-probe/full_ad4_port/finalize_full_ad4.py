@@ -7,6 +7,7 @@ import io
 import json
 import math
 import zipfile
+from collections import Counter
 from pathlib import Path
 
 from ezscreen.benchmark.metrics import compute_metrics
@@ -211,8 +212,16 @@ def main() -> None:
     if set(combined) != set(range(TOTAL)):
         raise RuntimeError("global accounting mismatch")
     source_ids = [row["source_id"] for row in combined.values()]
-    if len(source_ids) != len(set(source_ids)):
-        raise RuntimeError("duplicate source IDs")
+    source_id_counts = Counter(source_ids)
+    duplicate_source_ids = {
+        source_id: count
+        for source_id, count in source_id_counts.items()
+        if count > 1
+    }
+    for sample_index, row in combined.items():
+        # DUD2 contains separate records sharing a ZINC ID. The archive ordinal is
+        # therefore part of record identity and must not be deduplicated.
+        row["source_record_key"] = f"{row['source_id']}@{sample_index}"
     labels = [row["label"] for row in combined.values()]
     if (sum(labels), len(labels) - sum(labels)) != (ACTIVES, DECOYS):
         raise RuntimeError("label count mismatch")
@@ -258,6 +267,11 @@ def main() -> None:
         "coverage_gate_passed": coverage >= MIN_COVERAGE,
         "failures": len(failed),
         "filtered_rows": len(failed),
+        "unique_source_ids": len(source_id_counts),
+        "duplicate_source_id_groups": len(duplicate_source_ids),
+        "repeated_source_id_records": sum(
+            count - 1 for count in duplicate_source_ids.values()
+        ),
         "ef1": metric.ef1,
         "ef5": metric.ef5,
         "ef10": enrichment(ranked_labels, 0.10),
@@ -286,6 +300,7 @@ def main() -> None:
         fields = [
             "rank",
             "sample_index",
+            "source_record_key",
             "source_id",
             "label",
             "score",
@@ -302,6 +317,7 @@ def main() -> None:
         fields = [
             "rank",
             "sample_index",
+            "source_record_key",
             "source_id",
             "label",
             "score",
@@ -323,6 +339,8 @@ def main() -> None:
                 "map_manifest": expected_manifest,
                 "shards": shard_audit,
                 "ranking_policy": "finite scores ascending; failed compounds retained after scored compounds",
+                "record_identity": "source_record_key is source_id@sample_index because DUD2 may repeat a ZINC ID across separate archive records",
+                "duplicate_source_id_counts": duplicate_source_ids,
             },
             indent=2,
         )
