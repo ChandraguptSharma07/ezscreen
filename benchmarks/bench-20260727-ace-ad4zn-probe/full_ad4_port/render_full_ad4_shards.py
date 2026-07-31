@@ -178,11 +178,16 @@ def render() -> None:
 import pathlib, zipfile
 _mounted_input = pathlib.Path("/kaggle/input")
 _map_zips = list(_mounted_input.rglob("ad4_map_bundle.zip"))
-if len(_map_zips) != 1: raise RuntimeError(f"expected map bundle once, found {len(_map_zips)}")
-_input_root = WORK / "maps"
-_input_root.mkdir(exist_ok=True)
-with zipfile.ZipFile(_map_zips[0]) as _archive: _archive.extractall(_input_root)
-_candidates = list(_mounted_input.rglob("ace_receptor_TZ.pdbqt"))
+_mounted_manifests = list(_mounted_input.rglob("ad4_maps_manifest.json"))
+if len(_map_zips) == 1 and not _mounted_manifests:
+    _input_root = WORK / "maps"
+    _input_root.mkdir(exist_ok=True)
+    with zipfile.ZipFile(_map_zips[0]) as _archive: _archive.extractall(_input_root)
+elif not _map_zips and len(_mounted_manifests) == 1:
+    _input_root = _mounted_manifests[0].parent
+else:
+    raise RuntimeError(f"ambiguous map mount: zip={len(_map_zips)}, manifest={len(_mounted_manifests)}")
+_candidates = list(_mounted_input.rglob("receptor.pdbqt"))
 if len(_candidates) != 1: raise RuntimeError(f"expected exact receptor once, found {len(_candidates)}")
 RECEPTOR_PDBQT = _candidates[0]
 RECEPTOR_PDBQTS = {"default": RECEPTOR_PDBQT}

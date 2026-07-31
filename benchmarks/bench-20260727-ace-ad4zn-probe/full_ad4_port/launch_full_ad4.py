@@ -22,6 +22,7 @@ WORK = HERE / "work"
 SOURCE_MANIFEST = ROOT / "benchmarks/bench-20260723-vinardo-dud28/source_manifest.json"
 SOURCE_DIR = ROOT / "tmp/vinardo-audit"
 MAP_OUTPUT = ROOT / "benchmarks/bench-20260727-ace-ad4zn-probe/map_bundle_output_020"
+EXACT_RECEPTOR = ROOT / "benchmarks/bench-20260727-ace-ad4zn-probe/unidock_ad4_smoke_020/dataset_ace-1o86-unidock-ad4-smoke-020/receptor.pdbqt"
 PLANNED_HOURS_PER_SHARD = 2.0
 
 
@@ -29,7 +30,7 @@ def input_files() -> list[Path]:
     files = [
         SOURCE_MANIFEST,
         MAP_OUTPUT / "ad4_map_bundle.zip",
-        MAP_OUTPUT / "ace_receptor_TZ.pdbqt",
+        EXACT_RECEPTOR,
     ]
     missing = [str(path) for path in files if not path.is_file()]
     if missing: raise FileNotFoundError(missing)
