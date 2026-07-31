@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "account_count": 6,
+  "estimated_gpu_hours_per_account": 20.0,
+  "default_usable_hours_per_account": 16.5,
+  "maximum_planned_gpu_hours": 100.0,
+  "reserve_gpu_hours": 20.0,
+  "maximum_concurrent_notebooks_per_account": 2,
+  "maximum_concurrent_gpu_notebooks_per_account": 2,
+  "maximum_concurrent_cpu_notebooks_per_account": 10,
+  "allocations_gpu_hours": {
+    "t4_validation": 24.0
+  },
+  "planned_gpu_hours": 0.0,
+  "observed_gpu_hours": 0.0,
+  "accounts": {}
+}

@@ -1,0 +1,87 @@
+{
+  "total": 1846,
+  "shards": 12,
+  "modes": [
+    "vina"
+  ],
+  "exhaustiveness": 32,
+  "bounds": [
+    {
+      "shard": 0,
+      "start": 0,
+      "end": 153,
+      "count": 153
+    },
+    {
+      "shard": 1,
+      "start": 153,
+      "end": 307,
+      "count": 154
+    },
+    {
+      "shard": 2,
+      "start": 307,
+      "end": 461,
+      "count": 154
+    },
+    {
+      "shard": 3,
+      "start": 461,
+      "end": 615,
+      "count": 154
+    },
+    {
+      "shard": 4,
+      "start": 615,
+      "end": 769,
+      "count": 154
+    },
+    {
+      "shard": 5,
+      "start": 769,
+      "end": 923,
+      "count": 154
+    },
+    {
+      "shard": 6,
+      "start": 923,
+      "end": 1076,
+      "count": 153
+    },
+    {
+      "shard": 7,
+      "start": 1076,
+      "end": 1230,
+      "count": 154
+    },
+    {
+      "shard": 8,
+      "start": 1230,
+      "end": 1384,
+      "count": 154
+    },
+    {
+      "shard": 9,
+      "start": 1384,
+      "end": 1538,
+      "count": 154
+    },
+    {
+      "shard": 10,
+      "start": 1538,
+      "end": 1692,
+      "count": 154
+    },
+    {
+      "shard": 11,
+      "start": 1692,
+      "end": 1846,
+      "count": 154
+    }
+  ],
+  "hardware": {
+    "gpu_count": 2,
+    "model_token": "T4"
+  },
+  "campaign": "full_vina_t4_validation"
+}

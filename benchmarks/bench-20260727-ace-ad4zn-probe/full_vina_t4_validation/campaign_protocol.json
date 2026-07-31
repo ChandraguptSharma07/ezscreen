@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "campaign": "full_vina_t4_validation",
+  "scientific_question": "Does the unchanged automated ACE UniDock Vina-mode workflow achieve published Vina screening quality?",
+  "target": "ACE",
+  "pdb_id": "1O86",
+  "dataset": "DUD Release 2",
+  "records": {
+    "total": 1846,
+    "actives": 49,
+    "decoys": 1797
+  },
+  "protocol": {
+    "preparation": "AutoDockTools first; Meeko only after genuine ADT failure",
+    "prepared_identity": "must exactly match frozen AD4 attempt 04 prepared hashes",
+    "box_center": [
+      40.7317,
+      32.8822,
+      47.3635
+    ],
+    "box_size": [
+      36.8194,
+      41.835,
+      43.7048
+    ],
+    "autobox_add_angstrom": 15,
+    "exhaustiveness": 32,
+    "scoring": "vina",
+    "grid_spacing_angstrom": 0.375,
+    "ranking": "raw UniDock Vina score ascending"
+  },
+  "hardware": {
+    "required_gpu_count": 2,
+    "required_model": "Tesla T4",
+    "fail_fast": true
+  },
+  "unidock": {
+    "repository": "https://github.com/dptech-corp/Uni-Dock",
+    "commit": "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
+    "grid_point_cap": 2097152,
+    "source_change": "capacity limit only; no intended scoring protocol change"
+  },
+  "published": {
+    "roc_auc": 0.431,
+    "bedroc20": 0.159
+  },
+  "predefined_similarity_margins_pipeline_minus_published": {
+    "roc_auc": -0.02,
+    "bedroc20": -0.02
+  },
+  "bootstrap": {
+    "method": "stratified nonparametric",
+    "replicates": 10000,
+    "seed": 20260801,
+    "confidence": 0.95
+  },
+  "prohibitions": [
+    "no UniDock optimization",
+    "no label tuning",
+    "no post-hoc ranking selection"
+  ]
+}
