@@ -24,8 +24,8 @@ def test_push_kernel_uses_run_id_as_kernel_slug(monkeypatch, tmp_path):
     calls = []
 
     class FakeApi:
-        def kernels_push(self, kernel_dir):
-            calls.append(Path(kernel_dir))
+        def kernels_push(self, kernel_dir, acc=None):
+            calls.append((Path(kernel_dir), acc))
 
     monkeypatch.setattr(kernel, '_api', lambda: FakeApi())
 
@@ -40,16 +40,17 @@ def test_push_kernel_uses_run_id_as_kernel_slug(monkeypatch, tmp_path):
     )
 
     assert ref == 'worker-user/ezs-run'
-    metadata = (calls[0] / 'kernel-metadata.json').read_text(encoding='utf-8')
+    metadata = (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
     assert '"id": "worker-user/ezs-run"' in metadata
+    assert calls[0][1] == 'NvidiaTeslaP100'
 
 
 def test_push_kernel_bounds_long_run_id_slug(monkeypatch, tmp_path):
     calls = []
 
     class FakeApi:
-        def kernels_push(self, kernel_dir):
-            calls.append(Path(kernel_dir))
+        def kernels_push(self, kernel_dir, acc=None):
+            calls.append((Path(kernel_dir), acc))
 
     monkeypatch.setattr(kernel, '_api', lambda: FakeApi())
     notebook = tmp_path / 'run.ipynb'
@@ -67,8 +68,8 @@ def test_push_kernel_bounds_long_run_id_slug(monkeypatch, tmp_path):
     slug = ref.split('/')[1]
     assert len(slug) <= kernel.MAX_KERNEL_SLUG_LEN
     assert slug == kernel.kernel_slug(run_id)
-    assert calls[0].name == slug
-    metadata = json.loads((calls[0] / 'kernel-metadata.json').read_text(encoding='utf-8'))
+    assert calls[0][0].name == slug
+    metadata = json.loads((calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8'))
     assert metadata['id'] == ref
     assert len(metadata['title']) <= kernel.MAX_KERNEL_SLUG_LEN
 
@@ -77,8 +78,8 @@ def test_push_kernel_disables_gpu_for_cpu_accelerator(monkeypatch, tmp_path):
     calls = []
 
     class FakeApi:
-        def kernels_push(self, kernel_dir):
-            calls.append(Path(kernel_dir))
+        def kernels_push(self, kernel_dir, acc=None):
+            calls.append((Path(kernel_dir), acc))
 
     monkeypatch.setattr(kernel, '_api', lambda: FakeApi())
     notebook = tmp_path / 'cpu.ipynb'
@@ -94,18 +95,19 @@ def test_push_kernel_disables_gpu_for_cpu_accelerator(monkeypatch, tmp_path):
     )
 
     metadata = json.loads(
-        (calls[0] / 'kernel-metadata.json').read_text(encoding='utf-8')
+        (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
     )
     assert metadata['enable_gpu'] is False
     assert 'machine_shape' not in metadata
+    assert calls[0][1] is None
 
 
 def test_push_kernel_accepts_cpu_backend_option(monkeypatch, tmp_path):
     calls = []
 
     class FakeApi:
-        def kernels_push(self, kernel_dir):
-            calls.append(Path(kernel_dir))
+        def kernels_push(self, kernel_dir, acc=None):
+            calls.append((Path(kernel_dir), acc))
 
     monkeypatch.setattr(kernel, '_api', lambda: FakeApi())
     notebook = tmp_path / 'cpu.ipynb'
@@ -119,10 +121,11 @@ def test_push_kernel_accepts_cpu_backend_option(monkeypatch, tmp_path):
         backend='cpu',
     )
     metadata = json.loads(
-        (calls[0] / 'kernel-metadata.json').read_text(encoding='utf-8')
+        (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
     )
     assert metadata['enable_gpu'] is False
     assert 'machine_shape' not in metadata
+    assert calls[0][1] is None
 
 
 def test_unknown_kaggle_backend_is_rejected():
@@ -130,3 +133,31 @@ def test_unknown_kaggle_backend_is_rejected():
 
     with pytest.raises(ValueError, match='choose cpu, p100, or t4x2'):
         kernel.accelerator_for_backend('quantum')
+
+
+def test_push_kernel_passes_t4_accelerator_to_save_api(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeApi:
+        def kernels_push(self, kernel_dir, acc=None):
+            calls.append((Path(kernel_dir), acc))
+
+    monkeypatch.setattr(kernel, '_api', lambda: FakeApi())
+    notebook = tmp_path / 't4.ipynb'
+    notebook.write_text('{}', encoding='utf-8')
+
+    kernel.push_kernel(
+        run_id='ezs-t4',
+        notebook_path=notebook,
+        dataset_ref='user/dataset',
+        username='worker-user',
+        work_dir=tmp_path / 'work',
+        accelerator='nvidiaTeslaT4',
+    )
+
+    metadata = json.loads(
+        (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
+    )
+    assert calls[0][1] == 'NvidiaTeslaT4'
+    assert metadata['machine_shape'] == 'NvidiaTeslaT4'
+    assert metadata['enable_gpu'] is True

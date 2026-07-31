@@ -92,7 +92,7 @@ def push_kernel(
     # ``none``/``cpu`` requests must disable it so CPU-only benchmark stages do
     # not silently consume GPU quota.
     _MACHINE_SHAPE = {
-        "nvidiaTeslaT4": "GPU_T4x2",
+        "nvidiaTeslaT4": "NvidiaTeslaT4",
         "nvidiaTeslaP100": "NvidiaTeslaP100",
     }
     accelerator_key = (
@@ -120,7 +120,7 @@ def push_kernel(
     (kernel_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
 
     def _push():
-        api.kernels_push(str(kernel_dir))
+        api.kernels_push(str(kernel_dir), acc=machine_shape)
 
     _with_backoff(_push)
     return f"{username}/{slug}"
