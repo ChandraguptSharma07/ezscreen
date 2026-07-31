@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import math
@@ -23,6 +24,14 @@ PUBLISHED = {
     "vina": {"roc_auc": 0.431, "bedroc20": 0.159},
     "vinardo": {"roc_auc": 0.431, "bedroc20": 0.165},
 }
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def rows_from(archive: zipfile.ZipFile, name: str) -> list[dict[str, str]]:
@@ -284,6 +293,7 @@ def main() -> None:
             fallbacks = rows_from(archive, "fallbacks.csv")
             audit = {
                 "shard": shard,
+                "output_zip_sha256": sha256(bundle),
                 "intended": bound["count"],
                 "prepared": len(prepared),
                 "prep_failures": len(prep_failed),
@@ -383,6 +393,14 @@ def main() -> None:
             indent=2,
         )
         + "\n"
+    )
+    artifact_hashes = {
+        str(path.relative_to(FINAL)).replace("\\", "/"): sha256(path)
+        for path in sorted(FINAL.rglob("*"))
+        if path.is_file() and path.name != "artifact_manifest.json"
+    }
+    (FINAL / "artifact_manifest.json").write_text(
+        json.dumps({"sha256": artifact_hashes}, indent=2) + "\n"
     )
     print(json.dumps(metrics, indent=2))
 
