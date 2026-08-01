@@ -494,7 +494,8 @@ def main() -> None:
                     "preparation_failures": len(prep_failed),
                     "docking_failures": len(dock_failed),
                     "fallbacks": len(shard_fallbacks),
-                    "runtime_seconds": float(mode_run["runtime_seconds"]),
+                    "vina_runtime_seconds": float(mode_run["runtime_seconds"]),
+                    "notebook_total_seconds": float(runtime["total_seconds"]),
                     "gpu_count": hardware["gpu_count"],
                     "gpu_models": models,
                     "source_tree_sha256": source["source_tree_sha256"],
@@ -534,6 +535,8 @@ def main() -> None:
     prep_failures = sum(row["status"] == "prep_failed" for row in failed)
     dock_failures = sum(row["status"] == "dock_failed" for row in failed)
     coverage = len(scored) / TOTAL
+    quota = json.loads((HERE / "quota_budget.json").read_text(encoding="utf-8"))
+    supervisor_kernel_hours = float(quota.get("observed_gpu_hours") or 0.0)
     metrics = {
         "protocol": "UniDock Vina-mode T4 validation; not exact AutoDock Vina equivalence",
         "total_intended": TOTAL,
@@ -560,17 +563,29 @@ def main() -> None:
         "bayes_ef_decoy_proxy_5pct": bayes_ef_proxy(scored, 0.05),
         "bayes_ef_caveat": "DUD2 decoys are not random compounds; values are existing-project decoy-distribution proxies, not canonical Bayes EF.",
         "missing_score_policy": "Failures are excluded from score metrics and retained explicitly; missing output is not assigned a bad docking score.",
-        "runtime_seconds_sum": round(
-            sum(item["runtime_seconds"] for item in shard_audit), 3
+        "vina_runtime_seconds_sum": round(
+            sum(item["vina_runtime_seconds"] for item in shard_audit), 3
         ),
-        "runtime_seconds_max_shard": round(
-            max(item["runtime_seconds"] for item in shard_audit), 3
+        "vina_runtime_seconds_max_shard": round(
+            max(item["vina_runtime_seconds"] for item in shard_audit), 3
         ),
-        "total_gpu_hours_two_t4_allocated": round(
-            sum(item["runtime_seconds"] * item["gpu_count"] for item in shard_audit)
+        "notebook_runtime_seconds_sum": round(
+            sum(item["notebook_total_seconds"] for item in shard_audit), 3
+        ),
+        "notebook_runtime_seconds_max_shard": round(
+            max(item["notebook_total_seconds"] for item in shard_audit), 3
+        ),
+        "total_gpu_device_hours": round(
+            sum(
+                item["notebook_total_seconds"] * item["gpu_count"]
+                for item in shard_audit
+            )
             / 3600,
             6,
         ),
+        "supervisor_observed_kernel_hours": round(supervisor_kernel_hours, 6),
+        "supervisor_observed_gpu_device_hours": round(supervisor_kernel_hours * 2, 6),
+        "runtime_accounting_note": "Notebook execution time comes from each runtime.json. GPU device-hours multiply notebook time by two T4 devices. Supervisor-observed time spans submission to terminal poll and includes queue/poll latency.",
     }
     intervals = bootstrap(scores, labels)
     paper_comparison = {
@@ -652,10 +667,16 @@ def main() -> None:
         FINAL / "runtime_summary.json",
         {
             "shards": shard_audit,
-            "runtime_seconds_sum": metrics["runtime_seconds_sum"],
-            "total_gpu_hours_two_t4_allocated": metrics[
-                "total_gpu_hours_two_t4_allocated"
+            "vina_runtime_seconds_sum": metrics["vina_runtime_seconds_sum"],
+            "notebook_runtime_seconds_sum": metrics["notebook_runtime_seconds_sum"],
+            "total_gpu_device_hours": metrics["total_gpu_device_hours"],
+            "supervisor_observed_kernel_hours": metrics[
+                "supervisor_observed_kernel_hours"
             ],
+            "supervisor_observed_gpu_device_hours": metrics[
+                "supervisor_observed_gpu_device_hours"
+            ],
+            "accounting_note": metrics["runtime_accounting_note"],
         },
     )
     write_json(
@@ -691,7 +712,47 @@ def main() -> None:
             "shards": source_builds,
         },
     )
-    write_json(FINAL / "raw_bundle_hash_manifest.json", {"sha256": bundle_hashes})
+    attempt_failures = []
+    rejected_attempt_hashes = {}
+    for attempt_dir in sorted(
+        WORK.glob("ace-1o86-vina-t4-s*/attempt_00_p100_rejected")
+    ):
+        logs = sorted(attempt_dir.glob("*.log"))
+        if len(logs) != 1 or "Tesla P100" not in logs[0].read_text(encoding="utf-8"):
+            raise RuntimeError(
+                f"rejected P100 attempt evidence mismatch: {attempt_dir}"
+            )
+        for path in sorted(item for item in attempt_dir.rglob("*") if item.is_file()):
+            relative = str(path.relative_to(HERE)).replace("\\", "/")
+            rejected_attempt_hashes[relative] = sha256(path)
+        attempt_failures.append(
+            {
+                "shard": int(attempt_dir.parent.name.rsplit("s", 1)[1]),
+                "attempt": 0,
+                "failure_type": "hardware_mismatch",
+                "expected": "2 x Tesla T4",
+                "observed": "1 x Tesla P100-PCIE-16GB",
+                "failed_before_preparation": True,
+                "preserved_log": str(logs[0].relative_to(HERE)).replace("\\", "/"),
+                "remediation": "Passed NvidiaTeslaT4 through Kaggle SaveKernel accelerator API; retry 1 completed on 2 x Tesla T4.",
+            }
+        )
+    if len(attempt_failures) != 12:
+        raise RuntimeError("expected 12 preserved P100 rejection ledgers")
+    write_json(
+        FINAL / "campaign_attempt_failures.json",
+        {
+            "compound_preparation_or_docking_failures": 0,
+            "infrastructure_attempt_failures": attempt_failures,
+        },
+    )
+    write_json(
+        FINAL / "raw_bundle_hash_manifest.json",
+        {
+            "successful_output_bundles_sha256": bundle_hashes,
+            "rejected_attempt_files_sha256": rejected_attempt_hashes,
+        },
+    )
     write_json(FINAL / "shard_audit.json", shard_audit)
     metrics_md = (
         "# ACE T4 validation metrics\n\n"
@@ -708,7 +769,13 @@ def main() -> None:
 
 {conclusion}
 
-Coverage: {len(scored)}/{TOTAL} ({coverage:.4f}). ROC-AUC: {metrics["roc_auc"]} (published {PUBLISHED["roc_auc"]}; delta {paper_comparison["comparisons"]["roc_auc"]["pipeline_minus_published"]}). BEDROC20: {metrics["bedroc20"]} (published {PUBLISHED["bedroc20"]}; delta {paper_comparison["comparisons"]["bedroc20"]["pipeline_minus_published"]}).
+Gate outcome: FAIL overall because the predefined ROC-AUC margin failed; the BEDROC20 margin passed. No margin or protocol was changed after observing results.
+
+Coverage: {len(scored)}/{TOTAL} ({coverage:.4f}); 49 actives and 1,797 decoys; zero preparation failures, docking failures, fallbacks, or filtered rows. ROC-AUC: {metrics["roc_auc"]} (published {PUBLISHED["roc_auc"]}; delta {paper_comparison["comparisons"]["roc_auc"]["pipeline_minus_published"]}; bootstrap 95% CI {intervals["intervals"]["roc_auc"]["lower_95"]}-{intervals["intervals"]["roc_auc"]["upper_95"]}). BEDROC20: {metrics["bedroc20"]} (published {PUBLISHED["bedroc20"]}; delta {paper_comparison["comparisons"]["bedroc20"]["pipeline_minus_published"]}; bootstrap 95% CI {intervals["intervals"]["bedroc20"]["lower_95"]}-{intervals["intervals"]["bedroc20"]["upper_95"]}). Both published values fall inside the pipeline bootstrap intervals.
+
+Against the existing P100 raw Vina ranking: Spearman {p100_comparison["rank_correlation"]["spearman"]:.6f}, Kendall {p100_comparison["rank_correlation"]["kendall"]:.6f}; ROC-AUC delta {p100_comparison["metric_differences_t4_minus_p100"]["roc_auc"]}; BEDROC20 delta {p100_comparison["metric_differences_t4_minus_p100"]["bedroc20"]}. Architecture-specific floating-point scores were not required to be byte-identical.
+
+Measured notebook execution consumed {metrics["total_gpu_device_hours"]} T4 device-hours. The supervisor observed {metrics["supervisor_observed_kernel_hours"]} kernel-hours from submission to terminal polling. Attempt 0 was rejected before preparation on all shards because Kaggle allocated P100; all logs are retained and hashed. Retry 1 completed on T4 x2.
 
 Every shard required runtime evidence for exactly two Tesla T4 GPUs before preparation, exact frozen ADT prepared hashes, exact receptor and box, UniDock commit {UNIDOCK_COMMIT}, Vina scoring, spacing 0.375 A, and exhaustiveness 32. The 2,097,152-point source patch changes capacity limit only; no intended scoring protocol change.
 

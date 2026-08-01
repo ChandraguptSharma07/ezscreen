@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "recorded_before_any_selected_target_pipeline_outcome": true,
+  "launch_authorized": false,
+  "selection_rule": "Take the first three targets alphabetically from the paper campaign's frozen held-out validation split that have no SwiftScreen score or ranking outcome. Do not use published metric magnitude for selection.",
+  "primary_source": {
+    "title": "Vinardo: A Scoring Function Based on Autodock Vina Improves Scoring, Docking, and Virtual Screening",
+    "doi": "10.1371/journal.pone.0155183",
+    "article_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0155183",
+    "target_table": "Supplementary Table S2",
+    "auc_table": "Supplementary Table S3",
+    "bedroc_table": "Supplementary Table S4"
+  },
+  "protocol": {
+    "dataset": "DUD Release 2",
+    "preparation": "AutoDockTools prepare_receptor4.py and prepare_ligand4.py first; explicit Meeko fallback only after genuine ADT failure",
+    "box": "bound-crystallographic-ligand centered, autobox_add 15 A",
+    "exhaustiveness": 32,
+    "scoring": "UniDock Vina mode",
+    "grid_spacing_angstrom": 0.375,
+    "ranking": "raw score, lower is better",
+    "unidock_commit": "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
+    "grid_point_cap": 2097152
+  },
+  "selected_targets": [
+    {
+      "order": 1,
+      "target_id": "ada",
+      "pdb_id": "1NDW",
+      "actives": 39,
+      "decoys": 927,
+      "total": 966,
+      "published_vina_roc_auc": 0.451,
+      "published_vina_bedroc": 0.005,
+      "special_preparation": null
+    },
+    {
+      "order": 2,
+      "target_id": "ampc",
+      "pdb_id": "1XGJ",
+      "actives": 21,
+      "decoys": 786,
+      "total": 807,
+      "published_vina_roc_auc": 0.306,
+      "published_vina_bedroc": 0.046,
+      "special_preparation": null
+    },
+    {
+      "order": 3,
+      "target_id": "cdk2",
+      "pdb_id": "1CKP",
+      "actives": 72,
+      "decoys": 2074,
+      "total": 2146,
+      "published_vina_roc_auc": 0.624,
+      "published_vina_bedroc": 0.320,
+      "special_preparation": null
+    }
+  ],
+  "prelaunch_gates": [
+    "Reverify each S2/S3/S4 row directly against the primary supplementary workbooks.",
+    "Verify DUD archive counts, receptor PDB, bound ligand, and target/library-stem identity.",
+    "Freeze each crystal-ligand-derived box; do not reuse the ACE coordinates.",
+    "Generate and freeze target-specific ADT receptor and ligand preparation hashes on Tesla T4.",
+    "Confirm no target-specific preparation exception is required.",
+    "Render and statically validate target-specific T4 shards before any launch."
+  ],
+  "prohibitions": [
+    "Do not inspect SwiftScreen outcomes before retaining or rejecting a selected target.",
+    "Do not tune protocol, margins, or ranking per target.",
+    "Do not launch from this preregistration alone."
+  ]
+}
