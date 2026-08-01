@@ -488,9 +488,9 @@ SHARD_INDEX = __SHARD_INDEX__
 SHARD_START = __SHARD_START__
 SHARD_END = __SHARD_END__
 
-bundles = list(Path("/kaggle/input").rglob("prepared_bundle.zip"))
+bundles = list(Path("/kaggle/input").rglob("prepared_bundle.kaggle"))
 if len(bundles) != 1:
-    raise RuntimeError(f"expected one prepared_bundle.zip, found {len(bundles)}")
+    raise RuntimeError(f"expected one prepared_bundle.kaggle, found {len(bundles)}")
 bundle = bundles[0]
 if sha256(bundle) != EXPECTED_PREPARED_INPUT["prepared_bundle_sha256"]:
     raise RuntimeError("frozen ADA prepared bundle hash mismatch")

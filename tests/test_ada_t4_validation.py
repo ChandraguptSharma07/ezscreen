@@ -120,6 +120,14 @@ def test_all_docking_notebooks_compile_and_gate_hardware_first() -> None:
         assert "4d307b979c1ab7560d4b12703d411c37795fbe5d536995705da8deba0d27dcfb" in joined
         assert f"SHARD_INDEX = {shard}" in joined
         assert "--exhaustiveness" in joined
+        assert "prepared_bundle.kaggle" in joined
+
+
+def test_launcher_preserves_frozen_zip_bytes_under_opaque_transport_name() -> None:
+    source = (CAMPAIGN / "launch_ada_t4.py").read_text()
+    assert 'PREPARED_BUNDLE_TRANSPORT = HERE / "inputs/prepared_bundle.kaggle"' in source
+    assert "sha256(PREPARED_BUNDLE_TRANSPORT) != expected" in source
+    assert "archive_failed_output(job_work, retry_count)" in source
 
 
 def test_finalizer_freezes_published_values_and_similarity_margins() -> None:

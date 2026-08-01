@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from ezscreen import auth
@@ -29,8 +31,39 @@ SOURCE_MANIFEST = (
     ROOT / "benchmarks/bench-20260723-vinardo-dud28/source_manifest.json"
 )
 PREPARED_BUNDLE = HERE / "inputs/prepared_bundle.zip"
+PREPARED_BUNDLE_TRANSPORT = HERE / "inputs/prepared_bundle.kaggle"
 PREPARED_MANIFEST = HERE / "prepared_input_manifest.json"
 ACCELERATOR = "nvidiaTeslaT4"
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def prepared_bundle_transport() -> Path:
+    """Keep ZIP bytes opaque so Kaggle does not auto-expand the frozen bundle."""
+    expected = json.loads(PREPARED_MANIFEST.read_text())["prepared_bundle_sha256"]
+    if sha256(PREPARED_BUNDLE) != expected:
+        raise RuntimeError("local frozen ADA prepared bundle hash mismatch")
+    if not PREPARED_BUNDLE_TRANSPORT.is_file() or sha256(PREPARED_BUNDLE_TRANSPORT) != expected:
+        shutil.copy2(PREPARED_BUNDLE, PREPARED_BUNDLE_TRANSPORT)
+    if sha256(PREPARED_BUNDLE_TRANSPORT) != expected:
+        raise RuntimeError("ADA Kaggle transport bundle hash mismatch")
+    return PREPARED_BUNDLE_TRANSPORT
+
+
+def archive_failed_output(job_work: Path, retry_count: int) -> None:
+    output = job_work / "output"
+    if not output.exists():
+        return
+    attempt = job_work / f"attempt_{retry_count - 1:02d}_kaggle_zip_auto_expansion"
+    if attempt.exists():
+        raise RuntimeError(f"refusing to overwrite preserved failed attempt: {attempt}")
+    shutil.move(str(output), str(attempt))
 
 
 def healthy_accounts() -> list[tuple[dict, str, Path]]:
@@ -119,6 +152,8 @@ def register_and_push(
         raise RuntimeError(f"two active kernels already assigned to {username}")
     job_work = WORK / run_id
     retry_count = int(prior.get("retry_count") or 0) + 1 if prior else 0
+    if prior and prior.get("status") == "failed":
+        archive_failed_output(job_work, retry_count)
     supervisor.register_job(
         HERE,
         {
@@ -193,7 +228,7 @@ def launch_docking(accounts: list[tuple[dict, str, Path]]) -> None:
     notebooks = sorted(NOTEBOOKS.glob("ada_1ndw_vina_t4_shard_*.ipynb"))
     if len(notebooks) != 12:
         raise RuntimeError(f"expected 12 docking notebooks, got {len(notebooks)}")
-    files = [PREPARED_BUNDLE, PREPARED_MANIFEST]
+    files = [prepared_bundle_transport(), PREPARED_MANIFEST]
     if any(not path.is_file() for path in files):
         raise FileNotFoundError("frozen prepared input bundle is missing")
     for account_index, (account, username, credential) in enumerate(accounts[:6]):
