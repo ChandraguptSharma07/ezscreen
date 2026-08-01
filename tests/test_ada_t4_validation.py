@@ -43,6 +43,11 @@ def test_ada_box_and_protocol_are_target_specific_and_frozen() -> None:
     assert protocol["protocol"]["grid_spacing_angstrom"] == 0.375
     assert protocol["protocol"]["scoring"] == "vina"
     assert protocol["protocol"]["record_identity"] == "source_id@sample_index"
+    repair = evidence["receptor_input_normalization"]
+    assert repair["atoms_added"] == 0
+    assert repair["atoms_removed"] == 0
+    assert repair["coordinates_changed"] == 0
+    assert "element columns" in protocol["protocol"]["receptor_input_normalization"]
     assert protocol["hardware"] == {
         "required_gpu_count": 2,
         "required_model": "Tesla T4",
@@ -62,6 +67,8 @@ def test_renderer_places_hardware_gate_before_preparation() -> None:
     assert 'any("T4" not in model' in sources[hardware_index]
     assert "prepare_ligand4.py" in "\n".join(sources)
     assert "meeko_fallback" in "\n".join(sources)
+    assert 'line.ljust(76) + "ZN"' in "\n".join(sources)
+    assert "expected one blank-element ADA ZN atom" in "\n".join(sources)
 
 
 def test_renderer_freezes_expected_unidock_source_and_scoring() -> None:

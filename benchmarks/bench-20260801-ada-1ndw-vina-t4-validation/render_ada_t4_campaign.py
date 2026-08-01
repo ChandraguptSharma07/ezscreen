@@ -232,6 +232,40 @@ if sha256(receptor_source) != TARGET_EVIDENCE["dud_release_2"]["receptor_sha256"
 if sha256(crystal_ligand) != TARGET_EVIDENCE["dud_release_2"]["crystal_ligand_sha256"]:
     raise RuntimeError("ADA crystal ligand hash mismatch")
 
+receptor_normalized = WORK / "ada_receptor_element_normalized.pdb"
+source_receptor_lines = receptor_source.read_text(errors="replace").splitlines()
+normalized_receptor_lines = []
+normalizations = []
+for line_number, line in enumerate(source_receptor_lines, start=1):
+    atom_name = line[12:16].strip() if len(line) >= 16 else ""
+    residue_name = line[17:20].strip() if len(line) >= 20 else ""
+    element = line[76:78].strip() if len(line) >= 78 else ""
+    if line.startswith(("ATOM  ", "HETATM")) and atom_name == "ZN" and residue_name == "ZN" and not element:
+        normalized = line.ljust(76) + "ZN"
+        normalizations.append({
+            "line_number": line_number, "atom_name": atom_name, "residue_name": residue_name,
+            "original_line": line, "normalized_line": normalized,
+            "change": "populate blank PDB element columns 77-78 with ZN",
+        })
+        line = normalized
+    normalized_receptor_lines.append(line)
+if len(normalizations) != 1:
+    raise RuntimeError(f"expected one blank-element ADA ZN atom, found {len(normalizations)}")
+receptor_normalized.write_text("\n".join(normalized_receptor_lines) + "\n")
+if len(source_receptor_lines) != len(normalized_receptor_lines):
+    raise RuntimeError("receptor normalization changed atom-line count")
+normalization_manifest = {
+    "classification": "PDB element-column format repair for AutoDockTools",
+    "source_receptor_sha256": sha256(receptor_source),
+    "normalized_receptor_sha256": sha256(receptor_normalized),
+    "source_lines": len(source_receptor_lines), "normalized_lines": len(normalized_receptor_lines),
+    "atoms_added": 0, "atoms_removed": 0, "coordinates_changed": 0,
+    "normalizations": normalizations,
+}
+Path("/kaggle/working/receptor_normalization.json").write_text(
+    json.dumps(normalization_manifest, indent=2) + "\n"
+)
+
 xtal_lines = crystal_ligand.read_text(errors="replace").splitlines()
 atom_start = xtal_lines.index("@<TRIPOS>ATOM") + 1
 atom_end = xtal_lines.index("@<TRIPOS>BOND")
@@ -272,7 +306,7 @@ prepared_dir.mkdir(exist_ok=True)
 source_dir.mkdir(exist_ok=True)
 receptor_pdbqt = prepared_dir / "receptor.pdbqt"
 receptor_run = run(
-    [pythonsh, utilities / "prepare_receptor4.py", "-r", receptor_source, "-o", receptor_pdbqt, "-A", "hydrogens"],
+    [pythonsh, utilities / "prepare_receptor4.py", "-r", receptor_normalized, "-o", receptor_pdbqt, "-A", "hydrogens"],
     check=False, log_name="prepare_receptor.log",
 )
 if receptor_run.returncode or not receptor_pdbqt.exists() or not receptor_pdbqt.stat().st_size:
@@ -334,6 +368,8 @@ with Path("/kaggle/working/prep_messages.jsonl").open("w", encoding="utf-8") as 
 input_manifest = {
     "target": "ADA", "pdb_id": "1NDW", "dataset": "DUD Release 2",
     "source_archive_hashes": verified, "source_receptor_sha256": sha256(receptor_source),
+    "normalized_receptor_sha256": sha256(receptor_normalized),
+    "receptor_normalization_manifest_sha256": sha256(Path("/kaggle/working/receptor_normalization.json")),
     "crystal_ligand_sha256": sha256(crystal_ligand), "receptor_pdbqt_sha256": sha256(receptor_pdbqt),
     "prepared_manifest_sha256": sha256(prepared_manifest), "records": {"total": 966, "actives": 39, "decoys": 927},
     "prepared": len(prepared), "preparation_failures": len(prep_failures), "fallbacks": len(fallbacks),
@@ -350,6 +386,7 @@ with zipfile.ZipFile(bundle_path, "w", zipfile.ZIP_DEFLATED) as archive:
         (fallbacks_path, "fallbacks.csv"),
         (Path("/kaggle/working/input_manifest.json"), "input_manifest.json"),
         (Path("/kaggle/working/box_manifest.json"), "box_manifest.json"),
+        (Path("/kaggle/working/receptor_normalization.json"), "receptor_normalization.json"),
     ):
         archive.write(path, name)
     for row in prepared:
@@ -368,6 +405,7 @@ with zipfile.ZipFile("/kaggle/working/output.zip", "w", zipfile.ZIP_DEFLATED) as
     for name in (
         "prepared_bundle.zip", "prepared_manifest.csv", "prep_failures.csv", "fallbacks.csv",
         "prep_messages.jsonl", "input_manifest.json", "box_manifest.json", "hardware_manifest.json",
+        "receptor_normalization.json",
         "runtime.json",
     ):
         archive.write(Path("/kaggle/working") / name, name)

@@ -55,6 +55,7 @@ def main() -> None:
             "fallbacks.csv",
             "input_manifest.json",
             "box_manifest.json",
+            "receptor_normalization.json",
             "hardware_manifest.json",
             "runtime.json",
         }
@@ -71,6 +72,7 @@ def main() -> None:
         input_manifest = json.loads(outer.read("input_manifest.json"))
         box = json.loads(outer.read("box_manifest.json"))
         runtime = json.loads(outer.read("runtime.json"))
+        normalization = json.loads(outer.read("receptor_normalization.json"))
         prepared = rows(outer, "prepared_manifest.csv")
         failures = rows(outer, "prep_failures.csv")
         fallbacks = rows(outer, "fallbacks.csv")
@@ -82,6 +84,15 @@ def main() -> None:
         raise RuntimeError("crystal ligand hash mismatch")
     if box["center"] != EXPECTED_CENTER or box["size"] != EXPECTED_SIZE:
         raise RuntimeError("frozen ADA box mismatch")
+    if (
+        normalization.get("source_receptor_sha256") != EXPECTED_SOURCE_RECEPTOR
+        or normalization.get("atoms_added") != 0
+        or normalization.get("atoms_removed") != 0
+        or normalization.get("coordinates_changed") != 0
+        or len(normalization.get("normalizations", [])) != 1
+        or normalization["normalizations"][0].get("atom_name") != "ZN"
+    ):
+        raise RuntimeError("ADA receptor normalization audit failed")
     if len(prepared) + len(failures) != TOTAL:
         raise RuntimeError("preparation accounting mismatch")
     labels = Counter(int(row["label"]) for row in prepared + failures)
@@ -103,6 +114,7 @@ def main() -> None:
             "fallbacks.csv",
             "input_manifest.json",
             "box_manifest.json",
+            "receptor_normalization.json",
         } - bundle_names:
             raise RuntimeError("prepared bundle audit files missing")
         receptor_bytes = bundle.read("receptor.pdbqt")
@@ -139,6 +151,8 @@ def main() -> None:
         "prepared_manifest_sha256": sha256_bytes(internal_manifest),
         "receptor_pdbqt_sha256": sha256_bytes(receptor_bytes),
         "source_receptor_sha256": EXPECTED_SOURCE_RECEPTOR,
+        "normalized_receptor_sha256": normalization["normalized_receptor_sha256"],
+        "receptor_normalization": normalization,
         "crystal_ligand_sha256": EXPECTED_XTAL,
         "box_center": EXPECTED_CENTER,
         "box_size": EXPECTED_SIZE,

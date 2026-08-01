@@ -73,5 +73,15 @@
     "size": [36.9618, 39.689, 38.3826],
     "autobox_add_angstrom": 15.0
   },
-  "special_preparation": null
+  "special_preparation": null,
+  "receptor_input_normalization": {
+    "classification": "PDB element-column repair required for AutoDockTools parsing",
+    "trigger": "The exact DUD receptor stores the catalytic zinc as atom name/residue ZN but leaves PDB columns 77-78 blank; AutoDockTools otherwise raises 'Could not find atomic number for Z Z'.",
+    "rule": "For the single existing ZN atom only, populate the blank element columns with ZN.",
+    "atoms_added": 0,
+    "atoms_removed": 0,
+    "coordinates_changed": 0,
+    "source_receptor_remains_hash_gated": true,
+    "scientific_scope": "format annotation only; not target tuning or scoring modification"
+  }
 }

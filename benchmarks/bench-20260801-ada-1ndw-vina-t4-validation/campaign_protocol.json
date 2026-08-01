@@ -8,6 +8,7 @@
   "records": {"total": 966, "actives": 39, "decoys": 927},
   "protocol": {
     "preparation": "AutoDockTools prepare_receptor4.py and prepare_ligand4.py first on Tesla T4 runtime; Meeko only after genuine ADT failure",
+    "receptor_input_normalization": "Populate the blank PDB element columns of the one existing ADA ZN atom with ZN; record source and normalized hashes; change no atom or coordinate",
     "prepared_identity": "freeze exact T4-produced receptor and ligand PDBQT hashes before docking",
     "box_center": [42.2931, 17.3816, 49.5368],
     "box_size": [36.9618, 39.689, 38.3826],
