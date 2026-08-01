@@ -507,11 +507,10 @@ def main() -> None:
     labels_all = [combined[index]["label"] for index in range(TOTAL)]
     if (sum(labels_all), len(labels_all) - sum(labels_all)) != (ACTIVES, DECOYS):
         raise RuntimeError("global label count mismatch")
-    if (
-        len({item["source_tree_sha256"] for item in shard_audit}) != 1
-        or len({item["binary_sha256"] for item in shard_audit}) != 1
-    ):
-        raise RuntimeError("source/build hashes differ across shards")
+    if len({item["source_tree_sha256"] for item in shard_audit}) != 1:
+        raise RuntimeError("source-tree hashes differ across shards")
+    if len({source["binary_bytes"] for source in source_builds}) != 1:
+        raise RuntimeError("binary sizes differ across shards")
 
     for row in combined.values():
         row["source_record_key"] = f"{row['source_id']}@{row['sample_index']}"
@@ -682,6 +681,13 @@ def main() -> None:
             "commit": UNIDOCK_COMMIT,
             "grid_point_cap": 2_097_152,
             "change_scope": "capacity limit only; no intended scoring protocol change",
+            "source_tree_hashes_unique": len(
+                {source["source_tree_sha256"] for source in source_builds}
+            ),
+            "binary_hashes_unique": len(
+                {source["binary_sha256"] for source in source_builds}
+            ),
+            "binary_reproducibility_note": "Every binary hash is recorded and binary size is gated. Independent source builds may differ bytewise because compiler/linker build metadata is not reproducible; identical source-tree and patch hashes are required.",
             "shards": source_builds,
         },
     )
