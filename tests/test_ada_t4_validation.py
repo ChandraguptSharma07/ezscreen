@@ -137,3 +137,6 @@ def test_finalizer_freezes_published_values_and_similarity_margins() -> None:
     assert "BOOTSTRAP_REPLICATES = 10_000" in source
     assert "BOOTSTRAP_SEED = 20260801" in source
     assert "overall_validation_pass" in source
+    assert "execution_failure_audit" in source
+    assert "total_observed_t4_device_hours" in source
+    assert 'FINAL / "execution_attempt_failures.csv"' in source

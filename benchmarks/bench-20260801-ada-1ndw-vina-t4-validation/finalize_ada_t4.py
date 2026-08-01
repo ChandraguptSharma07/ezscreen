@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import zipfile
 from collections import Counter
 from pathlib import Path
@@ -83,6 +84,62 @@ def write_csv(path: Path, rows: list[dict], fields: list[str]) -> None:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def execution_failure_audit() -> tuple[list[dict], list[dict], float]:
+    specs = [
+        (
+            "preparation",
+            "ada-1ndw-prepare-t4",
+            WORK / "ada-1ndw-prepare-t4" / "attempt_00_adt_zinc_element_failure",
+            "ADT rejected the source receptor because the existing Zn atom had blank PDB element columns; no prepared campaign input was accepted.",
+        )
+    ]
+    specs.extend(
+        (
+            "docking",
+            f"ada-1ndw-vina-t4-s{shard:02d}",
+            WORK / f"ada-1ndw-vina-t4-s{shard:02d}" / "attempt_00_kaggle_zip_auto_expansion",
+            "Kaggle auto-expanded prepared_bundle.zip, so the exact bundle hash gate failed before docking and no score was emitted.",
+        )
+        for shard in range(SHARDS)
+    )
+    attempts, raw_files, elapsed_sum = [], [], 0.0
+    for stage, job_id, directory, reason in specs:
+        if not directory.is_dir():
+            raise RuntimeError(f"missing preserved failed attempt: {directory}")
+        hardware = json.loads((directory / "hardware_manifest.json").read_text())
+        if hardware.get("gpu_models") != ["Tesla T4", "Tesla T4"]:
+            raise RuntimeError(f"failed attempt hardware mismatch: {job_id}")
+        logs = list(directory.glob("*.log"))
+        if len(logs) != 1:
+            raise RuntimeError(f"expected one raw failed-attempt log: {job_id}")
+        log_text = logs[0].read_text(errors="replace")
+        elapsed_values = [float(value) for value in re.findall(r'"time":\s*([0-9]+(?:\.[0-9]+)?)', log_text)]
+        if not elapsed_values:
+            raise RuntimeError(f"missing raw Kaggle elapsed timestamps: {job_id}")
+        elapsed_seconds = max(elapsed_values)
+        elapsed_sum += elapsed_seconds
+        attempts.append({
+            "attempt": 0,
+            "stage": stage,
+            "job_id": job_id,
+            "reason": reason,
+            "gpu_models": "Tesla T4|Tesla T4",
+            "elapsed_seconds_from_raw_log": round(elapsed_seconds, 6),
+            "compound_scores_emitted": 0,
+            "preserved_directory": directory.relative_to(HERE).as_posix(),
+        })
+        for path in sorted(item for item in directory.rglob("*") if item.is_file()):
+            raw_files.append({
+                "attempt": 0,
+                "stage": stage,
+                "job_id": job_id,
+                "path": path.relative_to(HERE).as_posix(),
+                "sha256": sha256(path),
+                "bytes": path.stat().st_size,
+            })
+    return attempts, raw_files, elapsed_sum
 
 
 def enrichment(labels: list[int], fraction: float) -> float:
@@ -339,20 +396,27 @@ def main() -> None:
         ),
         "required_caveat": "This validates result quality for tested ADA protocol. It does not establish exact AutoDock Vina equivalence or universal performance across targets and scoring backends.",
     }
+    execution_failures, failed_attempt_raw_hashes, failed_attempt_seconds = execution_failure_audit()
     prep_seconds = float(frozen["prep_runtime"]["total_seconds"])
     docking_seconds = sum(float(item["docking_seconds"]) for item in runtimes)
     notebook_seconds = sum(float(item["total_seconds"]) for item in runtimes)
+    successful_device_hours = (prep_seconds + notebook_seconds) * 2 / 3600
+    failed_attempt_device_hours = failed_attempt_seconds * 2 / 3600
     runtime_summary = {
         "preparation_seconds": prep_seconds, "docking_seconds_sum": docking_seconds,
         "docking_notebook_seconds_sum": notebook_seconds,
         "total_notebook_seconds_including_preparation": prep_seconds + notebook_seconds,
-        "measured_t4_device_hours": round((prep_seconds + notebook_seconds) * 2 / 3600, 6),
+        "successful_t4_device_hours": round(successful_device_hours, 6),
+        "failed_attempt_notebook_seconds_sum": round(failed_attempt_seconds, 6),
+        "failed_attempt_t4_device_hours": round(failed_attempt_device_hours, 6),
+        "total_observed_t4_device_hours": round(successful_device_hours + failed_attempt_device_hours, 6),
+        "measured_t4_device_hours": round(successful_device_hours + failed_attempt_device_hours, 6),
         "gpu_count_per_job": 2,
         "shards": [{
             "shard": item["shard_index"], "docking_seconds": item["docking_seconds"],
             "total_seconds": item["total_seconds"],
         } for item in runtimes],
-        "accounting_note": "Measured device-hours multiply each notebook runtime by two observed T4 devices; excludes queue time.",
+        "accounting_note": "Total observed device-hours include successful notebooks plus all 13 preserved failed attempts, multiplying raw notebook elapsed time by two observed T4 devices; excludes queue and download time.",
     }
 
     FINAL.mkdir(parents=True, exist_ok=True)
@@ -381,6 +445,11 @@ def main() -> None:
         "binary_hash_note": "Independent source builds may contain nondeterministic build metadata; every hash is retained.",
     })
     write_json(FINAL / "raw_bundle_hash_manifest.json", raw_hashes)
+    write_csv(FINAL / "execution_attempt_failures.csv", execution_failures, [
+        "attempt", "stage", "job_id", "reason", "gpu_models",
+        "elapsed_seconds_from_raw_log", "compound_scores_emitted", "preserved_directory",
+    ])
+    write_json(FINAL / "failed_attempt_raw_hash_manifest.json", failed_attempt_raw_hashes)
 
     metrics_md = f"""# ADA/1NDW T4 validation metrics
 
@@ -425,6 +494,7 @@ def main() -> None:
 - All 12 docking shards proved 2x Tesla T4.
 - UniDock commit `{UNIDOCK_COMMIT}`; 2,097,152-point capacity patch only.
 - Measured T4 device-hours: {runtime_summary['measured_t4_device_hours']:.6f}.
+- This total includes {len(execution_failures)} preserved failed execution attempts; each emitted zero compound scores. See `execution_attempt_failures.csv`.
 
 ## Scope caveat
 
