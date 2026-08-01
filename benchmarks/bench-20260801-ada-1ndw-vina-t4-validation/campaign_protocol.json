@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "campaign": "bench-20260801-ada-1ndw-vina-t4-validation",
+  "scientific_question": "Does the unchanged automated UniDock Vina-mode workflow achieve published Vina screening quality on untouched ADA/1NDW?",
+  "target": "ADA",
+  "pdb_id": "1NDW",
+  "dataset": "DUD Release 2",
+  "records": {"total": 966, "actives": 39, "decoys": 927},
+  "protocol": {
+    "preparation": "AutoDockTools prepare_receptor4.py and prepare_ligand4.py first on Tesla T4 runtime; Meeko only after genuine ADT failure",
+    "prepared_identity": "freeze exact T4-produced receptor and ligand PDBQT hashes before docking",
+    "box_center": [42.2931, 17.3816, 49.5368],
+    "box_size": [36.9618, 39.689, 38.3826],
+    "autobox_add_angstrom": 15,
+    "exhaustiveness": 32,
+    "scoring": "vina",
+    "grid_spacing_angstrom": 0.375,
+    "ranking": "raw UniDock Vina score ascending",
+    "record_identity": "source_id@sample_index"
+  },
+  "hardware": {
+    "required_gpu_count": 2,
+    "required_model": "Tesla T4",
+    "fail_fast_before_preparation_or_docking": true
+  },
+  "unidock": {
+    "repository": "https://github.com/dptech-corp/Uni-Dock",
+    "commit": "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
+    "grid_point_cap": 2097152,
+    "source_change": "capacity limit only; no intended scoring protocol change"
+  },
+  "published": {"roc_auc": 0.451, "bedroc20_inferred": 0.005},
+  "predefined_similarity_margins_pipeline_minus_published": {
+    "roc_auc": -0.02,
+    "bedroc20": -0.02
+  },
+  "bootstrap": {
+    "method": "stratified nonparametric",
+    "replicates": 10000,
+    "seed": 20260801,
+    "confidence": 0.95
+  },
+  "execution": {
+    "preparation_shards": 1,
+    "docking_shards": 12,
+    "accounts": 6,
+    "maximum_active_kernels_per_account": 2,
+    "stages": [
+      "prepare and freeze exact ADA inputs on T4",
+      "dock exact frozen inputs on T4",
+      "finalize locally"
+    ]
+  },
+  "prohibitions": [
+    "no target-specific tuning",
+    "no label inspection before protocol freeze",
+    "no post-hoc ranking substitution",
+    "no AutoDock Vina or smina equivalence claim",
+    "no Vinardo or AD4 validation claim"
+  ]
+}

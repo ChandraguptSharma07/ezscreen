@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "selection": {
+    "rule": "First target in the frozen alphabetical held-out preregistration.",
+    "preregistration": "benchmarks/bench-20260727-ace-ad4zn-probe/full_vina_t4_validation/followup_target_preregistration.json",
+    "selected_before_pipeline_outcome": true,
+    "target_id": "ada",
+    "pdb_id": "1NDW"
+  },
+  "primary_paper": {
+    "title": "Vinardo: A Scoring Function Based on Autodock Vina Improves Scoring, Docking, and Virtual Screening",
+    "authors": ["Rodrigo Quiroga", "Marcos A. Villarreal"],
+    "journal": "PLOS ONE 11(5): e0155183 (2016)",
+    "doi": "10.1371/journal.pone.0155183",
+    "article_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0155183",
+    "protocol_location": "Methods sections 2.2 and 2.5; virtual-screening results section 3.5",
+    "protocol": "DUD Release 2; AutoDockTools prepare_receptor4.py and prepare_ligand4.py; bound-ligand-centered box extended 15 A in each dimension; smina; exhaustiveness 32; Vina scoring.",
+    "ambiguities": [
+      "The paper does not report AutoDockTools, Open Babel, or smina versions.",
+      "The paper does not report a random seed or complete command line.",
+      "Supplementary Table S4 reports BEDROC without alpha; BEDROC20 is the project's explicit alpha=20 inference.",
+      "UniDock Vina mode is an accelerated port and is not claimed to be AutoDock Vina or smina equivalent."
+    ]
+  },
+  "supplement_rows_verified_directly": {
+    "verified_on": "2026-08-01",
+    "s2": {
+      "file": "s2_targets.xls",
+      "sha256": "b652d2ca707394012f42172196f5db7741b42e11510261838432a722ba059882",
+      "sheet": "Sheet1",
+      "zero_based_row": 8,
+      "row": ["ada", "1ndw", 39, 927]
+    },
+    "s3": {
+      "file": "s3_auc.xls",
+      "sha256": "ec90e2cfaa96db79b01810c43b94f18828e4e9d226a93b4dab8c32c2db261cf8",
+      "sheet": "Sheet1",
+      "zero_based_row": 9,
+      "columns": ["Protein", "Dk_scoring", "Vina", "Vinardo"],
+      "row": ["ada", 0.389, 0.451, 0.639]
+    },
+    "s4": {
+      "file": "s4_bedroc.xls",
+      "sha256": "a3568902747fdc4faf56635d362bd4b57aa17df83b94627946299e30448809cb",
+      "sheet": "Sheet1",
+      "zero_based_row": 9,
+      "columns": ["Protein", "Dk_scoring", "Vina", "Vinardo"],
+      "row": ["ada", 0.048, 0.005, 0.217]
+    }
+  },
+  "dud_release_2": {
+    "records": {"total": 966, "actives": 39, "decoys": 927},
+    "library_stem": "ada",
+    "receptor_member": "targets/ada/rec.pdb",
+    "receptor_sha256": "dff0543204ea1fbf1586e718321fe4a62b8ed0637cc394eab29b74e404a82f95",
+    "crystal_ligand_member": "targets/ada/xtal-lig.mol2",
+    "crystal_ligand_sha256": "19df7dd93a16414d991d58719bd5b871454e8467d562ac433a8dbb879ba2e841",
+    "active_member": "dud_ligands2006/ada_ligands.mol2.gz",
+    "active_member_sha256": "83146b9c36de59811de3916d0c12c9832fee28087da03018fc490740cce6066e",
+    "active_uncompressed_sha256": "1cac3dad35151bfccf148bbc8974ffbf1dd8f7188dce45ae2811138e452be63e",
+    "decoy_member": "dud_decoys2006/ada_decoys.mol2.gz",
+    "decoy_member_sha256": "ddbe3e5b6bc4c5f990248408b29047ada3b7a1c13a31ad9237e1371cf5ec9686",
+    "decoy_uncompressed_sha256": "15b439da146de98637a064567802fc571a69431f1cb8b35543afb0d8849af52a",
+    "duplicate_source_ids": {"actives": 16, "decoys": 106},
+    "record_identity": "source_id@sample_index"
+  },
+  "box": {
+    "derivation": "Atomic coordinate bounds of targets/ada/xtal-lig.mol2, expanded 15 A on all six faces.",
+    "crystal_ligand_atoms": 36,
+    "coordinate_min": [38.8122, 12.5371, 45.3455],
+    "coordinate_max": [45.774, 22.2261, 53.7281],
+    "center": [42.2931, 17.3816, 49.5368],
+    "size": [36.9618, 39.689, 38.3826],
+    "autobox_add_angstrom": 15.0
+  },
+  "special_preparation": null
+}
