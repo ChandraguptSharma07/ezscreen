@@ -87,3 +87,45 @@ def test_shard_bounds_account_for_all_records_without_overlap() -> None:
     assert indices == list(range(966))
     assert min(end - start for start, end in bounds) == 80
     assert max(end - start for start, end in bounds) == 81
+
+
+def test_frozen_prepared_manifest_has_complete_t4_accounting() -> None:
+    frozen = json.loads((CAMPAIGN / "prepared_input_manifest.json").read_text())
+    assert frozen["prepared_on_required_hardware"] is True
+    assert frozen["hardware"]["gpu_models"] == ["Tesla T4", "Tesla T4"]
+    assert frozen["records"] == {
+        "intended": 966,
+        "actives": 39,
+        "decoys": 927,
+        "prepared": 966,
+        "preparation_failures": 0,
+        "fallbacks": 0,
+    }
+    assert frozen["prepared_bundle_sha256"] == "4d307b979c1ab7560d4b12703d411c37795fbe5d536995705da8deba0d27dcfb"
+    assert frozen["receptor_pdbqt_sha256"] == "e35617b87b8ecd15dc5b47fcc0427258e7ef7072e042b6993f471bcba3334078"
+
+
+def test_all_docking_notebooks_compile_and_gate_hardware_first() -> None:
+    renderer = load_renderer()
+    paths = renderer.render_docking()
+    assert len(paths) == 12
+    for shard, path in enumerate(paths):
+        notebook = json.loads(path.read_text())
+        sources = ["".join(cell["source"]) for cell in notebook["cells"]]
+        hardware_index = next(i for i, source in enumerate(sources) if "nvidia-smi" in source)
+        build_index = next(i for i, source in enumerate(sources) if "git clone" in source)
+        dock_index = next(i for i, source in enumerate(sources) if '"--scoring", "vina"' in source)
+        assert hardware_index < build_index < dock_index
+        joined = "\n".join(sources)
+        assert "4d307b979c1ab7560d4b12703d411c37795fbe5d536995705da8deba0d27dcfb" in joined
+        assert f"SHARD_INDEX = {shard}" in joined
+        assert "--exhaustiveness" in joined
+
+
+def test_finalizer_freezes_published_values_and_similarity_margins() -> None:
+    source = (CAMPAIGN / "finalize_ada_t4.py").read_text()
+    assert 'PUBLISHED = {"roc_auc": 0.451, "bedroc20": 0.005}' in source
+    assert 'MARGINS = {"roc_auc": -0.02, "bedroc20": -0.02}' in source
+    assert "BOOTSTRAP_REPLICATES = 10_000" in source
+    assert "BOOTSTRAP_SEED = 20260801" in source
+    assert "overall_validation_pass" in source

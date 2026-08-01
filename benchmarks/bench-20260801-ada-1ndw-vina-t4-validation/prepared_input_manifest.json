@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "target": "ADA",
+  "pdb_id": "1NDW",
+  "prepared_on_required_hardware": true,
+  "hardware": {
+    "gpu_count": 2,
+    "gpu_models": [
+      "Tesla T4",
+      "Tesla T4"
+    ],
+    "query_stdout": "0, Tesla T4, GPU-b43ee048-f17f-469d-8519-c36cfde69c27, 15360, 580.159.04\n1, Tesla T4, GPU-9e86a51b-d2b7-7d3f-a3ff-71376bec416d, 15360, 580.159.04\n"
+  },
+  "records": {
+    "intended": 966,
+    "actives": 39,
+    "decoys": 927,
+    "prepared": 966,
+    "preparation_failures": 0,
+    "fallbacks": 0
+  },
+  "prepared_bundle_sha256": "4d307b979c1ab7560d4b12703d411c37795fbe5d536995705da8deba0d27dcfb",
+  "prepared_bundle_bytes": 958683,
+  "prepared_manifest_sha256": "15856b6a5747fe5a1660a095132472e87140d7a0b494fea3a71ebbeb5374fe0a",
+  "receptor_pdbqt_sha256": "e35617b87b8ecd15dc5b47fcc0427258e7ef7072e042b6993f471bcba3334078",
+  "source_receptor_sha256": "dff0543204ea1fbf1586e718321fe4a62b8ed0637cc394eab29b74e404a82f95",
+  "normalized_receptor_sha256": "0cd059a76831483138352fd0a61946890771157dadfcd71bdc424343e9178a1c",
+  "receptor_normalization": {
+    "classification": "PDB element-column format repair for AutoDockTools",
+    "source_receptor_sha256": "dff0543204ea1fbf1586e718321fe4a62b8ed0637cc394eab29b74e404a82f95",
+    "normalized_receptor_sha256": "0cd059a76831483138352fd0a61946890771157dadfcd71bdc424343e9178a1c",
+    "source_lines": 2799,
+    "normalized_lines": 2799,
+    "atoms_added": 0,
+    "atoms_removed": 0,
+    "coordinates_changed": 0,
+    "normalizations": [
+      {
+        "line_number": 2794,
+        "atom_name": "ZN",
+        "residue_name": "ZN",
+        "original_line": "ATOM   3432  ZN   ZN   400      40.473  24.536  52.034  1.00  0.00",
+        "normalized_line": "ATOM   3432  ZN   ZN   400      40.473  24.536  52.034  1.00  0.00          ZN",
+        "change": "populate blank PDB element columns 77-78 with ZN"
+      }
+    ]
+  },
+  "crystal_ligand_sha256": "19df7dd93a16414d991d58719bd5b871454e8467d562ac433a8dbb879ba2e841",
+  "box_center": [
+    42.2931,
+    17.3816,
+    49.5368
+  ],
+  "box_size": [
+    36.9618,
+    39.689,
+    38.3826
+  ],
+  "prep_output_zip_sha256": "73ad6c5583aea0c8981db9eccb3aecbe8b273d78d97d9cc3f7b18ec7c76421d4",
+  "prep_runtime": {
+    "stage": "preparation",
+    "target": "ADA",
+    "pdb_id": "1NDW",
+    "intended": 966,
+    "prepared": 966,
+    "preparation_failures": 0,
+    "fallbacks": 0,
+    "total_seconds": 304.4289643764496,
+    "gpu_count": 2,
+    "gpu_models": [
+      "Tesla T4",
+      "Tesla T4"
+    ],
+    "prepared_bundle_sha256": "4d307b979c1ab7560d4b12703d411c37795fbe5d536995705da8deba0d27dcfb"
+  },
+  "record_identity": "source_id@sample_index"
+}

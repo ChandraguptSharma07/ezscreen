@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "target": "ADA",
+  "pdb_id": "1NDW",
+  "total": 966,
+  "shards": 12,
+  "bounds": [
+    {
+      "shard": 0,
+      "start": 0,
+      "end": 80,
+      "count": 80
+    },
+    {
+      "shard": 1,
+      "start": 80,
+      "end": 161,
+      "count": 81
+    },
+    {
+      "shard": 2,
+      "start": 161,
+      "end": 241,
+      "count": 80
+    },
+    {
+      "shard": 3,
+      "start": 241,
+      "end": 322,
+      "count": 81
+    },
+    {
+      "shard": 4,
+      "start": 322,
+      "end": 402,
+      "count": 80
+    },
+    {
+      "shard": 5,
+      "start": 402,
+      "end": 483,
+      "count": 81
+    },
+    {
+      "shard": 6,
+      "start": 483,
+      "end": 563,
+      "count": 80
+    },
+    {
+      "shard": 7,
+      "start": 563,
+      "end": 644,
+      "count": 81
+    },
+    {
+      "shard": 8,
+      "start": 644,
+      "end": 724,
+      "count": 80
+    },
+    {
+      "shard": 9,
+      "start": 724,
+      "end": 805,
+      "count": 81
+    },
+    {
+      "shard": 10,
+      "start": 805,
+      "end": 885,
+      "count": 80
+    },
+    {
+      "shard": 11,
+      "start": 885,
+      "end": 966,
+      "count": 81
+    }
+  ],
+  "hardware": {
+    "gpu_count": 2,
+    "model_token": "T4"
+  },
+  "scoring": "vina",
+  "exhaustiveness": 32,
+  "spacing": 0.375
+}
