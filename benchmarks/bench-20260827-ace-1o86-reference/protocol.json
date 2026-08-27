@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "status": "completed_reference_reproduction",
+  "purpose": "Fast outcome-known regression benchmark for ligand preparation and raw Vina ranking",
+  "target": {
+    "id": "ACE",
+    "pdb_id": "1O86",
+    "dataset": "DUD Release 2",
+    "total_records": 1846,
+    "actives": 49,
+    "decoys": 1797
+  },
+  "preparation": {
+    "ligands": "AutoDockTools prepare_ligand4.py; preserve supplied DUD2 state; fail closed",
+    "receptor": "AutoDockTools prepare_receptor4.py",
+    "observed_ligand_prep_methods": [
+      "autodocktools"
+    ],
+    "fallbacks_allowed": false,
+    "receptor_sha256": "7c3e148c6c094ffc5bb5d10ddb7184983f0248590712a1ed7c82f3a752375585"
+  },
+  "docking": {
+    "engine": "UniDock",
+    "scoring": "vina",
+    "unidock_commit": "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
+    "box_center": [40.7317, 32.8822, 47.3635],
+    "box_size": [36.8194, 41.835, 43.7048],
+    "grid_spacing_angstrom": 0.375,
+    "exhaustiveness": 32,
+    "ranking": "lowest finite raw Vina score ascending"
+  },
+  "reference_ranking": {
+    "path": "../bench-20260727-ace-ad4zn-probe/full_vina_vinardo_port/final_results/vina/ranking_1846.csv",
+    "sha256": "2a49aa429c495bec8ed703eedb2b16e96b694f8d3255349f9cf18bf1f34b947d"
+  },
+  "published_reference": {
+    "citation": "Empereur-Mot et al., Journal of Cheminformatics 7:52 (2015)",
+    "doi": "10.1186/s13321-015-0100-8",
+    "evidence": "Additional file 3, AutoDock Vina table",
+    "ef2": 3.05,
+    "ef5": 2.84,
+    "comparison_rule": "Pipeline values must round to the published two-decimal values"
+  },
+  "scientific_scope": {
+    "comparison_class": "same target, PDB, DUD2 records, metric, and ranking direction; accelerated engine and incompletely reported publication preparation prevent exact full-protocol equivalence",
+    "outcome_known": true,
+    "allowed_use": "regression test and positive control",
+    "forbidden_use": "untouched validation or evidence that a tuned ranking generalizes"
+  }
+}
