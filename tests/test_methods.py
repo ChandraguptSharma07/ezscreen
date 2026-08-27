@@ -49,6 +49,26 @@ def test_methods_contains_key_tokens():
     assert "ezscreen v1.11.0" in text
 
 
+def test_methods_does_not_claim_unrecorded_protonation():
+    text = build_methods_text(_RUN_META)
+
+    assert "protonated at pH" not in text
+    assert "protonation handling not recorded" in text
+
+
+def test_methods_reports_preserved_input_protonation_state():
+    meta = dict(_RUN_META)
+    meta["ligands"] = {
+        **_RUN_META["ligands"],
+        "protonation_status": "not_applied_input_state_preserved",
+    }
+
+    text = build_methods_text(meta)
+
+    assert "supplied protonation states" in text
+    assert "protonated at pH" not in text
+
+
 def test_p2rank_citation_only_when_used():
     cocrystal = dict(_RUN_META)
     cocrystal["binding_site"] = {

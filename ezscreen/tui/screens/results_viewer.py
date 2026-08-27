@@ -57,10 +57,10 @@ class ResultsScreen(Screen):
         return "\n".join([
             "[bold #3fb950]Benchmark complete[/bold #3fb950]",
             "",
-            f"[#6e7681]EF 1%:[/#6e7681]  [bold #79c0ff]{float(metrics["ef1"]):.2f}x[/bold #79c0ff]",
-            f"[#6e7681]EF 5%:[/#6e7681]  [bold #79c0ff]{float(metrics["ef5"]):.2f}x[/bold #79c0ff]",
-            f"[#6e7681]AUC-ROC:[/#6e7681] [bold #79c0ff]{float(metrics["auc_roc"]):.3f}[/bold #79c0ff]",
-            f"[#6e7681]Actives matched:[/#6e7681] {metrics["n_actives"]} / {metrics["total_screened"]}",
+            f"[#6e7681]EF 1%:[/#6e7681]  [bold #79c0ff]{float(metrics['ef1']):.2f}x[/bold #79c0ff]",
+            f"[#6e7681]EF 5%:[/#6e7681]  [bold #79c0ff]{float(metrics['ef5']):.2f}x[/bold #79c0ff]",
+            f"[#6e7681]AUC-ROC:[/#6e7681] [bold #79c0ff]{float(metrics['auc_roc']):.3f}[/bold #79c0ff]",
+            f"[#6e7681]Actives matched:[/#6e7681] {metrics['n_actives']} / {metrics['total_screened']}",
         ])
 
     @staticmethod
@@ -161,10 +161,9 @@ class ResultsScreen(Screen):
 
         all_cols    = list(rows[0].keys())
         headers     = [h for h in all_cols if h not in _SKIP_COLS]
-        score_col   = next(
-            (h for h in headers if "score" in h.lower() or "affinity" in h.lower()),
-            headers[-1],
-        )
+        from ezscreen.results import score_types
+
+        score_col = score_types.read_score_col(self._output, headers)
 
         self._all_rows  = rows
         self._rows      = rows
@@ -178,10 +177,20 @@ class ResultsScreen(Screen):
             self._annotations = {}
 
         try:
-            from ezscreen.results import score_types
             self._score_type = score_types.read_score_type(self._output)
         except Exception:
             self._score_type = "vina_kcal_mol"
+
+        integrity_warning = score_types.ranking_integrity_warning(
+            rows, score_col, self._score_type
+        )
+        if integrity_warning:
+            self.app.call_from_thread(
+                self.app.notify,
+                integrity_warning,
+                severity="error",
+                timeout=12,
+            )
 
         self.app.call_from_thread(self._populate_table, rows[:200], headers, score_col)
         self.app.call_from_thread(self._refresh_report_button)
@@ -812,10 +821,10 @@ class ResultsScreen(Screen):
         if not rows:
             return
         headers = [h for h in rows[0].keys() if h not in _SKIP_COLS]
-        score_col = next(
-            (h for h in headers if "score" in h.lower() or "affinity" in h.lower()),
-            headers[-1],
-        )
+        from ezscreen.results import score_types
+
+        score_col = score_types.read_score_col(self._output, headers)
+        self._score_type = score_types.read_score_type(self._output)
         self._all_rows = rows
         self._headers = headers
         self._score_col = score_col
@@ -844,7 +853,9 @@ class ResultsScreen(Screen):
         else:
             def _key(r: dict) -> float:
                 try:
-                    return float(r.get(self._score_col) or "inf")  # more negative kcal/mol = better
+                    value = float(r.get(self._score_col) or "nan")
+                    from ezscreen.results import score_types
+                    return -value if score_types.higher_is_better(self._score_type) else value
                 except ValueError:
                     return float("inf")
             self._rows = sorted(self._rows, key=_key)

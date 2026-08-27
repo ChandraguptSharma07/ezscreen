@@ -753,7 +753,9 @@ def write_results_report(
         return output_path
 
     headers   = list(rows[0].keys())
-    score_col = _detect_score_col(headers)
+    from ezscreen.results import score_types
+
+    score_col = score_types.read_score_col(scores_csv.parent, headers)
 
     scores: list[float] = []
     for r in rows:
@@ -762,7 +764,14 @@ def write_results_report(
         except (ValueError, KeyError):
             pass
 
-    top_score = f"{min(scores):.3f}" if scores else "—"
+    score_type = score_types.read_score_type(scores_csv.parent)
+    integrity_warning = score_types.ranking_integrity_warning(
+        rows, score_col, score_type
+    )
+    best_score = (
+        max(scores) if score_types.higher_is_better(score_type) else min(scores)
+    ) if scores else None
+    top_score = f"{best_score:.3f}" if best_score is not None else "—"
     meta_html = _metadata_table_html(run_id, len(rows), top_score, metadata)
 
     # property computation for scatter plots
@@ -771,8 +780,7 @@ def write_results_report(
     mw_vals     = [p.get("mw") for p in props]
     logp_vals   = [p.get("logp") for p in props]
 
-    from ezscreen.results import score_types
-    score_label = score_types.label(score_types.read_score_type(scores_csv.parent))
+    score_label = score_types.label(score_type)
 
     hist_b64    = _score_histogram_b64(scores, score_col, score_label) if scores else ""
     mw_b64      = _scatter_b64(scores, mw_vals,   "MW (Da)",   score_col, score_label)
@@ -829,6 +837,7 @@ def write_results_report(
 
 <h2>Run Summary</h2>
 {meta_html}
+{f'<p style="border:2px solid #f85149;padding:12px;color:#f85149"><strong>{integrity_warning}</strong></p>' if integrity_warning else ''}
 
 <h2>Score Distribution &amp; Property Scatter</h2>
 <div class="plots">

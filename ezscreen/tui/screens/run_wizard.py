@@ -1896,6 +1896,27 @@ class RunWizardScreen(Screen):
             if not shard_paths:
                 raise RuntimeError("Ligand prep produced 0 dockable compounds.")
 
+            if ctx.get("run_locally") or not _prep_on_kaggle:
+                _protonation_status = lig_result["report"].get(
+                    "protonation_status", "unknown"
+                )
+                _protonation_method = lig_result["report"].get("protonation_method")
+                _preparation_location = "local"
+            elif _enum_enabled and bool(_enum_opts.get("protonation")):
+                _protonation_status = "enumeration_requested_fail_soft"
+                _protonation_method = "Gypsum-DL"
+                _preparation_location = "kaggle"
+            else:
+                _protonation_status = "not_applied_input_state_preserved"
+                _protonation_method = None
+                _preparation_location = "kaggle"
+            ctx["ligand_prep_provenance"] = {
+                "preparation_location": _preparation_location,
+                "protonation_ph": cfg["run"].get("default_ph", 7.4),
+                "protonation_status": _protonation_status,
+                "protonation_method": _protonation_method,
+            }
+
             # Checkpoint
             checkpoint.init_db()
             checkpoint.create_run(run_id, ctx, lig_result["report"]["total_input"])

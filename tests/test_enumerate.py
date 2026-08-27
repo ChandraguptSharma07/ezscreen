@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import types
+
+import pytest
 from rdkit import Chem
 
 from ezscreen.prep import enumerate as enum
@@ -23,6 +26,37 @@ def test_returns_input_when_subprocess_fails(monkeypatch):
 
     monkeypatch.setattr(enum.subprocess, "run", _boom)
     assert enum.enumerate_variants(ACETIC_ACID) == [ACETIC_ACID]
+
+
+def test_module_fallback_uses_packaged_run_main(monkeypatch, tmp_path):
+    monkeypatch.setattr(enum.shutil, "which", lambda _name: None)
+    package_dir = tmp_path / "gypsum_dl"
+    package_dir.mkdir()
+    monkeypatch.setitem(
+        enum.sys.modules,
+        "gypsum_dl",
+        types.SimpleNamespace(__file__=str(package_dir / "__init__.py")),
+    )
+    command = enum._gypsum_command()
+    assert command is not None
+    assert command[-1] == "from gypsum_dl.run import main; main()"
+
+
+def test_fail_closed_raises_when_gypsum_unavailable(monkeypatch):
+    monkeypatch.setattr(enum, "_gypsum_command", lambda: None)
+    with pytest.raises(enum.EnumerationError, match="unavailable"):
+        enum.enumerate_variants(ACETIC_ACID, fail_closed=True)
+
+
+def test_fail_closed_raises_when_subprocess_fails(monkeypatch):
+    monkeypatch.setattr(enum, "_gypsum_command", lambda: ["gypsum-dl"])
+
+    def _boom(*a, **k):
+        raise RuntimeError("gypsum exploded")
+
+    monkeypatch.setattr(enum.subprocess, "run", _boom)
+    with pytest.raises(enum.EnumerationError, match="gypsum exploded"):
+        enum.enumerate_variants(ACETIC_ACID, fail_closed=True)
 
 
 def test_collect_variants_dedupes_from_sdf(tmp_path):

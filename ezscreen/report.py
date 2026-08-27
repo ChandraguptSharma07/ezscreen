@@ -76,6 +76,10 @@ def write_report(
             "conformer_qc_flagged": ligand_data.get("conformer_qc_flagged", 0),
             "conformer_qc_list": ligand_data.get("conformer_qc_list", []),
             "protonation_ph": ligand_data.get("protonation_ph", 7.4),
+            "protonation_status": ligand_data.get(
+                "protonation_status", "unknown"
+            ),
+            "protonation_method": ligand_data.get("protonation_method"),
             "tools": ligand_data.get("tools", {}),
         },
         "warnings": all_warnings,
@@ -175,7 +179,8 @@ def _render_txt(r: dict[str, Any]) -> str:
         f"Prep failed       : {lig['prep_failed']:,}",
         f"Enumeration       : {'on' if lig['enumeration_enabled'] else 'off'} ({lig['variants_generated']:,} variants)",
         f"Conformer QC      : {lig['conformer_qc_flagged']:,} flagged",
-        f"Protonation pH    : {lig['protonation_ph']}",
+        f"Protonation       : {lig['protonation_status']}"
+        f" (requested pH {lig['protonation_ph']})",
         f"Tools             : {lig['tools']}",
         "",
         "WARNINGS",

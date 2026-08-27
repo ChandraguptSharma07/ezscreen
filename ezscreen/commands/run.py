@@ -435,6 +435,15 @@ def _run_prep_and_submit(ctx: dict) -> None:
             "Check your library or lower ADMET filter stringency."
         )
 
+    ctx["ligand_prep_provenance"] = {
+        "preparation_location": "local",
+        "protonation_ph": lig_result["report"].get("protonation_ph"),
+        "protonation_status": lig_result["report"].get(
+            "protonation_status", "unknown"
+        ),
+        "protonation_method": lig_result["report"].get("protonation_method"),
+    }
+
     # Checkpoint
     checkpoint.init_db()
     checkpoint.create_run(run_id, ctx, lig_result["report"]["total_input"])

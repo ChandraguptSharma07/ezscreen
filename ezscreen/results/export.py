@@ -6,13 +6,6 @@ from pathlib import Path
 _AMBER = "FFE3B341"
 
 
-def _detect_score_col(headers: list[str]) -> str | None:
-    for h in headers:
-        if "score" in h.lower() or "affinity" in h.lower():
-            return h
-    return headers[-1] if headers else None
-
-
 def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None, collapse: bool = False) -> Path:
     """Write a styled Excel hit list from a merged scores.csv.
 
@@ -50,7 +43,9 @@ def export_xlsx(scores_csv: Path, out_xlsx: Path, limit: int | None = None, coll
     for cell in ws[1]:
         cell.font = bold
 
-    score_col = _detect_score_col(headers)
+    from ezscreen.results import score_types
+
+    score_col = score_types.read_score_col(scores_csv.parent, headers)
     score_idx = headers.index(score_col) + 1 if score_col in headers else None
     le_idx = headers.index("LE") + 1 if "LE" in headers else None
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
@@ -63,6 +64,34 @@ def test_export_xlsx_limit(tmp_path):
     # the kept row is the best (first) one
     name_idx = _HEADERS.index("name") + 1
     assert ws.cell(row=2, column=name_idx).value == "alpha"
+
+
+def test_export_xlsx_uses_primary_score_from_results_metadata(tmp_path):
+    from openpyxl import load_workbook
+
+    scores = tmp_path / "scores.csv"
+    with scores.open("w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=["ligand", "unidock_score", "consensus_norm_rank"],
+        )
+        writer.writeheader()
+        writer.writerow({
+            "ligand": "lig1",
+            "unidock_score": "-9.5",
+            "consensus_norm_rank": "0.125",
+        })
+    (tmp_path / "results_meta.json").write_text(json.dumps({
+        "score_type": "consensus_rank",
+        "score_col": "consensus_norm_rank",
+    }))
+
+    out = export_xlsx(scores, tmp_path / "hits.xlsx")
+    ws = load_workbook(out).active
+    headers = [cell.value for cell in ws[1]]
+
+    assert ws.cell(row=2, column=headers.index("consensus_norm_rank") + 1).value == 0.125
+    assert ws.cell(row=2, column=headers.index("unidock_score") + 1).value == "-9.5"
 
 
 def test_export_sdf_limit(tmp_path):

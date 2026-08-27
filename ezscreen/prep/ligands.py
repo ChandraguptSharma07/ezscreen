@@ -504,8 +504,9 @@ def prep_ligands(
                 tautomers=bool(_eo.get("tautomers", True)),
                 stereo=bool(_eo.get("stereo", False)),
                 ring=bool(_eo.get("ring", False)),
+                fail_closed=bool(_eo.get("fail_closed", False)),
             )
-            if len(variants) <= 1:
+            if len(variants) <= 1 and not bool(_eo.get("fail_closed", False)):
                 exp_mols.append(mol)
                 exp_meta.append((smiles, mol_name))
                 continue
@@ -634,6 +635,18 @@ def prep_ligands(
         if (Scrubber and "vendor" in getattr(Scrubber, "__module__", ""))
         else "git+"
     )
+    _enum_protonation = _enum_on and bool(_eo.get("protonation", True))
+    if Scrubber is not None:
+        protonation_status = "applied_scrubber"
+        protonation_method = "Scrubber"
+    elif _enum_protonation:
+        # Enumeration is deliberately fail-soft unless fail_closed was requested,
+        # so a run-level report cannot claim that every ligand was protonated.
+        protonation_status = "enumeration_requested_fail_soft"
+        protonation_method = "Gypsum-DL"
+    else:
+        protonation_status = "not_applied_input_state_preserved"
+        protonation_method = None
 
     return {
         "shard_paths": shard_paths,
@@ -653,6 +666,8 @@ def prep_ligands(
             "conformer_qc_flagged": len(qc_flagged),
             "conformer_qc_list": qc_flagged,
             "protonation_ph": ph,
+            "protonation_status": protonation_status,
+            "protonation_method": protonation_method,
             "force_field": force_field,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
             "warnings": warnings,

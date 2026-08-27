@@ -361,7 +361,19 @@ def _score_col_from_headers(headers: list[str]) -> str:
 
 
 def _row_identity(row: dict) -> str:
-    return row.get("smiles") or row.get("name") or row.get("ligand") or ""
+    # Prefer record-level identity over structure. Distinct library records may
+    # intentionally share a SMILES string and must remain distinct in a ranking.
+    from ezscreen.results.variants import source_compound_id
+
+    identity = source_compound_id(row)
+    if identity:
+        return f"record:{identity}"
+    smiles = str(row.get("canonical_smiles") or row.get("smiles") or "").strip()
+    return f"smiles:{smiles}" if smiles else ""
+
+
+def _format_rank(rank: float) -> str:
+    return str(int(rank)) if rank.is_integer() else f"{rank:g}"
 
 
 def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
@@ -376,6 +388,7 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
         "consensus_rank",
         "consensus_norm_rank",
         "consensus_engines",
+        "consensus_coverage",
         "ligand",
         "name",
         "smiles",
@@ -388,13 +401,13 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
         meta_path = engine_dir / "results_meta.json"
         meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
         engine = str(meta.get("engine") or engine_dir.name)
-        engines_used.append(engine)
 
         with scores_csv.open(newline="") as f:
             rows = list(csv.DictReader(f))
             headers = list(rows[0].keys()) if rows else []
         if not rows:
             continue
+        engines_used.append(engine)
         score_col = str(meta.get("score_col") or _score_col_from_headers(headers))
 
         def _score_value(row: dict) -> float:
@@ -415,17 +428,32 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
             if h not in fieldnames:
                 fieldnames.append(h)
 
-        for rank, row in enumerate(ranked, 1):
+        average_rank_by_row: dict[int, float] = {}
+        start = 0
+        while start < len(ranked):
+            score = _score_value(ranked[start])
+            end = start + 1
+            while end < len(ranked) and _score_value(ranked[end]) == score:
+                end += 1
+            average_rank = ((start + 1) + end) / 2
+            for tied_row in ranked[start:end]:
+                average_rank_by_row[id(tied_row)] = average_rank
+            start = end
+
+        seen_this_engine: set[str] = set()
+        for row in ranked:
             identity = _row_identity(row)
-            if not identity:
+            if not identity or identity in seen_this_engine:
                 continue
+            seen_this_engine.add(identity)
+            rank = average_rank_by_row[id(row)]
             entry = by_identity.setdefault(
                 identity,
                 {
                     "ligand": row.get("ligand", ""),
                     "name": row.get("name", "") or row.get("ligand", ""),
                     "smiles": row.get("smiles", ""),
-                    "_norms": [],
+                    "_norms": {},
                     "_engines": [],
                 },
             )
@@ -433,8 +461,8 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
                 if not entry.get(base) and row.get(base):
                     entry[base] = row.get(base, "")
             entry[score_field] = row.get(score_col, "")
-            entry[rank_field] = str(rank)
-            entry["_norms"].append((rank - 1) / denom)
+            entry[rank_field] = _format_rank(rank)
+            entry["_norms"][engine] = (rank - 1) / denom
             entry["_engines"].append(engine)
 
     rows_out: list[dict[str, Any]] = []
@@ -443,8 +471,10 @@ def build_consensus_results(engine_output_dirs: list[Path], output_dir: Path) ->
         seen_engines = entry.pop("_engines")
         if not norms:
             continue
-        entry["consensus_norm_rank"] = f"{sum(norms) / len(norms):.6f}"
+        imputed_norms = [norms.get(engine, 1.0) for engine in engines_used]
+        entry["consensus_norm_rank"] = f"{sum(imputed_norms) / len(imputed_norms):.6f}"
         entry["consensus_engines"] = ",".join(seen_engines)
+        entry["consensus_coverage"] = f"{len(norms)}/{len(engines_used)}"
         rows_out.append(entry)
 
     rows_out.sort(key=lambda r: float(r["consensus_norm_rank"]))
@@ -581,24 +611,19 @@ def merge_shard_results(shard_dirs: list[Path], output_dir: Path, engine: str | 
 
     score_filtered: list[dict] = []
     if _enable_floor and result_engine != "diffdock":
-        # Vina-family scores below the floor are GPU underflow artifacts. Keep
-        # finite evidence for benchmark survival, but clamp to the floor and tag
-        # it so artifacts do not outrank plausible binders at impossible scores.
+        # Vina-family scores below the floor are GPU underflow artifacts. Preserve
+        # their raw values in the audit sidecar, but never retain them as ranked
+        # hits: even a clamped negative floor sorts ahead of plausible binders.
         valid: list[dict] = []
         for r in all_rows:
             s = _score(r)
             existing_qc = str(r.get("score_qc", "")).strip()
             qc_parts = [qc for qc in existing_qc.split(";") if qc]
             if s < _score_floor:
-                if "score_floor" not in qc_parts:
-                    qc_parts.append("score_floor")
-                r["score_qc"] = ";".join(qc_parts)
-                r["raw_score"] = str(r.get("raw_score") or r.get(score_col, ""))
-                r[score_col] = f"{_score_floor:g}"
-                if "score_qc" not in fieldnames:
-                    fieldnames.append("score_qc")
-                if "raw_score" not in fieldnames:
-                    fieldnames.append("raw_score")
+                filtered = dict(r)
+                filtered["_reason"] = "score_floor"
+                score_filtered.append(filtered)
+                continue
             elif s >= _score_ceil:
                 if "score_ceiling" not in qc_parts:
                     qc_parts.append("score_ceiling")

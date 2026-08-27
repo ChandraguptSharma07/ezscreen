@@ -87,10 +87,9 @@ def push_kernel(
     # title must slugify to exactly the slug — replace hyphens with spaces so
     # Kaggle's slug derivation round-trips back to the same value
     title = slug.replace("-", " ")
-    # Kaggle still needs GPU to be explicitly enabled or the notebook may start
-    # on a CPU-only runtime even when machine_shape is present. Explicit
-    # ``none``/``cpu`` requests must disable it so CPU-only benchmark stages do
-    # not silently consume GPU quota.
+    # Do not combine the deprecated generic enable_gpu flag with an explicit
+    # machine shape. Kaggle gives the generic flag precedence and may silently
+    # allocate its default P100 even when NvidiaTeslaT4 was requested.
     _MACHINE_SHAPE = {
         "nvidiaTeslaT4": "NvidiaTeslaT4",
         "nvidiaTeslaP100": "NvidiaTeslaP100",
@@ -100,8 +99,8 @@ def push_kernel(
         if backend is not None
         else str(accelerator or "").strip()
     )
-    enable_gpu = accelerator_key.lower() not in {"", "none", "cpu"}
-    machine_shape = _MACHINE_SHAPE.get(accelerator_key) if enable_gpu else None
+    wants_gpu = accelerator_key.lower() not in {"", "none", "cpu"}
+    machine_shape = _MACHINE_SHAPE.get(accelerator_key) if wants_gpu else None
     meta = {
         "id": f"{username}/{slug}",
         "title": title,
@@ -109,7 +108,7 @@ def push_kernel(
         "language": "python",
         "kernel_type": "notebook",
         "is_private": True,
-        "enable_gpu": enable_gpu,
+        "enable_gpu": False,
         "enable_internet": True,
         "dataset_sources": [dataset_ref],
         "competition_sources": [],
@@ -120,7 +119,7 @@ def push_kernel(
     (kernel_dir / "kernel-metadata.json").write_text(json.dumps(meta, indent=2))
 
     def _push():
-        api.kernels_push(str(kernel_dir), acc=machine_shape)
+        api.kernels_push(str(kernel_dir))
 
     _with_backoff(_push)
     return f"{username}/{slug}"

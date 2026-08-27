@@ -286,6 +286,35 @@ def test_merge_keeps_score_floor_failures_unscored_not_headline_hits(tmp_path, m
     assert result["unscored_reason_counts"].get("score_floor", 0) == 1
 
 
+def test_merge_removes_existing_below_floor_score_from_ranked_hits(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "ezscreen.config.load",
+        lambda: {"local": {"enable_score_floor": True, "score_floor": -15.0, "score_ceiling": 0.0}},
+    )
+    sd = tmp_path / "floor"
+    sd.mkdir()
+    _write(sd / "scores.csv", ["ligand", "score", "name", "smiles"], [
+        {"ligand": "valid", "score": "-8.0", "name": "valid", "smiles": "CCO"},
+        {"ligand": "underflow", "score": "-50.0", "name": "underflow", "smiles": "CCN"},
+    ])
+
+    out = tmp_path / "output"
+    result = merge_shard_results([sd], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    reasons = list(csv.DictReader((out / "unscored_reasons.csv").open()))
+
+    assert [row["ligand"] for row in rows] == ["valid"]
+    assert reasons == [{
+        "ligand": "underflow",
+        "name": "underflow",
+        "smiles": "CCN",
+        "reason": "score_floor",
+        "raw_score": "-50.0",
+    }]
+    assert result["unscored_reason_counts"]["score_floor"] == 1
+
+
 def test_merge_marks_existing_finite_ceiling_score_with_qc(tmp_path):
     sd = tmp_path / "shard"
     sd.mkdir()
@@ -402,6 +431,56 @@ def test_build_consensus_results_averages_normalized_ranks(tmp_path):
     assert rows[1]["gnina_rank"] == "3"
 
 
+def test_consensus_keeps_distinct_compounds_with_the_same_smiles(tmp_path):
+    u = tmp_path / "unidock"
+    g = tmp_path / "gnina"
+    u.mkdir()
+    g.mkdir()
+    for directory, engine in ((u, "unidock"), (g, "gnina")):
+        _write(directory / "scores.csv", ["ligand", "name", "smiles", "score"], [
+            {"ligand": f"{engine}-0", "name": "record-A", "smiles": "CCO", "score": "-9.0"},
+            {"ligand": f"{engine}-1", "name": "record-B", "smiles": "CCO", "score": "-8.0"},
+        ])
+        (directory / "results_meta.json").write_text(
+            json.dumps({"engine": engine, "score_col": "score"})
+        )
+
+    out = tmp_path / "consensus"
+    build_consensus_results([u, g], out)
+
+    rows = list(csv.DictReader((out / "scores.csv").open()))
+    assert [row["name"] for row in rows] == ["record-A", "record-B"]
+
+
+def test_consensus_uses_average_tie_ranks_and_penalizes_missing_engines(tmp_path):
+    u = tmp_path / "unidock"
+    g = tmp_path / "gnina"
+    u.mkdir()
+    g.mkdir()
+    _write(u / "scores.csv", ["ligand", "name", "smiles", "score"], [
+        {"ligand": "u0", "name": "A", "smiles": "CCO", "score": "-9.0"},
+        {"ligand": "u1", "name": "B", "smiles": "CCN", "score": "-9.0"},
+        {"ligand": "u2", "name": "C", "smiles": "CCC", "score": "-7.0"},
+    ])
+    _write(g / "scores.csv", ["ligand", "name", "smiles", "score"], [
+        {"ligand": "g0", "name": "A", "smiles": "CCO", "score": "-10.0"},
+        {"ligand": "g2", "name": "C", "smiles": "CCC", "score": "-8.0"},
+    ])
+    (u / "results_meta.json").write_text(json.dumps({"engine": "unidock", "score_col": "score"}))
+    (g / "results_meta.json").write_text(json.dumps({"engine": "gnina", "score_col": "score"}))
+
+    out = tmp_path / "consensus"
+    build_consensus_results([u, g], out)
+    rows = {row["name"]: row for row in csv.DictReader((out / "scores.csv").open())}
+
+    assert rows["A"]["unidock_rank"] == "1.5"
+    assert rows["B"]["unidock_rank"] == "1.5"
+    assert rows["B"]["gnina_rank"] == ""
+    assert rows["B"]["consensus_coverage"] == "1/2"
+    assert float(rows["B"]["consensus_norm_rank"]) == 0.625
+    assert float(rows["A"]["consensus_norm_rank"]) == 0.125
+
+
 def test_results_report_includes_consensus_section(tmp_path):
     from ezscreen.results.report_html import write_results_report
 
@@ -427,6 +506,23 @@ def test_results_report_includes_consensus_section(tmp_path):
     html = write_results_report(out / "scores.csv", out / "report.html", cluster=False).read_text()
     assert "Consensus Ranking" in html
     assert "unidock rank" in html
+
+
+def test_results_report_warns_for_legacy_floor_rankings(tmp_path):
+    from ezscreen.results.report_html import write_results_report
+
+    out = tmp_path / "legacy"
+    out.mkdir()
+    (out / "scores.csv").write_text(
+        "ligand,score,name,smiles\nfailed,-20.0,failed,CC\nok,-8.0,ok,CCC\n"
+    )
+
+    html = write_results_report(
+        out / "scores.csv", out / "report.html", cluster=False
+    ).read_text()
+
+    assert "Ranking integrity warning" in html
+    assert "archived ranking as quarantined" in html
 
 
 def test_results_report_escapes_imported_html_values(tmp_path):

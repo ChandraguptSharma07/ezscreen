@@ -31,7 +31,8 @@ def build_methods_text(run_meta: dict) -> str:
 
     run_meta keys (all optional): version, receptor{pdb_id, is_alphafold, af_accession,
     af_version, chains, source}, binding_site{method, center, size, reference_ligand},
-    ligands{total_input, admet_applied, admet_removed, protonation_ph, force_field},
+    ligands{total_input, admet_applied, admet_removed, protonation_ph,
+    protonation_status, protonation_method, force_field},
     docking{engine, exhaustiveness, search_mode, num_poses, backend}.
     """
     rec  = run_meta.get("receptor", {})
@@ -84,9 +85,25 @@ def build_methods_text(run_meta: dict) -> str:
     ff = lig.get("force_field", "MMFF94")
     ph = lig.get("protonation_ph", 7.4)
     n_str = f"{n:,} input compounds were" if isinstance(n, int) and n else "Input compounds were"
+    protonation_status = str(lig.get("protonation_status") or "unknown")
+    protonation_method = lig.get("protonation_method")
+    if protonation_status == "applied_scrubber":
+        prep_prefix = (
+            f"{n_str} protonated at pH {ph} with "
+            f"{protonation_method or 'Scrubber'}, then"
+        )
+    elif protonation_status == "enumeration_requested_fail_soft":
+        prep_prefix = (
+            f"Protonation-state enumeration around pH {ph} was requested with "
+            f"{protonation_method or 'Gypsum-DL'} in fail-soft mode; compounds were then"
+        )
+    elif protonation_status == "not_applied_input_state_preserved":
+        prep_prefix = f"{n_str} used in their supplied protonation states and"
+    else:
+        prep_prefix = f"{n_str} prepared with protonation handling not recorded and"
     sentences.append(
-        f"{n_str} protonated at pH {ph}, embedded in 3D with RDKit ETKDG and "
-        f"energy-minimised with the {ff} force field, then converted to PDBQT with Meeko."
+        f"{prep_prefix} embedded in 3D with RDKit ETKDG and energy-minimised with the "
+        f"{ff} force field, then converted to PDBQT with Meeko."
     )
     if lig.get("admet_removed"):
         sentences.append(
@@ -219,6 +236,7 @@ def run_meta_from_checkpoint(run_id: str) -> dict | None:
         cfg = {}
     ph = cfg.get("run", {}).get("default_ph", 7.4)
     ff = cfg.get("prep", {}).get("force_field", "MMFF94")
+    ligand_provenance = ctx.get("ligand_prep_provenance") or {}
 
     run_locally = bool(ctx.get("run_locally"))
     consensus_enabled = bool(ctx.get("consensus_enabled"))
@@ -257,6 +275,10 @@ def run_meta_from_checkpoint(run_id: str) -> dict | None:
             "total_input":    row.get("total_compounds"),
             "admet_applied":  bool(ctx.get("admet_pre_filter")),
             "protonation_ph": ph,
+            "protonation_status": ligand_provenance.get(
+                "protonation_status", "unknown"
+            ),
+            "protonation_method": ligand_provenance.get("protonation_method"),
             "force_field":    ff,
         },
         "docking": {

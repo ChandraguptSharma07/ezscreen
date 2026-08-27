@@ -313,6 +313,7 @@ def test_multi_account_runner_packs_receptor_variants_into_selected_kernel_count
     monkeypatch.setattr(runner, "push_kernel", fake_push_kernel)
     monkeypatch.setattr(runner, "poll_until_done", fake_poll_until_done)
     monkeypatch.setattr(runner, "_download_output", fake_download_output)
+    monkeypatch.setattr(runner, "_wait_for_dataset_sync", lambda _refs, **_kwargs: None)
 
     import ezscreen.results.merger as merger
 

@@ -42,7 +42,7 @@ def test_push_kernel_uses_run_id_as_kernel_slug(monkeypatch, tmp_path):
     assert ref == 'worker-user/ezs-run'
     metadata = (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
     assert '"id": "worker-user/ezs-run"' in metadata
-    assert calls[0][1] == 'NvidiaTeslaP100'
+    assert calls[0][1] is None
 
 
 def test_push_kernel_bounds_long_run_id_slug(monkeypatch, tmp_path):
@@ -158,6 +158,6 @@ def test_push_kernel_passes_t4_accelerator_to_save_api(monkeypatch, tmp_path):
     metadata = json.loads(
         (calls[0][0] / 'kernel-metadata.json').read_text(encoding='utf-8')
     )
-    assert calls[0][1] == 'NvidiaTeslaT4'
+    assert calls[0][1] is None
     assert metadata['machine_shape'] == 'NvidiaTeslaT4'
-    assert metadata['enable_gpu'] is True
+    assert metadata['enable_gpu'] is False

@@ -67,6 +67,23 @@ def test_prep_ligands_records_force_field_override(tmp_path):
     assert result["report"]["prep_passed"] == 1
 
 
+def test_prep_ligands_reports_when_protonation_is_not_applied(tmp_path, monkeypatch):
+    monkeypatch.setattr(ligand_prep, "_get_scrubber", lambda: None)
+    smi = tmp_path / "in.smi"
+    smi.write_text(f"{IBUPROFEN}\tibuprofen\n")
+
+    result = ligand_prep.prep_ligands(
+        input_path=smi,
+        output_dir=tmp_path / "shards",
+        enumerate_opts={"enabled": False},
+    )
+
+    assert result["report"]["protonation_status"] == (
+        "not_applied_input_state_preserved"
+    )
+    assert result["report"]["protonation_method"] is None
+
+
 def test_conformer_qc_passes_clean_molecule():
     mol = _embed_3d(Chem.MolFromSmiles(IBUPROFEN), force_field="MMFF94")
     assert _conformer_qc(mol) is None

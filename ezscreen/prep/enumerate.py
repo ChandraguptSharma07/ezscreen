@@ -6,6 +6,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+
+class EnumerationError(RuntimeError):
+    """Raised when a fail-closed enumeration contract cannot be satisfied."""
+
 # Gypsum-DL is an optional prep backend. It is a CLI/subprocess tool (no clean
 # import API), so we locate a runnable entry point and shell out to it. Every
 # failure path returns the input SMILES unchanged, so prep degrades gracefully
@@ -23,7 +27,7 @@ def _gypsum_command() -> list[str] | None:
     driver = Path(gypsum_dl.__file__).parent / "run_gypsum_dl.py"
     if driver.exists():
         return [sys.executable, str(driver)]
-    return [sys.executable, "-m", "gypsum_dl"]
+    return [sys.executable, "-c", "from gypsum_dl.run import main; main()"]
 
 
 def gypsum_available() -> bool:
@@ -54,7 +58,7 @@ def _build_args(cmd, src, out_dir, ph, max_variants, protonation, tautomers, ste
     return args
 
 
-def _collect_variants(out_dir: Path, fallback: str) -> list[str]:
+def _collect_variants(out_dir: Path, fallback: str | None) -> list[str]:
     from rdkit import Chem
 
     seen: set[str] = set()
@@ -68,7 +72,7 @@ def _collect_variants(out_dir: Path, fallback: str) -> list[str]:
             if smi and smi not in seen:
                 seen.add(smi)
                 variants.append(smi)
-    return variants or [fallback]
+    return variants or ([fallback] if fallback is not None else [])
 
 
 def enumerate_variants(
@@ -81,9 +85,12 @@ def enumerate_variants(
     stereo: bool = False,
     ring: bool = False,
     timeout: int = 120,
+    fail_closed: bool = False,
 ) -> list[str]:
     cmd = _gypsum_command()
     if cmd is None:
+        if fail_closed:
+            raise EnumerationError("Gypsum-DL executable is unavailable")
         return [smiles]
     try:
         with tempfile.TemporaryDirectory() as td:
@@ -94,6 +101,13 @@ def enumerate_variants(
             out_dir.mkdir()
             args = _build_args(cmd, src, out_dir, ph, max_variants, protonation, tautomers, stereo, ring)
             subprocess.run(args, check=True, capture_output=True, timeout=timeout)
-            return _collect_variants(out_dir, smiles)
-    except Exception:
+            variants = _collect_variants(out_dir, None if fail_closed else smiles)
+            if fail_closed and not variants:
+                raise EnumerationError("Gypsum-DL produced no valid variants")
+            return variants
+    except EnumerationError:
+        raise
+    except Exception as exc:
+        if fail_closed:
+            raise EnumerationError(f"Gypsum-DL enumeration failed: {exc}") from exc
         return [smiles]

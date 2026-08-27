@@ -10,6 +10,11 @@ from ezscreen.team.kaggle_upload_ticket import mint_upload_ticket, upload_file_t
 from ezscreen.team.state import TeamStateError, TeamStore, extract_result_zip
 
 
+def _write_kaggle_json(path: Path, payload: str) -> None:
+    path.write_text(payload, encoding="utf-8")
+    path.chmod(0o600)
+
+
 def test_default_team_server_url_prefers_env(monkeypatch):
     from ezscreen.team.client import default_server_url
 
@@ -568,7 +573,7 @@ def test_resolve_worker_kaggle_credentials_reads_local_without_mutating(tmp_path
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     kaggle_json = tmp_path / "kaggle.json"
-    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
     creds = {"kaggle_json_path": str(kaggle_json)}
     before = kaggle_json.read_text(encoding="utf-8")
 
@@ -585,7 +590,7 @@ def test_resolve_worker_kaggle_credentials_prefers_explicit_key(tmp_path):
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     kaggle_json = tmp_path / "kaggle.json"
-    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
 
     resolved = resolve_worker_kaggle_credentials(
         kaggle_username="explicit_user",
@@ -604,7 +609,7 @@ def test_resolve_worker_kaggle_credentials_reads_saved_team_account(monkeypatch,
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     kaggle_json = tmp_path / "team-kaggle.json"
-    kaggle_json.write_text('{"username": "team_user", "key": "team_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "team_user", "key": "team_key"}')
     monkeypatch.setattr(
         "ezscreen.auth.list_team_accounts",
         lambda _creds: [
@@ -1034,7 +1039,7 @@ def test_team_join_cli_uses_local_kaggle_for_worker_secrets(monkeypatch, tmp_pat
     import ezscreen.team.github as github_mod
 
     kaggle_json = tmp_path / "kaggle.json"
-    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
     monkeypatch.setattr(auth, "load_credentials", lambda: {"kaggle_json_path": str(kaggle_json)})
     monkeypatch.setattr("ezscreen.team.client.LOCAL_STATE_PATH", tmp_path / "client.json")
 
@@ -1097,7 +1102,7 @@ def test_team_connect_worker_cli_updates_repo_and_secrets(monkeypatch, tmp_path)
     import ezscreen.team.github as github_mod
 
     kaggle_json = tmp_path / "kaggle.json"
-    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
     monkeypatch.setattr(auth, "load_credentials", lambda: {"kaggle_json_path": str(kaggle_json)})
     monkeypatch.setattr("ezscreen.team.client.LOCAL_STATE_PATH", tmp_path / "client.json")
     from ezscreen.team.client import save_local_state
@@ -1681,7 +1686,7 @@ def test_resolve_worker_kaggle_credentials_prefers_local_over_env(tmp_path, monk
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     kaggle_json = tmp_path / "kaggle.json"
-    kaggle_json.write_text('{"username": "local_user", "key": "local_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
     monkeypatch.setenv("KAGGLE_USERNAME", "env_user")
     monkeypatch.setenv("KAGGLE_KEY", "env_key")
 
@@ -1699,7 +1704,7 @@ def test_resolve_worker_kaggle_credentials_prefers_team_account_over_env(monkeyp
     from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
 
     kaggle_json = tmp_path / "team-kaggle.json"
-    kaggle_json.write_text('{"username": "team_user", "key": "team_key"}', encoding="utf-8")
+    _write_kaggle_json(kaggle_json, '{"username": "team_user", "key": "team_key"}')
     monkeypatch.setenv("KAGGLE_USERNAME", "env_user")
     monkeypatch.setenv("KAGGLE_KEY", "env_key")
     monkeypatch.setattr(
