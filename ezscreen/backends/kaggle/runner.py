@@ -1035,6 +1035,7 @@ def render_vina_notebook(
         max_rotatable_bonds=int(prep_cfg.get("max_rotatable_bonds", 20)),
         mmff_max_iters=int(prep_cfg.get("mmff_max_iters", 0)),
         force_field=force_field or str(prep_cfg.get("force_field", "MMFF94")),
+        normalization_profile=str(prep_cfg.get("normalization_profile", "legacy")),
         enumerate_enabled=_enum_enabled,
         enumerate_protonation=bool(_eo.get("protonation", prep_cfg.get("enumerate_protonation", True))),
         enumerate_tautomers=bool(_eo.get("tautomers", prep_cfg.get("enumerate_tautomers", True))),

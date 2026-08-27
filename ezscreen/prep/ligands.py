@@ -19,6 +19,20 @@ _SHARD_SIZE = 5_000
 _RDKIT_INPUT_EXTS = (".sdf", ".smi", ".smiles", ".ism")
 _OPENBABEL_INPUT_EXTS = (".mol2", ".mol", ".pdb")
 _LIGAND_INPUT_EXTS = _RDKIT_INPUT_EXTS + _OPENBABEL_INPUT_EXTS
+_NORMALIZATION_PROFILES = frozenset({"legacy", "generalized_v1"})
+_RECOGNIZED_MONATOMIC_COUNTERIONS = frozenset(
+    {
+        (3, 1),  # lithium
+        (9, -1),  # fluoride
+        (11, 1),  # sodium
+        (12, 2),  # magnesium
+        (17, -1),  # chloride
+        (19, 1),  # potassium
+        (20, 2),  # calcium
+        (35, -1),  # bromide
+        (53, -1),  # iodide
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +136,75 @@ def _normalise_input_files(files: list[Path], output_dir: Path) -> list[Path]:
         else:
             raise LigandPrepError(f"Unsupported file type: {src.suffix}")
     return normalised
+
+
+def _copy_molecule_properties(source, destination) -> None:
+    for name in source.GetPropNames(includePrivate=True, includeComputed=False):
+        destination.SetProp(name, source.GetProp(name))
+
+
+def _is_recognized_counterion(fragment) -> bool:
+    if fragment.GetNumAtoms() != 1:
+        return False
+    atom = fragment.GetAtomWithIdx(0)
+    return (atom.GetAtomicNum(), atom.GetFormalCharge()) in (
+        _RECOGNIZED_MONATOMIC_COUNTERIONS
+    )
+
+
+def _normalization_record(mol) -> dict[str, Any]:
+    from rdkit.Chem import FindPotentialStereo, MolToSmiles
+
+    unspecified = sum(
+        1
+        for stereo in FindPotentialStereo(mol)
+        if str(stereo.specified) == "Unspecified"
+    )
+    return {
+        "status": "unchanged",
+        "reason": None,
+        "source_smiles": MolToSmiles(mol),
+        "normalized_smiles": MolToSmiles(mol),
+        "removed_counterions": [],
+        "unspecified_stereocenters": unspecified,
+        # Normalization does not predict pKa. A later state-selection feature
+        # must replace this with an assessed result before the profile is made
+        # the production default.
+        "protonation_uncertainty": "not_assessed",
+    }
+
+
+def _normalize_ligand(mol, profile: str):
+    """Apply target-independent fragment normalization with full provenance."""
+    from rdkit.Chem import GetMolFrags, MolToSmiles
+
+    if profile not in _NORMALIZATION_PROFILES:
+        raise LigandPrepError(f"Unknown ligand normalization profile: {profile}")
+
+    record = _normalization_record(mol)
+    if profile == "legacy":
+        record["protonation_uncertainty"] = "not_reported_legacy"
+        return mol, record
+
+    fragments = list(GetMolFrags(mol, asMols=True, sanitizeFrags=True))
+    if len(fragments) == 1:
+        return mol, record
+
+    retained = [frag for frag in fragments if not _is_recognized_counterion(frag)]
+    removed = [frag for frag in fragments if _is_recognized_counterion(frag)]
+    if len(retained) != 1 or len(removed) != len(fragments) - 1:
+        record.update(status="rejected", reason="ambiguous_fragments")
+        return None, record
+
+    parent = retained[0]
+    _copy_molecule_properties(mol, parent)
+    removed_smiles = sorted(MolToSmiles(frag) for frag in removed)
+    record.update(
+        status="normalized",
+        normalized_smiles=MolToSmiles(parent),
+        removed_counterions=removed_smiles,
+    )
+    return parent, record
 
 
 def _scrub(mol, Scrubber, ph: float):
@@ -377,6 +460,7 @@ def prep_ligands(
     n_shards: int | None = None,
     force_field: str | None = None,
     enumerate_opts: dict | None = None,
+    normalization_profile: str | None = None,
 ) -> dict[str, Any]:
     from rdkit.Chem import SDWriter
 
@@ -406,14 +490,21 @@ def prep_ligands(
         )
         mmff_max_iters: int = int(_pc.get("mmff_max_iters", 0))
         _cfg_force_field = str(_pc.get("force_field", "MMFF94"))
+        _cfg_normalization_profile = str(_pc.get("normalization_profile", "legacy"))
     except Exception:
         gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
         mmff_max_iters = 0
         _cfg_force_field = "MMFF94"
+        _cfg_normalization_profile = "legacy"
         _pc = {}
 
     # explicit per-run override wins over the config default
     force_field = force_field or _cfg_force_field
+    normalization_profile = normalization_profile or _cfg_normalization_profile
+    if normalization_profile not in _NORMALIZATION_PROFILES:
+        raise LigandPrepError(
+            f"Unknown ligand normalization profile: {normalization_profile}"
+        )
 
     # enumeration: per-run override (enumerate_opts) wins over the config defaults
     _eo = (
@@ -432,6 +523,7 @@ def prep_ligands(
 
     failures = {
         "sanitization": 0,
+        "ambiguous_fragments": 0,
         "conformer_generation": 0,
         "unsupported_atoms": 0,
         "too_large_for_gpu": 0,
@@ -457,14 +549,16 @@ def prep_ligands(
     # Phase 1: load all molecules (sequential — suppliers are not thread-safe)
     all_mols: list = []
     all_meta: list[tuple[str, str]] = []  # (smiles, mol_name)
+    all_normalization: list[dict[str, Any]] = []
+    normalization_rejections: list[dict[str, Any]] = []
     bad_mols: list = []  # None-supplier failures to count
     for fp in load_files:
-        for mol in _load_supplier(fp):
+        for source_ordinal, mol in enumerate(_load_supplier(fp), 1):
             if mol is None:
                 bad_mols.append(None)
                 continue
             total += 1
-            smiles = MolToSmiles(mol)
+            source_smiles = MolToSmiles(mol)
             mol_name = mol.GetProp("_Name").strip() if mol.HasProp("_Name") else ""
             if not mol_name:
                 for _prop in (
@@ -477,11 +571,30 @@ def prep_ligands(
                     if mol.HasProp(_prop):
                         mol_name = mol.GetProp(_prop).strip()
                         break
-            all_mols.append(mol)
-            all_meta.append((smiles, mol_name))
+            normalized, normalization = _normalize_ligand(mol, normalization_profile)
+            normalization["source_record"] = f"{fp}:{source_ordinal}"
+            if normalized is None:
+                prep_failed += 1
+                failures[normalization["reason"]] += 1
+                normalization_rejections.append(
+                    {
+                        "name": mol_name,
+                        "source_smiles": source_smiles,
+                        "source_record": normalization["source_record"],
+                        "reason": normalization["reason"],
+                    }
+                )
+                failed_writer.write(mol)
+                continue
+            all_mols.append(normalized)
+            all_meta.append((MolToSmiles(normalized), mol_name))
+            all_normalization.append(normalization)
 
     prep_failed += len(bad_mols)
     failures["sanitization"] += len(bad_mols)
+    counterions_removed = sum(
+        len(record["removed_counterions"]) for record in all_normalization
+    )
 
     # Phase 1b: optional protonation/tautomer/stereo/ring enumeration.
     # Each input SMILES fans out to its variants; the source name gets a _v{k}
@@ -495,7 +608,10 @@ def prep_ligands(
 
         exp_mols: list = []
         exp_meta: list[tuple[str, str]] = []
-        for (smiles, mol_name), mol in zip(all_meta, all_mols):
+        exp_normalization: list[dict[str, Any]] = []
+        for (smiles, mol_name), mol, normalization in zip(
+            all_meta, all_mols, all_normalization
+        ):
             variants = enumerate_variants(
                 smiles,
                 ph,
@@ -509,6 +625,7 @@ def prep_ligands(
             if len(variants) <= 1 and not bool(_eo.get("fail_closed", False)):
                 exp_mols.append(mol)
                 exp_meta.append((smiles, mol_name))
+                exp_normalization.append(normalization)
                 continue
             for k, vsmi in enumerate(variants, 1):
                 vmol = MolFromSmiles(vsmi)
@@ -516,8 +633,13 @@ def prep_ligands(
                     continue
                 exp_mols.append(vmol)
                 exp_meta.append((vsmi, f"{mol_name}_v{k}" if mol_name else f"v{k}"))
+                exp_normalization.append(dict(normalization))
                 variants_generated += 1
-        all_mols, all_meta = exp_mols, exp_meta
+        all_mols, all_meta, all_normalization = (
+            exp_mols,
+            exp_meta,
+            exp_normalization,
+        )
 
     # Phase 2: parallel conformer generation + PDBQT conversion.
     # RDKit's ETKDGv3 and MMFF are C++ extensions that release the GIL,
@@ -564,7 +686,9 @@ def prep_ligands(
 
     # Phase 3: assemble shards in original order (preserves lig_id sequence)
     qc_flagged: list[dict] = []
-    for (smiles, mol_name), mol, result in zip(all_meta, all_mols, results):
+    for (smiles, mol_name), mol, normalization, result in zip(
+        all_meta, all_mols, all_normalization, results
+    ):
         pdbqt, reason, qc = result  # type: ignore[misc]
         if pdbqt:
             lig_id = f"lig_{prep_passed:05d}"
@@ -573,6 +697,16 @@ def prep_ligands(
                     "ligand": lig_id,
                     "name": mol_name,
                     "smiles": smiles,
+                    "source_smiles": normalization["source_smiles"],
+                    "source_record": normalization["source_record"],
+                    "normalization_status": normalization["status"],
+                    "removed_counterions": ";".join(
+                        normalization["removed_counterions"]
+                    ),
+                    "unspecified_stereocenters": normalization[
+                        "unspecified_stereocenters"
+                    ],
+                    "protonation_uncertainty": normalization["protonation_uncertainty"],
                     "conformer_qc": qc or "",
                 }
             )
@@ -593,7 +727,21 @@ def prep_ligands(
 
     index_path = output_dir / "index.csv"
     with index_path.open("w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=["ligand", "name", "smiles", "conformer_qc"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=[
+                "ligand",
+                "name",
+                "smiles",
+                "source_smiles",
+                "source_record",
+                "normalization_status",
+                "removed_counterions",
+                "unspecified_stereocenters",
+                "protonation_uncertainty",
+                "conformer_qc",
+            ],
+        )
         w.writeheader()
         w.writerows(index_rows)
 
@@ -668,6 +816,10 @@ def prep_ligands(
             "protonation_ph": ph,
             "protonation_status": protonation_status,
             "protonation_method": protonation_method,
+            "normalization_profile": normalization_profile,
+            "counterions_removed": counterions_removed,
+            "normalization_rejected": len(normalization_rejections),
+            "normalization_rejections": normalization_rejections,
             "force_field": force_field,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
             "warnings": warnings,

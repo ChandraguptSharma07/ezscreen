@@ -54,6 +54,22 @@ def test_render_vina_notebook_contract_is_valid_json() -> None:
     assert "output.zip" in joined
 
 
+def test_render_vina_notebook_uses_generalized_fragment_contract() -> None:
+    rendered = runner.render_vina_notebook(
+        run_id="ezs-normalization",
+        shard_filenames=["shard_000.smi"],
+        prep_on_kaggle=True,
+        prep_cfg={"normalization_profile": "generalized_v1"},
+    )
+
+    joined = _joined_notebook_source(rendered)
+
+    assert "_normalize_ligand" in joined
+    assert "ambiguous_fragments" in joined
+    assert "removed_counterions" in joined
+    assert "_largest_fragment_mol" not in joined
+
+
 def test_render_gnina_notebook_contract_is_valid_json(tmp_path: Path) -> None:
     out_path = tmp_path / "gnina.ipynb"
     gnina_runner._render_gnina_notebook(

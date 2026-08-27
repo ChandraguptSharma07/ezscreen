@@ -84,6 +84,67 @@ def test_prep_ligands_reports_when_protonation_is_not_applied(tmp_path, monkeypa
     assert result["report"]["protonation_method"] is None
 
 
+def test_generalized_normalization_removes_only_recognized_counterion():
+    mol = Chem.MolFromSmiles("CC(=O)[O-].[Na+]")
+
+    normalized, record = ligand_prep._normalize_ligand(mol, "generalized_v1")
+
+    assert Chem.MolToSmiles(normalized) == "CC(=O)[O-]"
+    assert record["status"] == "normalized"
+    assert record["removed_counterions"] == ["[Na+]"]
+    assert record["protonation_uncertainty"] == "not_assessed"
+
+
+def test_generalized_normalization_rejects_ambiguous_organic_fragments():
+    mol = Chem.MolFromSmiles("CCO.CN")
+
+    normalized, record = ligand_prep._normalize_ligand(mol, "generalized_v1")
+
+    assert normalized is None
+    assert record["status"] == "rejected"
+    assert record["reason"] == "ambiguous_fragments"
+
+
+def test_generalized_normalization_reports_unspecified_stereo():
+    unspecified = Chem.MolFromSmiles("CC(O)C(=O)O")
+    specified = Chem.MolFromSmiles("C[C@H](O)C(=O)O")
+
+    _, unspecified_record = ligand_prep._normalize_ligand(unspecified, "generalized_v1")
+    _, specified_record = ligand_prep._normalize_ligand(specified, "generalized_v1")
+
+    assert unspecified_record["unspecified_stereocenters"] == 1
+    assert specified_record["unspecified_stereocenters"] == 0
+
+
+def test_generalized_normalization_rejection_stays_in_denominator(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(ligand_prep, "_get_scrubber", lambda: None)
+    smi = tmp_path / "in.smi"
+    smi.write_text("CCO.CN\tmixture\nCC(=O)[O-].[Na+]\tacetate\n")
+
+    result = ligand_prep.prep_ligands(
+        input_path=smi,
+        output_dir=tmp_path / "shards",
+        enumerate_opts={"enabled": False},
+        normalization_profile="generalized_v1",
+    )
+
+    report = result["report"]
+    assert report["total_input"] == 2
+    assert report["prep_passed"] == 1
+    assert report["prep_failed"] == 1
+    assert report["prep_failures"]["ambiguous_fragments"] == 1
+    assert report["normalization_profile"] == "generalized_v1"
+    assert report["counterions_removed"] == 1
+    assert report["normalization_rejected"] == 1
+
+    index = (tmp_path / "shards" / "index.csv").read_text()
+    assert "source_smiles" in index
+    assert "CC(=O)[O-].[Na+]" in index
+    assert "[Na+]" in index
+
+
 def test_conformer_qc_passes_clean_molecule():
     mol = _embed_3d(Chem.MolFromSmiles(IBUPROFEN), force_field="MMFF94")
     assert _conformer_qc(mol) is None
