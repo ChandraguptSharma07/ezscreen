@@ -123,6 +123,10 @@ def poll_until_done(
     credentials cannot be overwritten by another thread mid-call.
     Set show_live=False for concurrent callers to avoid Rich LiveError
     (only one Live instance is allowed per console at a time).
+
+    Status-query exceptions leave the remote state unconfirmed. Continue polling
+    the same kernel until a terminal response or the polling timeout; query
+    failures never consume the kernel retry budget or request resubmission.
     """
     elapsed = retries = 0
 
@@ -153,8 +157,12 @@ def poll_until_done(
             try:
                 status, errmsg = _status_call()
             except Exception as e:
-                status = "error"
-                errmsg = f"Poller crashed: {e}"
+                status = "unconfirmed"
+                errmsg = ""
+                console.print(
+                    f"  Status query unavailable ({type(e).__name__}); "
+                    "remote state unconfirmed, polling the same kernel."
+                )
 
             update_fn(status)
 
@@ -162,7 +170,7 @@ def poll_until_done(
                 _notify(run_id, "complete")
                 return {"status": "complete", "error_type": None, "retry_count": retries}
 
-            if status in ("error", "cancelacknowledged", "unknown"):
+            if status in ("error", "cancelacknowledged"):
                 error_type = _classify_error(errmsg)
                 if errmsg:
                     console.print(f"\n  [red]Kaggle failureMessage:[/red] {errmsg}")
