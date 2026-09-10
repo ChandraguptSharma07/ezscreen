@@ -102,7 +102,6 @@ def _strip_alt_conformations(src: Path, dst: Path) -> int:
 def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
     chain_set = set(chains)
     keep_records = {
-        "TER",
         "MODEL",
         "ENDMDL",
         "END",
@@ -112,16 +111,24 @@ def _filter_chains(src: Path, chains: list[str], dst: Path) -> None:
         "TITLE",
     }  # noqa: E501
     lines = []
+    retained_segment = False
     for line in src.read_text(errors="ignore").splitlines():
         record = line[:6].rstrip()
         if record in ("ATOM", "HETATM"):
-            if line[21:22] in chain_set:
+            retained_segment = line[21:22] in chain_set
+            if retained_segment:
                 lines.append(line)
+        elif record == "TER":
+            if retained_segment:
+                lines.append(line)
+            retained_segment = False
         elif record == "SEQRES":
             if line[11:12] in chain_set:
                 lines.append(line)
         elif record in keep_records:
             lines.append(line)
+            if record in {"MODEL", "ENDMDL", "END"}:
+                retained_segment = False
     dst.write_text("\n".join(lines) + "\n")
 
 
