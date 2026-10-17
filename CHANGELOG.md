@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.16.0 — 2026-10-17
+
+> Theme: follow-on workflows and hardening. Dock against receptor ensembles, run short MD on top hits, share screening runs with a team, and get a round of security and result-integrity fixes.
+
+### Added
+
+- **Receptor ensembles** — the run wizard can dock against several receptor conformers: supply your own (manual) or let ezscreen build them from related PDB structures and normal-mode conformers (auto, 3 by default, at most 8). Each ensemble conformer gets a QC report.
+- **Co-crystal ligand selection and redock diagnostics** — choose which co-crystal ligand defines the docking box when a structure has several, and see redock diagnostics for that ligand.
+- **MD follow-on** — a new MD screen runs a short OpenMM protein-ligand simulation on a Kaggle GPU for a docked hit (choose the run, ligand, pose source, simulation preset and GPU). Results come back as a local HTML report, a trajectory viewer and metrics, and MD jobs are tracked in the checkpoint database.
+- **Team runs** — a Team screen and `ezscreen team` commands let a group share a screening run: sign in with GitHub, create or join a team, connect a worker that submits shards with the member's own Kaggle account, and split shards across members. Team runs need an ezscreen team server (`ezscreen team serve`, or `[team] server_url`). `TERMS.md` and `PRIVACY.md` describe the data the team server stores.
+- **Benchmark workspaces** — `ezscreen benchmark` commands set up benchmark campaigns, submit and supervise Kaggle notebooks, recover failed jobs, correct and compare rescored results, and summarise campaigns.
+- **Generalized ligand normalization (opt-in)** — set `normalization_profile = "generalized_v1"` under `[prep]` to remove simple counterions, reject other multi-component inputs instead of keeping the largest fragment, and report stereo and protonation uncertainty. The default stays `legacy`.
+
+### Changed
+
+- `ezscreen tui` is gone; run `ezscreen` to open the app. GitHub sign-in is needed only for team runs.
+- Kaggle GPU jobs now request their accelerator only through the kernel's machine shape, so a T4 request is no longer silently assigned a P100.
+- Local AutoDock Vina runs use deterministic seeds.
+- Generated Methods text reports the ligand protonation that was actually applied, not just the configured pH.
+- Requires `kaggle>=2.2.2`; adds `cryptography` (used by team runs).
+
+### Fixed
+
+- **Security** — Kaggle output downloads, team worker archives and P2Rank downloads reject unsafe archive paths, and HTML reports escape imported content.
+- Vina-family scores below the score floor are treated as failures instead of ranking as top hits; consensus identity, tie ranking, missing-engine handling and coverage reporting were corrected.
+- Kaggle runs keep polling through connection errors, recover kernels that finished while polling failed, wait for dataset sync before submitting, and clean up with the pushed run slug.
+- Partial runs keep their `partial` checkpoint status, merged results keep shard-only score columns, and older checkpoint databases are migrated.
+- Chain filtering no longer leaves orphan `TER` records in the prepared receptor.
+- The first run on a fresh install no longer fails because `~/.ezscreen/runs` did not exist yet.
+- Installed packages now include the TUI theme file.
+
+### Internal
+
+- Uni-Dock AD4 scoring with validated AutoGrid map bundles (including zinc-aware AD4Zn maps) in the Kaggle runner, used by benchmark campaigns; not yet offered in the wizard.
+- Contract tests for the Kaggle notebooks, wheel smoke tests for runtime assets, and a lint cleanup. Benchmark campaign checks skip when the campaign files are not present.
+
 ## v1.15.0 — 2026-07-04
 
 > Theme: interactive prep. Make receptor and ligand preparation choices visible, configurable, and auditable before screening.
