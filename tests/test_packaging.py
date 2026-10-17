@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 import zipfile
 from pathlib import Path
 
@@ -23,3 +24,13 @@ def test_wheel_includes_runtime_assets(tmp_path, monkeypatch):
     assert "ezscreen/backends/kaggle/templates/plip_analysis.ipynb.j2" in names
     assert "ezscreen/backends/kaggle/templates/md_openmm.ipynb.j2" in names
     assert "ezscreen/team/team-worker.yml" in names
+
+
+def test_sdist_leaves_out_benchmarks_and_docs():
+    repo_root = Path(__file__).resolve().parents[1]
+    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    exclude = pyproject["tool"]["hatch"]["build"]["targets"]["sdist"]["exclude"]
+
+    assert "/benchmarks" in exclude
+    assert "/docs" in exclude

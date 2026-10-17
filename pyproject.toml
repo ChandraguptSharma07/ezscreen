@@ -83,6 +83,12 @@ packages = ["ezscreen"]
 [tool.hatch.build.targets.wheel.force-include]
 "ezscreen/tui/theme.tcss" = "ezscreen/tui/theme.tcss"
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/benchmarks",
+    "/docs",
+]
+
 [tool.black]
 line-length = 88
 target-version = ["py311"]
