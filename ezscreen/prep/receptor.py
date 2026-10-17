@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import math
 import shutil
 import subprocess
@@ -374,6 +375,66 @@ def _apply_hetero_selection(src: Path, dst: Path, keep_keys: set[tuple]) -> int:
     return removed
 
 
+def _append_selected_heterogens(
+    protein_pdb: Path, selected_pdb: Path, dst: Path,
+    protected_keys: set[tuple] | None = None,
+) -> None:
+    """Append selected HETATM records after PDBFixer without losing their IDs."""
+    protein_lines = [
+        line
+        for line in protein_pdb.read_text(errors="ignore").splitlines()
+        if not line.startswith("END")
+        and (not line.startswith("HETATM") or _hetero_key_from_line(line) in (protected_keys or set()))
+    ]
+    hetero_lines = [
+        line
+        for line in selected_pdb.read_text(errors="ignore").splitlines()
+        if line.startswith("HETATM") and _hetero_key_from_line(line) not in (protected_keys or set())
+    ]
+    dst.write_text("\n".join([*protein_lines, *hetero_lines, "END"]) + "\n")
+
+
+def _hetero_key_from_line(line: str) -> tuple[str, str, int] | None:
+    # Meeko serializes retained waters and other rigid receptor residues as ATOM.
+    if not line.startswith(("ATOM  ", "HETATM")):
+        return None
+    try:
+        return (line[17:20].strip(), line[21:22].strip(), int(line[22:26]))
+    except (IndexError, ValueError):
+        return None
+
+
+def _hetero_retention_report(
+    pdbqt_path: Path, requested: list[dict[str, Any]] | None
+) -> dict[str, Any]:
+    """Report whether explicitly selected heterogen groups survived PDBQT prep."""
+    requested_entries = [
+        {
+            "resname": str(item["resname"]).strip().upper(),
+            "chain": str(item.get("chain", "")).strip(),
+            "resseq": int(item["resseq"]),
+        }
+        for item in (requested or [])
+    ]
+    present = {
+        key
+        for line in pdbqt_path.read_text(errors="ignore").splitlines()
+        if (key := _hetero_key_from_line(line)) is not None
+    }
+    retained = [
+        item
+        for item in requested_entries
+        if (item["resname"], item["chain"], item["resseq"]) in present
+    ]
+    missing = [item for item in requested_entries if item not in retained]
+    return {
+        "requested": requested_entries,
+        "retained": retained,
+        "missing": missing,
+        "complete": not missing,
+    }
+
+
 # ---------------------------------------------------------------------------
 # pdbfixer + Meeko
 # ---------------------------------------------------------------------------
@@ -406,7 +467,7 @@ def _run_pdbfixer(
 
     residue_count = fixer.topology.getNumResidues()
     with dst.open("w") as f:
-        PDBFile.writeFile(fixer.topology, fixer.positions, f)
+        PDBFile.writeFile(fixer.topology, fixer.positions, f, keepIds=True)
 
     try:
         from pdbfixer import __version__ as v
@@ -1314,7 +1375,6 @@ def prep_receptor(
     # Honour explicit heteroatom keep/remove choices from the wizard. When any are
     # kept, pre-strip the rest here and tell pdbfixer not to remove heterogens.
     prefixer_src = chain_filtered
-    remove_heterogens = True
     n_hetero_removed = 0
     if keep_hetero is not None:
         keep_keys = {
@@ -1325,7 +1385,6 @@ def prep_receptor(
             chain_filtered, hetero_filtered, keep_keys
         )
         prefixer_src = hetero_filtered
-        remove_heterogens = False
         warnings.append(
             {
                 "severity": "low",
@@ -1337,26 +1396,36 @@ def prep_receptor(
         )
 
     base_fixed = output_dir / "receptor_fixed.pdb"
+    fixer_output = (
+        output_dir / "receptor_fixed_protein.pdb"
+        if keep_hetero is not None
+        else base_fixed
+    )
     try:
         fx = _run_pdbfixer(
             prefixer_src,
-            base_fixed,
-            keep_waters=keep_waters,
-            remove_heterogens=remove_heterogens,
+            fixer_output,
+            keep_waters=keep_waters if keep_hetero is None else False,
+            remove_heterogens=True,
         )
     except ReceptorPrepError:
         raise
     except Exception as exc:
         raise ReceptorPrepError(f"pdbfixer error: {exc}") from exc
 
+    if keep_hetero is not None:
+        _append_selected_heterogens(
+            fixer_output, prefixer_src, base_fixed,
+        )
+
     if fx["missing_residues"]:
         warnings.append(
             {
                 "severity": "medium",
-                "category": "missing_residues_modelled",
+                "category": "missing_residues_unresolved",
                 "affected_count": fx["missing_residues"],
-                "message": f"{fx['missing_residues']} missing residues modelled by pdbfixer",
-                "action": "verify modelled regions are not in/near binding site",
+                "message": f"{fx['missing_residues']} missing residues detected; not rebuilt by this preparation protocol",
+                "action": "review unresolved regions near the binding site before docking; consider a more complete experimental structure",
             }
         )
 
@@ -1458,6 +1527,19 @@ def prep_receptor(
     except Exception as exc:
         raise ReceptorPrepError(f"Meeko error: {exc}") from exc
 
+    hetero_retention = _hetero_retention_report(primary_pdbqt, keep_hetero)
+    retention_path = output_dir / "receptor_hetero_retention.json"
+    retention_path.write_text(json.dumps(hetero_retention, indent=2) + "\n")
+    if not hetero_retention["complete"]:
+        missing = ", ".join(
+            f"{item['resname']} {item['chain']}:{item['resseq']}"
+            for item in hetero_retention["missing"]
+        )
+        raise ReceptorPrepError(
+            "Explicitly retained heterogen(s) disappeared during receptor PDBQT "
+            f"preparation: {missing}. See {retention_path}."
+        )
+
     variant_entries: list[dict[str, Any]] = [
         {"name": "default", "pdb_path": primary_fixed, "pdbqt_path": primary_pdbqt}
     ]
@@ -1531,6 +1613,8 @@ def prep_receptor(
             "metal_site_qc": prepared_metal_qc,
             "prep_protocol_audit": prep_protocol_audit,
             "receptor_protonation": protonation,
+            "heteroatom_retention": hetero_retention,
+            "heteroatom_retention_path": str(retention_path),
             "receptor_variants": [
                 {
                     "name": v["name"],

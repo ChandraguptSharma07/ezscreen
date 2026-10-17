@@ -8,6 +8,7 @@ import pytest
 from ezscreen.prep.receptor import (
     _apply_hetero_selection,
     _apply_pqr_residue_names_to_pdb,
+    _hetero_retention_report,
     _meeko_receptor_command,
     _pqr_atom_to_pdb_line,
     _run_meeko_receptor,
@@ -122,6 +123,23 @@ def test_run_meeko_uses_modern_read_pdb_interface(tmp_path, monkeypatch):
     assert "--read_pdb" in captured["cmd"]
     assert "-i" not in captured["cmd"]
     assert "-a" in captured["cmd"]
+
+
+def test_hetero_retention_report_requires_every_selected_group(tmp_path):
+    pdbqt = tmp_path / "receptor.pdbqt"
+    pdbqt.write_text(_line("HETATM", 1, "O", "HOH", "A", 301, "O") + "\nEND\n")
+
+    report = _hetero_retention_report(
+        pdbqt,
+        [
+            {"resname": "HOH", "chain": "A", "resseq": 301},
+            {"resname": "HOH", "chain": "A", "resseq": 566},
+        ],
+    )
+
+    assert report["complete"] is False
+    assert report["retained"] == [{"resname": "HOH", "chain": "A", "resseq": 301}]
+    assert report["missing"] == [{"resname": "HOH", "chain": "A", "resseq": 566}]
 
 
 def _pdb_atom(serial, name, resn, chain, resseq, xyz, elem="C"):
@@ -423,7 +441,10 @@ def test_pdb2pqr_protonation_falls_back_when_missing(tmp_path, monkeypatch):
     assert "not found" in result["error"]
 
 
-def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
+@pytest.mark.parametrize("missing_count", [0, 21])
+def test_prep_receptor_defers_variant_prep_to_kaggle(
+    tmp_path, monkeypatch, missing_count
+):
     from ezscreen.prep import receptor as rec
 
     src = tmp_path / "input.pdb"
@@ -431,7 +452,11 @@ def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
 
     def fake_pdbfixer(_src, dst, keep_waters, remove_heterogens=True):
         dst.write_text(src.read_text())
-        return {"missing_residues": 0, "residue_count": 1, "pdbfixer_version": "test"}
+        return {
+            "missing_residues": missing_count,
+            "residue_count": 1,
+            "pdbfixer_version": "test",
+        }
 
     def fake_protonation(_src, dst, ph):
         raise AssertionError("variant mode should not run local PDB2PQR")
@@ -456,6 +481,19 @@ def test_prep_receptor_defers_variant_prep_to_kaggle(tmp_path, monkeypatch):
     assert result["receptor_variant_modes"] == ["default", "propka_ph"]
     assert result["report"]["receptor_variant_modes"] == ["default", "propka_ph"]
     assert result["report"]["receptor_protonation"]["error"] == "deferred_to_kaggle"
+    unresolved = [
+        w
+        for w in result["report"]["warnings"]
+        if w["category"] == "missing_residues_unresolved"
+    ]
+    assert len(unresolved) == bool(missing_count)
+    if missing_count:
+        assert unresolved[0]["affected_count"] == missing_count
+        assert "not rebuilt" in unresolved[0]["message"]
+    assert not any(
+        w["category"] == "missing_residues_modelled"
+        for w in result["report"]["warnings"]
+    )
     assert any(
         w["category"] == "receptor_protonation_deferred"
         for w in result["report"]["warnings"]
