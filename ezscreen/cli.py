@@ -220,10 +220,10 @@ def benchmark_init(
         None, "--run-label", help="Run label for a benchmark cell scaffold"
     ),
     root: Path = typer.Option(
-        None, "--root", help="Optional benchmark root directory override"
+        None, "--root", help="Benchmark root directory (default: ./benchmarks)"
     ),
 ) -> None:
-    """Create a benchmark campaign or benchmark cell scaffold from repo templates."""
+    """Create a benchmark campaign or benchmark cell scaffold from the bundled templates."""
     from ezscreen.commands import benchmark as _benchmark
 
     try:

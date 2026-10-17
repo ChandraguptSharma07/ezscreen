@@ -6,6 +6,7 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
+import ezscreen
 from ezscreen.benchmark.runner import pose_retention_diagnostics, run_benchmark
 from ezscreen.benchmark.workspace import (
     benchmark_root,
@@ -19,9 +20,9 @@ runner = CliRunner()
 
 
 def test_benchmark_templates_exist():
-    root = benchmark_root()
-    assert root.name == "benchmarks"
+    assert benchmark_root() == Path.cwd() / "benchmarks"
     tdir = templates_dir()
+    assert tdir.is_relative_to(Path(ezscreen.__file__).resolve().parent)
     assert (tdir / "campaign_manifest.template.json").exists()
     assert (tdir / "targets.template.json").exists()
     assert (tdir / "cell_manifest.template.json").exists()
@@ -146,6 +147,21 @@ def test_benchmark_cli_init_creates_campaign_scaffold(tmp_path: Path):
     campaign = tmp_path / "bench-20260714-core-panel"
     assert result.exit_code == 0
     assert campaign.exists()
+    assert (campaign / "campaign_manifest.json").exists()
+    assert (campaign / "inputs" / "targets.json").exists()
+
+
+def test_benchmark_cli_init_defaults_to_benchmarks_in_current_folder(
+    tmp_path: Path, monkeypatch
+):
+    from ezscreen.cli import app
+
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["benchmark", "init", "bench-20260714-core-panel"])
+
+    campaign = tmp_path / "benchmarks" / "bench-20260714-core-panel"
+    assert result.exit_code == 0
     assert (campaign / "campaign_manifest.json").exists()
     assert (campaign / "inputs" / "targets.json").exists()
 

@@ -12,16 +12,16 @@ See `INPUT_ACQUISITION_CHECKLIST.md` for the exact files to gather before a smok
 
 ## Start a new benchmark campaign
 
-Preferred CLI path:
+Preferred CLI path (creates `benchmarks/<benchmark_id>/` in the current folder; `--root <dir>` picks another benchmark root):
 - `ezscreen benchmark init bench-20260714-core-panel`
 - `ezscreen benchmark init bench-20260714-core-panel --target hiv1_protease --regime crystal_holo --run-label run-001`
 
 Manual path:
 1. Pick a new `benchmark_id`, for example `bench-20260714-core-panel`.
 2. Create `benchmarks/<benchmark_id>/inputs/`.
-3. Copy these templates into the new campaign:
-   - `templates/campaign_manifest.template.json` -> `benchmarks/<benchmark_id>/campaign_manifest.json`
-   - `templates/targets.template.json` -> `benchmarks/<benchmark_id>/inputs/targets.json`
+3. Copy these templates from `ezscreen/benchmark/templates/` into the new campaign:
+   - `campaign_manifest.template.json` -> `benchmarks/<benchmark_id>/campaign_manifest.json`
+   - `targets.template.json` -> `benchmarks/<benchmark_id>/inputs/targets.json`
 4. Create target-specific active and decoy files under `benchmarks/<benchmark_id>/inputs/actives/` and `benchmarks/<benchmark_id>/inputs/decoys/`.
 5. For each executed benchmark cell, archive outputs under:
    - `benchmarks/<benchmark_id>/<target>/<regime>/<run_label>/`
@@ -34,12 +34,14 @@ Manual path:
 
 ## Templates available
 
-- `templates/campaign_manifest.template.json`
-- `templates/targets.template.json`
-- `templates/cell_manifest.template.json`
-- `templates/provenance.template.json`
-- `templates/failure_summary.template.json`
-- `templates/notes.template.md`
+The templates ship with ezscreen in `ezscreen/benchmark/templates/`:
+
+- `campaign_manifest.template.json`
+- `targets.template.json`
+- `cell_manifest.template.json`
+- `provenance.template.json`
+- `failure_summary.template.json`
+- `notes.template.md`
 
 ## Rules
 

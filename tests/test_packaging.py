@@ -24,6 +24,12 @@ def test_wheel_includes_runtime_assets(tmp_path, monkeypatch):
     assert "ezscreen/backends/kaggle/templates/plip_analysis.ipynb.j2" in names
     assert "ezscreen/backends/kaggle/templates/md_openmm.ipynb.j2" in names
     assert "ezscreen/team/team-worker.yml" in names
+    assert "ezscreen/benchmark/templates/campaign_manifest.template.json" in names
+    assert "ezscreen/benchmark/templates/targets.template.json" in names
+    assert "ezscreen/benchmark/templates/cell_manifest.template.json" in names
+    assert "ezscreen/benchmark/templates/provenance.template.json" in names
+    assert "ezscreen/benchmark/templates/failure_summary.template.json" in names
+    assert "ezscreen/benchmark/templates/notes.template.md" in names
 
 
 def test_sdist_leaves_out_benchmarks_and_docs():

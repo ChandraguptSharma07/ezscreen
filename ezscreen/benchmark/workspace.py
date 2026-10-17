@@ -27,16 +27,12 @@ _DEFAULT_METRICS_SUMMARY = {
 }
 
 
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
 def benchmark_root() -> Path:
-    return _repo_root() / "benchmarks"
+    return Path.cwd() / "benchmarks"
 
 
 def templates_dir() -> Path:
-    return benchmark_root() / "templates"
+    return Path(__file__).resolve().parent / "templates"
 
 
 def _copy_template(src_name: str, dest: Path) -> Path:
