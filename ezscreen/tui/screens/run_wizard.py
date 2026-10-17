@@ -197,6 +197,19 @@ class RunWizardScreen(Screen):
                         id="residue-state-overrides",
                     )
                     yield Label(
+                        "Preserve modified residues (optional, expert)",
+                        classes="form-section",
+                    )
+                    yield Static(
+                        "Supply a reviewed JSON policy with explicit residue identities, "
+                        "linked Meeko templates and chemical-state rationale. "
+                        "No automatic protonation or ensembles with this option."
+                    )
+                    yield Input(
+                        placeholder="/path/to/modified_residue_policy.json",
+                        id="modified-residue-policy",
+                    )
+                    yield Label(
                         "Ensemble receptor conformations", classes="form-section"
                     )
                     yield Static(
@@ -1256,6 +1269,21 @@ class RunWizardScreen(Screen):
                 return "Use automatic receptor protonation or manual residue states, not both."
             ensemble_mode = self._selected_ensemble_mode()
             self._ctx["ensemble_mode"] = ensemble_mode
+            policy_text = self.query_one("#modified-residue-policy", Input).value.strip()
+            self._ctx["modified_residue_policy"] = None
+            self._ctx["modified_residue_policy_sha256"] = None
+            if policy_text:
+                if self._ctx["receptor_isomers"] != "off" or ensemble_mode != "off":
+                    return "Modified residues require automatic protonation and ensembles off."
+                from ezscreen.prep.modified_residues import load_modified_residue_policy
+
+                policy_path = Path(policy_text).expanduser().resolve()
+                try:
+                    policy = load_modified_residue_policy(policy_path)
+                except Exception as exc:
+                    return str(exc)
+                self._ctx["modified_residue_policy"] = str(policy_path)
+                self._ctx["modified_residue_policy_sha256"] = policy["source_sha256"]
             self._ctx["ensemble_method"] = None
             self._ctx["ensemble_manual_paths"] = []
             self._ctx["ensemble_receptor_paths"] = []
@@ -1556,6 +1584,8 @@ class RunWizardScreen(Screen):
                     f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
                     f"[bold #6e7681]Rec isomers  [/bold #6e7681][#f0f6fc]{receptor_isomers}[/#f0f6fc]",
                     f"[bold #6e7681]Manual states [/bold #6e7681][#f0f6fc]{manual_states_label}[/#f0f6fc]",
+                    f"Modified-residue policy: {ctx.get('modified_residue_policy') or 'off'}",
+                    f"Policy SHA256: {ctx.get('modified_residue_policy_sha256') or 'not applicable'}",
                     f"[bold #6e7681]Ensemble     [/bold #6e7681][#f0f6fc]{ensemble_label}[/#f0f6fc]",
                     f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
                     f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
@@ -1644,6 +1674,13 @@ class RunWizardScreen(Screen):
                 kaggle_username = "user"
 
             # Receptor prep
+            modified_policy_path = ctx.get("modified_residue_policy")
+            if modified_policy_path:
+                import hashlib
+
+                actual_hash = hashlib.sha256(Path(modified_policy_path).read_bytes()).hexdigest()
+                if actual_hash != ctx.get("modified_residue_policy_sha256"):
+                    raise ValueError("Modified-residue policy changed after confirmation; review it again")
             log("[#79c0ff]Prepping receptor...[/#79c0ff]")
             rec_result = rec_prep.prep_receptor(
                 pdb_path=ctx["pdb_path"],
@@ -1653,6 +1690,7 @@ class RunWizardScreen(Screen):
                 keep_hetero=ctx.get("keep_hetero"),
                 receptor_isomers=ctx.get("receptor_isomers", "off"),
                 residue_state_overrides=ctx.get("residue_state_overrides"),
+                modified_residue_policy=Path(modified_policy_path) if modified_policy_path else None,
             )
             receptor_pdbqt = rec_result["pdbqt_path"]
             receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get(

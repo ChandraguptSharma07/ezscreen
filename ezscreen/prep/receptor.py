@@ -526,7 +526,8 @@ def _apply_residue_state_overrides(
 
 
 def _run_pdbfixer(
-    src: Path, dst: Path, keep_waters: bool, remove_heterogens: bool = True
+    src: Path, dst: Path, keep_waters: bool, remove_heterogens: bool = True,
+    protected_keys: set[tuple] | None = None,
 ) -> dict[str, Any]:
     try:
         from openmm.app import PDBFile
@@ -540,11 +541,32 @@ def _run_pdbfixer(
     fixer.missingResidues = {}
 
     fixer.findNonstandardResidues()
+    if protected_keys:
+        fixer.nonstandardResidues = [
+            (residue, replacement)
+            for residue, replacement in fixer.nonstandardResidues
+            if (residue.name, residue.chain.id, int(residue.id)) not in protected_keys
+        ]
     fixer.replaceNonstandardResidues()
     # When the user has chosen specific heterogens to keep, the de-selected ones
     # are already stripped upstream — don't let pdbfixer remove the kept ones.
     if remove_heterogens:
-        fixer.removeHeterogens(keepWater=keep_waters)
+        if protected_keys:
+            from openmm.app import Modeller
+            from pdbfixer.pdbfixer import dnaResidues, proteinResidues, rnaResidues
+
+            keep = set(proteinResidues) | set(dnaResidues) | set(rnaResidues) | {"N", "UNK"}
+            if keep_waters:
+                keep.add("HOH")
+            remove = [
+                r for r in fixer.topology.residues()
+                if r.name not in keep and (r.name, r.chain.id, int(r.id)) not in protected_keys
+            ]
+            modeller = Modeller(fixer.topology, fixer.positions)
+            modeller.delete(remove)
+            fixer.topology, fixer.positions = modeller.topology, modeller.positions
+        else:
+            fixer.removeHeterogens(keepWater=keep_waters)
     # Do NOT call addMissingAtoms or addMissingHydrogens — PDBFixer adds
     # N/C-terminal H and OXT atoms that cause ProDy to infer valence-4 O
     # or valence-5 C, crashing Meeko's RDKit sanitization. Meeko assigns
@@ -615,7 +637,10 @@ def _strip_conect(src: Path, dst: Path) -> None:
     dst.write_text("\n".join(lines) + "\n")
 
 
-def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
+def _run_meeko_receptor(
+    src: Path, output_dir: Path, *, modified_templates: Path | None = None,
+    template_assignments: dict[str, str] | None = None,
+) -> tuple[Path, str]:
     exe = _meeko_receptor_command()
     if exe is None:
         raise ReceptorPrepError(
@@ -646,9 +671,18 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     )
 
     console.print("  [dim]meeko: converting receptor to PDBQT...[/dim]")
+    command = [exe, "--read_pdb", str(clean), "-p", str(pdbqt)]
+    if modified_templates is not None:
+        command.extend([
+            "--add_templates", str(modified_templates), "--set_template",
+            ",".join(f"{key}={value}" for key, value in (template_assignments or {}).items()),
+            "-j", str(output_dir / "receptor_modified_polymer.json"),
+        ])
+    else:
+        command.append("-a")
     try:
         result = subprocess.run(
-            [exe, "--read_pdb", str(clean), "-p", str(pdbqt), "-a"],
+            command,
             capture_output=True,
             stdin=subprocess.DEVNULL,
             env=env,
@@ -664,6 +698,12 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
             else result.stderr.strip()
         )
         meeko_err = stderr
+        if modified_templates is not None:
+            raise ReceptorPrepError(
+                f"Protected modified-residue Meeko preparation failed: {meeko_err}\n"
+                "Fallback conversion is disabled for explicit modified chemistry.\n"
+                "Review the template and receptor before retrying."
+            )
         console.print("  [yellow]meeko failed — trying obabel fallback...[/yellow]")
         try:
             return _run_obabel_receptor(clean, output_dir)
@@ -1438,7 +1478,14 @@ def prep_receptor(
     keep_hetero: list[dict[str, Any]] | None = None,
     receptor_isomers: str = "off",
     residue_state_overrides: list[dict[str, Any]] | None = None,
+    modified_residue_policy: Path | None = None,
 ) -> dict[str, Any]:
+    if modified_residue_policy is not None and receptor_isomers != "off":
+        raise ReceptorPrepError(
+            "Modified-residue preservation cannot use automatic protonation variants.\n"
+            "The explicit template defines its chemical state.\n"
+            "Set receptor_isomers to off and review the policy."
+        )
     if residue_state_overrides and receptor_isomers != "off":
         raise ReceptorPrepError(
             "Choose either automatic receptor protonation variants or manual "
@@ -1446,6 +1493,32 @@ def prep_receptor(
         )
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[dict] = []
+    modified_policy = None
+    protected_keys: set[tuple] = set()
+    modified_templates = None
+    if modified_residue_policy is not None:
+        from ezscreen.prep.modified_residues import (
+            load_modified_residue_policy,
+            validate_modified_atoms,
+            validate_modified_polymer,
+        )
+
+        modified_policy = load_modified_residue_policy(Path(modified_residue_policy))
+        protected_keys = {
+            (r["resname"], r["chain"], r["resseq"]) for r in modified_policy["residues"]
+        }
+        if any(
+            (r.get("chain", ""), r["resseq"]) == (p[1], p[2])
+            for r in (residue_state_overrides or []) for p in protected_keys
+        ):
+            raise ReceptorPrepError("Manual residue states cannot override a protected modified residue")
+        (output_dir / "modified_residue_policy.json").write_text(
+            json.dumps(modified_policy, indent=2) + "\n"
+        )
+        modified_templates = output_dir / "modified_residue_templates.json"
+        modified_templates.write_text(
+            json.dumps({"residue_templates": modified_policy["templates"]}, indent=2) + "\n"
+        )
 
     noalt = output_dir / "receptor_noalt.pdb"
     n_alt = _strip_alt_conformations(pdb_path, noalt)
@@ -1462,6 +1535,8 @@ def prep_receptor(
 
     chain_filtered = output_dir / "receptor_chains.pdb"
     _filter_chains(noalt, chains, chain_filtered)
+    if modified_policy is not None:
+        validate_modified_atoms(modified_policy, chain_filtered)
 
     # Honour explicit heteroatom keep/remove choices from the wizard. When any are
     # kept, pre-strip the rest here and tell pdbfixer not to remove heterogens.
@@ -1470,7 +1545,7 @@ def prep_receptor(
     if keep_hetero is not None:
         keep_keys = {
             (d["resname"], d.get("chain", ""), int(d["resseq"])) for d in keep_hetero
-        }
+        } | protected_keys
         hetero_filtered = output_dir / "receptor_hetero.pdb"
         n_hetero_removed = _apply_hetero_selection(
             chain_filtered, hetero_filtered, keep_keys
@@ -1498,6 +1573,7 @@ def prep_receptor(
             fixer_output,
             keep_waters=keep_waters if keep_hetero is None else False,
             remove_heterogens=True,
+            **({"protected_keys": protected_keys} if protected_keys else {}),
         )
     except ReceptorPrepError:
         raise
@@ -1507,7 +1583,10 @@ def prep_receptor(
     if keep_hetero is not None:
         _append_selected_heterogens(
             fixer_output, prefixer_src, base_fixed,
+            **({"protected_keys": protected_keys} if protected_keys else {}),
         )
+    if modified_policy is not None:
+        validate_modified_atoms(modified_policy, chain_filtered, base_fixed)
 
     if fx["missing_residues"]:
         warnings.append(
@@ -1632,11 +1711,30 @@ def prep_receptor(
     warnings.extend(_qc_warnings(sanity))
 
     try:
-        primary_pdbqt, mv = _run_meeko_receptor(primary_fixed, output_dir)
+        primary_pdbqt, mv = _run_meeko_receptor(
+            primary_fixed, output_dir,
+            **({
+                "modified_templates": modified_templates,
+                "template_assignments": {
+                    f"{r['chain']}:{r['resseq']}": r["template"]
+                    for r in modified_policy["residues"]
+                },
+            } if modified_policy is not None else {}),
+        )
     except ReceptorPrepError:
         raise
     except Exception as exc:
         raise ReceptorPrepError(f"Meeko error: {exc}") from exc
+
+    modified_report = None
+    if modified_policy is not None:
+        validate_modified_atoms(modified_policy, chain_filtered, primary_pdbqt)
+        modified_report = validate_modified_polymer(
+            modified_policy, output_dir / "receptor_modified_polymer.json"
+        )
+        (output_dir / "receptor_modified_retention.json").write_text(
+            json.dumps(modified_report, indent=2) + "\n"
+        )
 
     hetero_retention = _hetero_retention_report(primary_pdbqt, keep_hetero)
     retention_path = output_dir / "receptor_hetero_retention.json"
@@ -1725,6 +1823,7 @@ def prep_receptor(
             "prep_protocol_audit": prep_protocol_audit,
             "receptor_protonation": protonation,
             "manual_residue_states": manual_states,
+            **({"modified_residue_preservation": modified_report} if modified_report is not None else {}),
             "heteroatom_retention": hetero_retention,
             "heteroatom_retention_path": str(retention_path),
             "receptor_variants": [
