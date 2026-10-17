@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
 from ezscreen.prep.receptor import (
     _apply_hetero_selection,
     _apply_pqr_residue_names_to_pdb,
+    _meeko_receptor_command,
     _pqr_atom_to_pdb_line,
+    _run_meeko_receptor,
     _run_pdb2pqr_protonation,
     heteroatom_inventory,
     metal_site_qc,
@@ -79,6 +82,46 @@ def test_apply_hetero_selection_keeps_only_selected(tmp_path):
     assert "ATOM" in text  # protein retained
     assert "LIG" in text  # kept ligand retained
     assert "HOH" not in text and " ZN " not in text  # de-selected hetero gone
+
+
+def test_meeko_receptor_command_accepts_modern_script_name(monkeypatch):
+    monkeypatch.setattr("ezscreen.prep.receptor.sys.prefix", "/missing-env")
+    monkeypatch.setattr(
+        "ezscreen.prep.receptor.shutil.which",
+        lambda name: (
+            "/venv/bin/mk_prepare_receptor.py"
+            if name == "mk_prepare_receptor.py"
+            else None
+        ),
+    )
+
+    assert _meeko_receptor_command() == "/venv/bin/mk_prepare_receptor.py"
+
+
+def test_run_meeko_uses_modern_read_pdb_interface(tmp_path, monkeypatch):
+    import subprocess
+
+    src = tmp_path / "fixed.pdb"
+    src.write_text(_pdb_atom(1, "CA", "ALA", "A", 1, (0.0, 0.0, 0.0)) + "\nEND\n")
+    captured = {}
+
+    monkeypatch.setattr(
+        "ezscreen.prep.receptor._meeko_receptor_command",
+        lambda: "/venv/bin/mk_prepare_receptor.py",
+    )
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        Path(cmd[cmd.index("-p") + 1]).write_text("ATOM      1  CA  ALA A   1\n")
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr("ezscreen.prep.receptor.subprocess.run", fake_run)
+
+    _run_meeko_receptor(src, tmp_path)
+
+    assert "--read_pdb" in captured["cmd"]
+    assert "-i" not in captured["cmd"]
+    assert "-a" in captured["cmd"]
 
 
 def _pdb_atom(serial, name, resn, chain, resseq, xyz, elem="C"):

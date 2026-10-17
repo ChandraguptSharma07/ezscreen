@@ -5,6 +5,7 @@ import io
 import math
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -469,9 +470,11 @@ def _strip_conect(src: Path, dst: Path) -> None:
 
 
 def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
-    exe = shutil.which("mk_prepare_receptor")
+    exe = _meeko_receptor_command()
     if exe is None:
-        raise ReceptorPrepError("mk_prepare_receptor not found — pip install meeko")
+        raise ReceptorPrepError(
+            "mk_prepare_receptor(.py) not found — pip install meeko"
+        )
 
     # Strip CONECT/LINK/SSBOND records before Meeko sees the file — explicit
     # bond records from DUD-E/PDBFixer can create carbon with 5 bonds which
@@ -499,7 +502,7 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     console.print("  [dim]meeko: converting receptor to PDBQT...[/dim]")
     try:
         result = subprocess.run(
-            [exe, "-i", str(clean), "-p", str(pdbqt), "--allow_bad_res"],
+            [exe, "--read_pdb", str(clean), "-p", str(pdbqt), "-a"],
             capture_output=True,
             stdin=subprocess.DEVNULL,
             env=env,
@@ -529,6 +532,18 @@ def _run_meeko_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
     except (ImportError, AttributeError):
         mv = "unknown"
     return pdbqt, mv
+
+
+def _meeko_receptor_command() -> str | None:
+    """Return either supported Meeko receptor-preparation entry point."""
+    for name in ("mk_prepare_receptor", "mk_prepare_receptor.py"):
+        exe = shutil.which(name)
+        if exe:
+            return exe
+        environment_exe = Path(sys.prefix) / ("Scripts" if sys.platform == "win32" else "bin") / name
+        if environment_exe.is_file():
+            return str(environment_exe)
+    return None
 
 
 def _run_obabel_receptor(src: Path, output_dir: Path) -> tuple[Path, str]:
