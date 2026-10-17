@@ -42,9 +42,6 @@ ezscreen/dists/
 /work/
 *.log
 
-# Claude Code memory and session files
-.claude/
-
 # Ad-hoc test inputs / handoff docs
 *.smi
 !examples/*.smi
