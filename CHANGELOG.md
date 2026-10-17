@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.16.1 — 2026-10-17
+
+### Fixed
+
+- CLI help, CLI messages, the home screen and the run wizard show dashes, arrows, × and Å correctly again instead of garbled text such as `â€”`.
+
 ## v1.16.0 — 2026-10-17
 
 > Theme: follow-on workflows and hardening. Dock against receptor ensembles, run short MD on top hits, share screening runs with a team, and get a round of security and result-integrity fixes.
