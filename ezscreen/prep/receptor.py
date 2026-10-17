@@ -435,6 +435,91 @@ def _hetero_retention_report(
     }
 
 
+_RESIDUE_STATE_FAMILIES: dict[str, frozenset[str]] = {
+    "ASP": frozenset({"ASP", "ASH"}),
+    "ASH": frozenset({"ASP", "ASH"}),
+    "GLU": frozenset({"GLU", "GLH"}),
+    "GLH": frozenset({"GLU", "GLH"}),
+    "HIS": frozenset({"HIS", "HID", "HIE", "HIP"}),
+    "HID": frozenset({"HIS", "HID", "HIE", "HIP"}),
+    "HIE": frozenset({"HIS", "HID", "HIE", "HIP"}),
+    "HIP": frozenset({"HIS", "HID", "HIE", "HIP"}),
+    "LYS": frozenset({"LYS", "LYN"}),
+    "LYN": frozenset({"LYS", "LYN"}),
+    "CYS": frozenset({"CYS", "CYM"}),
+    "CYM": frozenset({"CYS", "CYM"}),
+    "TYR": frozenset({"TYR", "TYM"}),
+    "TYM": frozenset({"TYR", "TYM"}),
+}
+
+
+def _apply_residue_state_overrides(
+    src: Path, dst: Path, overrides: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Apply exact user-selected titratable residue names, failing on ambiguity."""
+    normalized: dict[tuple[str, int, str], str] = {}
+    for item in overrides:
+        try:
+            key = (
+                str(item.get("chain", "")).strip(),
+                int(item["resseq"]),
+                str(item.get("icode", "")).strip(),
+            )
+            state = str(item["state"]).strip().upper()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ReceptorPrepError(f"Invalid residue-state override: {item!r}") from exc
+        previous = normalized.get(key)
+        if previous is not None and previous != state:
+            raise ReceptorPrepError(
+                f"Conflicting residue-state overrides for {key[0]}:{key[1]}{key[2]}"
+            )
+        normalized[key] = state
+
+    found: dict[tuple[str, int, str], str] = {}
+    output: list[str] = []
+    for line in src.read_text(errors="ignore").splitlines():
+        if line.startswith("ATOM  "):
+            try:
+                key = (
+                    line[21:22].strip(),
+                    int(line[22:26]),
+                    line[26:27].strip(),
+                )
+            except (IndexError, ValueError):
+                output.append(line)
+                continue
+            state = normalized.get(key)
+            if state is not None:
+                current = line[17:20].strip().upper()
+                if state not in _RESIDUE_STATE_FAMILIES.get(current, frozenset()):
+                    raise ReceptorPrepError(
+                        f"Residue-state override {state} is incompatible with "
+                        f"{key[0]}:{current}{key[1]}{key[2]}"
+                    )
+                line = line[:17] + f"{state:>3}" + line[20:]
+                found[key] = state
+        output.append(line)
+
+    missing = [key for key in normalized if key not in found]
+    if missing:
+        rendered = ", ".join(f"{chain}:{resseq}{icode}" for chain, resseq, icode in missing)
+        raise ReceptorPrepError(f"Residue-state override target(s) not found: {rendered}")
+
+    dst.write_text("\n".join(output) + "\n")
+    return {
+        "assignment_count": len(found),
+        "assignments": [
+            {
+                "chain": chain,
+                "resseq": resseq,
+                "icode": icode,
+                "state": found[(chain, resseq, icode)],
+            }
+            for chain, resseq, icode in sorted(found)
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # pdbfixer + Meeko
 # ---------------------------------------------------------------------------
@@ -1352,7 +1437,13 @@ def prep_receptor(
     keep_waters: bool = False,
     keep_hetero: list[dict[str, Any]] | None = None,
     receptor_isomers: str = "off",
+    residue_state_overrides: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    if residue_state_overrides and receptor_isomers != "off":
+        raise ReceptorPrepError(
+            "Choose either automatic receptor protonation variants or manual "
+            "residue-state overrides, not both"
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[dict] = []
 
@@ -1502,6 +1593,26 @@ def prep_receptor(
     else:
         primary_fixed = base_fixed
 
+    manual_states = {
+        "assignment_count": 0,
+        "assignments": [],
+    }
+    if residue_state_overrides:
+        manual_fixed = output_dir / "receptor_manual_states.pdb"
+        manual_states = _apply_residue_state_overrides(
+            primary_fixed, manual_fixed, residue_state_overrides
+        )
+        primary_fixed = manual_fixed
+        warnings.append(
+            {
+                "severity": "low",
+                "category": "manual_residue_states",
+                "affected_count": manual_states["assignment_count"],
+                "message": "User-selected residue protonation states override automatic assignments",
+                "action": "confirm the selected states are appropriate for the binding site",
+            }
+        )
+
     rama_angles = ramachandran_angles(primary_fixed)
     rama_plot = _render_ramachandran_plot(rama_angles)
     sanity = receptor_sanity_checks(primary_fixed)
@@ -1613,6 +1724,7 @@ def prep_receptor(
             "metal_site_qc": prepared_metal_qc,
             "prep_protocol_audit": prep_protocol_audit,
             "receptor_protonation": protonation,
+            "manual_residue_states": manual_states,
             "heteroatom_retention": hetero_retention,
             "heteroatom_retention_path": str(retention_path),
             "receptor_variants": [

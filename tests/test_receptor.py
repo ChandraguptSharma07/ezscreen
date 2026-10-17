@@ -8,6 +8,7 @@ import pytest
 from ezscreen.prep.receptor import (
     _apply_hetero_selection,
     _apply_pqr_residue_names_to_pdb,
+    _apply_residue_state_overrides,
     _hetero_retention_report,
     _meeko_receptor_command,
     _pqr_atom_to_pdb_line,
@@ -140,6 +141,65 @@ def test_hetero_retention_report_requires_every_selected_group(tmp_path):
     assert report["complete"] is False
     assert report["retained"] == [{"resname": "HOH", "chain": "A", "resseq": 301}]
     assert report["missing"] == [{"resname": "HOH", "chain": "A", "resseq": 566}]
+
+
+def test_residue_state_overrides_are_exact_and_user_controlled(tmp_path):
+    src = tmp_path / "propka.pdb"
+    src.write_text(
+        "\n".join(
+            [
+                _pdb_atom(1, "CA", "ASP", "A", 25, (0.0, 0.0, 0.0)),
+                _pdb_atom(2, "CA", "ASH", "B", 25, (1.0, 0.0, 0.0)),
+                "END",
+            ]
+        )
+        + "\n"
+    )
+    dst = tmp_path / "manual.pdb"
+
+    result = _apply_residue_state_overrides(
+        src,
+        dst,
+        [
+            {"chain": "A", "resseq": 25, "state": "ASH"},
+            {"chain": "B", "resseq": 25, "state": "ASP"},
+        ],
+    )
+
+    assert result["assignment_count"] == 2
+    assert " ASH A  25" in dst.read_text()
+    assert " ASP B  25" in dst.read_text()
+
+
+@pytest.mark.parametrize(
+    "override, message",
+    [
+        ({"chain": "A", "resseq": 99, "state": "ASH"}, "not found"),
+        ({"chain": "A", "resseq": 25, "state": "LYN"}, "incompatible"),
+    ],
+)
+def test_residue_state_overrides_fail_closed(tmp_path, override, message):
+    src = tmp_path / "fixed.pdb"
+    src.write_text(_pdb_atom(1, "CA", "ASP", "A", 25, (0.0, 0.0, 0.0)) + "\nEND\n")
+
+    with pytest.raises(Exception, match=message):
+        _apply_residue_state_overrides(src, tmp_path / "out.pdb", [override])
+
+
+def test_prep_receptor_rejects_ambiguous_manual_and_automatic_states(tmp_path):
+    from ezscreen.prep import receptor as rec
+
+    src = tmp_path / "fixed.pdb"
+    src.write_text(_pdb_atom(1, "CA", "ASP", "A", 25, (0.0, 0.0, 0.0)) + "\nEND\n")
+
+    with pytest.raises(Exception, match="either automatic.*or manual"):
+        rec.prep_receptor(
+            src,
+            ["A"],
+            tmp_path / "out",
+            receptor_isomers="single",
+            residue_state_overrides=[{"chain": "A", "resseq": 25, "state": "ASH"}],
+        )
 
 
 def _pdb_atom(serial, name, resn, chain, resseq, xyz, elem="C"):

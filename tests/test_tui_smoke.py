@@ -23,8 +23,25 @@ from ezscreen.tui.screens.auth_setup import AuthScreen
 from ezscreen.tui.screens.home import HomeScreen
 from ezscreen.tui.screens.md_results import MDResultsScreen
 from ezscreen.tui.screens.md_simulation import MDSimulationScreen
-from ezscreen.tui.screens.run_wizard import RunWizardScreen
+from ezscreen.tui.screens.run_wizard import (
+    RunWizardScreen,
+    _parse_residue_state_overrides,
+)
 from ezscreen.tui.screens.team_runs import TeamRunsScreen
+
+
+def test_parse_residue_state_overrides() -> None:
+    assert _parse_residue_state_overrides("A:25=ASH, B:25=ASP") == [
+        {"chain": "A", "resseq": 25, "icode": "", "state": "ASH"},
+        {"chain": "B", "resseq": 25, "icode": "", "state": "ASP"},
+    ]
+
+
+def test_parse_residue_state_overrides_rejects_ambiguous_input() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="use A:25=ASH"):
+        _parse_residue_state_overrides("ASP25 protonated")
 
 
 async def test_app_title() -> None:

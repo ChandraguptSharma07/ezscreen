@@ -49,6 +49,33 @@ _HETERO_CATEGORY_LABELS = {
     "other": "Other heteroatoms",
 }
 _HETERO_NOISY_CATEGORIES = {"water", "additive"}
+_RESIDUE_STATE_OVERRIDE_RE = re.compile(
+    r"^(?P<chain>[^:\s]?):(?P<resseq>-?\d+)(?P<icode>[A-Za-z]?)="
+    r"(?P<state>[A-Za-z]{3})$"
+)
+
+
+def _parse_residue_state_overrides(value: str) -> list[dict]:
+    """Parse `A:25=ASH, B:25=ASP` into receptor-prep override records."""
+    if not value.strip():
+        return []
+    overrides = []
+    for raw in value.split(","):
+        token = raw.strip()
+        match = _RESIDUE_STATE_OVERRIDE_RE.fullmatch(token)
+        if match is None:
+            raise ValueError(
+                f"Invalid residue-state override '{token}'; use A:25=ASH"
+            )
+        overrides.append(
+            {
+                "chain": match.group("chain"),
+                "resseq": int(match.group("resseq")),
+                "icode": match.group("icode"),
+                "state": match.group("state").upper(),
+            }
+        )
+    return overrides
 
 
 _STEPS = [
@@ -155,6 +182,20 @@ class RunWizardScreen(Screen):
                                 "B - multiple binding-site variants",
                                 id="rb-rec-isomer-variants",
                             )
+                    yield Label(
+                        "Manual residue protonation states (optional)",
+                        classes="form-section",
+                    )
+                    yield Static(
+                        "[#6e7681]Expert override for known binding-site chemistry. "
+                        "Use PDB chain and residue IDs, for example "
+                        "A:25=ASH, B:25=ASP. Cannot be combined with automatic "
+                        "protonation variants.[/#6e7681]"
+                    )
+                    yield Input(
+                        placeholder="A:25=ASH, B:25=ASP",
+                        id="residue-state-overrides",
+                    )
                     yield Label(
                         "Ensemble receptor conformations", classes="form-section"
                     )
@@ -1200,6 +1241,19 @@ class RunWizardScreen(Screen):
                 h for i, h in enumerate(self._hetero) if i in self._hetero_keep
             ]
             self._ctx["receptor_isomers"] = self._selected_receptor_isomer_mode()
+            try:
+                self._ctx["residue_state_overrides"] = (
+                    _parse_residue_state_overrides(
+                        self.query_one("#residue-state-overrides", Input).value
+                    )
+                )
+            except ValueError as exc:
+                return str(exc)
+            if (
+                self._ctx["residue_state_overrides"]
+                and self._ctx["receptor_isomers"] != "off"
+            ):
+                return "Use automatic receptor protonation or manual residue states, not both."
             ensemble_mode = self._selected_ensemble_mode()
             self._ctx["ensemble_mode"] = ensemble_mode
             self._ctx["ensemble_method"] = None
@@ -1447,6 +1501,16 @@ class RunWizardScreen(Screen):
             "single": "single corrected state",
             "variants": "multiple variants",
         }.get(ctx.get("receptor_isomers", "off"), "off")
+        manual_states = ctx.get("residue_state_overrides", [])
+        manual_states_label = (
+            ", ".join(
+                f"{item['chain']}:{item['resseq']}{item.get('icode', '')}="
+                f"{item['state']}"
+                for item in manual_states
+            )
+            if manual_states
+            else "off"
+        )
         ensemble_mode = ctx.get("ensemble_mode", "off")
         if ensemble_mode == "manual":
             ensemble_count = (
@@ -1491,6 +1555,7 @@ class RunWizardScreen(Screen):
                     f"[bold #6e7681]Receptor     [/bold #6e7681][#f0f6fc]{pdb}[/#f0f6fc]  chains {chains}",
                     f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
                     f"[bold #6e7681]Rec isomers  [/bold #6e7681][#f0f6fc]{receptor_isomers}[/#f0f6fc]",
+                    f"[bold #6e7681]Manual states [/bold #6e7681][#f0f6fc]{manual_states_label}[/#f0f6fc]",
                     f"[bold #6e7681]Ensemble     [/bold #6e7681][#f0f6fc]{ensemble_label}[/#f0f6fc]",
                     f"[bold #6e7681]Ligands      [/bold #6e7681][#f0f6fc]{lig}[/#f0f6fc]",
                     f"[bold #6e7681]ADMET filter [/bold #6e7681][#f0f6fc]{admet}[/#f0f6fc]",
@@ -1587,6 +1652,7 @@ class RunWizardScreen(Screen):
                 ph=cfg["run"].get("default_ph", 7.4),
                 keep_hetero=ctx.get("keep_hetero"),
                 receptor_isomers=ctx.get("receptor_isomers", "off"),
+                residue_state_overrides=ctx.get("residue_state_overrides"),
             )
             receptor_pdbqt = rec_result["pdbqt_path"]
             receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get(
