@@ -1549,10 +1549,9 @@ class RunWizardScreen(Screen):
         from ezscreen.pocket import detect as pocket
         from ezscreen.prep import ligands as ligand_prep
         from ezscreen.prep import receptor as rec_prep
+        from ezscreen.results.run_layout import open_last_run_log
 
-        _log_file = (Path.home() / ".ezscreen" / "runs" / "last_run.log").open(
-            "w", buffering=1, encoding="utf-8"
-        )
+        _log_file = open_last_run_log()
 
         def log(msg: str) -> None:
             self.app.call_from_thread(self.query_one("#run-log", RichLog).write, msg)

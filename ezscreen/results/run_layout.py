@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TextIO
 
 
 def resolve_output_dir(run_dir: Path) -> Path:
@@ -43,3 +44,10 @@ def resolve_receptor_pdb(run_dir: Path) -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def open_last_run_log() -> TextIO:
+    """Open ~/.ezscreen/runs/last_run.log for writing, creating the folder first."""
+    log_path = Path.home() / ".ezscreen" / "runs" / "last_run.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    return log_path.open("w", buffering=1, encoding="utf-8")

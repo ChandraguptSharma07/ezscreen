@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ezscreen.results.run_layout import (
+    open_last_run_log,
     resolve_output_dir,
     resolve_receptor_pdb,
     resolve_run_dir,
@@ -59,3 +60,13 @@ def test_resolve_receptor_pdb_supports_resume_pointer(tmp_path: Path) -> None:
     )
 
     assert resolve_receptor_pdb(run_dir) == pointed
+
+
+def test_open_last_run_log_creates_runs_folder(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    with open_last_run_log() as handle:
+        handle.write("started\n")
+
+    log_path = tmp_path / ".ezscreen" / "runs" / "last_run.log"
+    assert log_path.read_text(encoding="utf-8") == "started\n"
