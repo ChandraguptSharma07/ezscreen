@@ -188,7 +188,7 @@ def _worker_runtime_files() -> dict[str, str]:
         "ezscreen/team/kaggle_upload_ticket.py": repo_root / "ezscreen" / "team" / "kaggle_upload_ticket.py",
         "ezscreen/team/state.py": repo_root / "ezscreen" / "team" / "state.py",
         "ezscreen/team/worker.py": repo_root / "ezscreen" / "team" / "worker.py",
-        WORKER_WORKFLOW_PATH: repo_root / ".github" / "workflows" / "team-worker.yml",
+        WORKER_WORKFLOW_PATH: repo_root / "ezscreen" / "team" / "team-worker.yml",
     }
     files = {path: src.read_text(encoding="utf-8") for path, src in file_map.items()}
     files["pyproject.toml"] = """[build-system]

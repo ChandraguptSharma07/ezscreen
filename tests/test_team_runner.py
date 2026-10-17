@@ -822,6 +822,7 @@ def test_worker_runtime_files_include_notebook_renderer_and_template():
 
     assert "ezscreen/backends/kaggle/runner.py" in files
     assert "ezscreen/backends/kaggle/templates/vina_shard.ipynb.j2" in files
+    assert "python -m ezscreen.team.worker" in files[".github/workflows/team-worker.yml"]
     assert "jinja2>=3.1.4" in files["pyproject.toml"]
     assert 'templates/*.j2' in files["pyproject.toml"]
     assert '\"ezscreen.tui\" = [\"theme.tcss\"]' in files["pyproject.toml"]

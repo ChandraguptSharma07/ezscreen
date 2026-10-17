@@ -22,3 +22,4 @@ def test_wheel_includes_runtime_assets(tmp_path, monkeypatch):
     assert "ezscreen/backends/kaggle/templates/gnina_rescore.ipynb.j2" in names
     assert "ezscreen/backends/kaggle/templates/plip_analysis.ipynb.j2" in names
     assert "ezscreen/backends/kaggle/templates/md_openmm.ipynb.j2" in names
+    assert "ezscreen/team/team-worker.yml" in names
