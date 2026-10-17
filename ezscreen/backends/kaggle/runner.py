@@ -1058,6 +1058,7 @@ def render_vina_notebook(
         enumerate_tautomers=bool(_eo.get("tautomers", prep_cfg.get("enumerate_tautomers", True))),
         enumerate_stereo=bool(_eo.get("stereo", prep_cfg.get("enumerate_stereo", False))),
         enumerate_ring=bool(_eo.get("ring", prep_cfg.get("enumerate_ring", False))),
+        enumerate_fail_closed=bool(_eo.get("fail_closed", False)),
         max_variants_per_ligand=int(_eo.get("max_variants", prep_cfg.get("max_variants_per_ligand", 4))),
         poses_returned=int(results_cfg.get("poses_returned", 25)),
         receptor_filename=receptor_filename,
