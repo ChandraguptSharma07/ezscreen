@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -942,6 +943,13 @@ def _download_if_kernel_completed_after_poll_failure(
         console.print(f"  [yellow]Recovery download failed for {kernel_ref}: {exc}[/yellow]")
         return None
 
+def _validated_package_version(value: Any, *, package: str) -> str:
+    version = str(value)
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+!-]*", version) is None:
+        raise ValueError(f"Invalid pinned {package} version: {version!r}")
+    return version
+
+
 def render_vina_notebook(
     *,
     run_id: str,
@@ -1038,6 +1046,12 @@ def render_vina_notebook(
         mmff_max_iters=int(prep_cfg.get("mmff_max_iters", 0)),
         force_field=force_field or str(prep_cfg.get("force_field", "MMFF94")),
         normalization_profile=str(prep_cfg.get("normalization_profile", "legacy")),
+        rdkit_version=_validated_package_version(
+            prep_cfg.get("kaggle_rdkit_version", "2026.3.5"), package="RDKit"
+        ),
+        meeko_version=_validated_package_version(
+            prep_cfg.get("kaggle_meeko_version", "0.7.1"), package="Meeko"
+        ),
         enumerate_enabled=_enum_enabled,
         enumerate_protonation=bool(_eo.get("protonation", prep_cfg.get("enumerate_protonation", True))),
         enumerate_tautomers=bool(_eo.get("tautomers", prep_cfg.get("enumerate_tautomers", True))),

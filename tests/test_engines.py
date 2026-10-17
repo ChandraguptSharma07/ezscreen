@@ -202,7 +202,7 @@ def test_kaggle_receptor_variant_notebook_prepares_propka_receptor():
     cells = ["".join(c["source"]) for c in nb["cells"]]
     joined = "\n".join(cells)
 
-    assert "pip install meeko gemmi prody" in joined
+    assert "pip install rdkit==2026.3.5 meeko==0.7.1 gemmi prody" in joined
     assert "pip install pdb2pqr propka" in joined
     assert "RECEPTOR_PDB_FILENAME = 'receptor_fixed.pdb'" in joined
     assert "RECEPTOR_VARIANT_SPECS" in joined

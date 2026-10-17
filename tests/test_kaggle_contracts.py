@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from ezscreen.backends.kaggle import gnina_runner, plip_runner, runner
 
 
@@ -74,6 +76,15 @@ def test_render_vina_notebook_uses_generalized_fragment_contract() -> None:
     assert "ambiguous_fragments" in joined
     assert "removed_counterions" in joined
     assert "_largest_fragment_mol" not in joined
+
+
+def test_render_vina_notebook_rejects_unsafe_prep_version() -> None:
+    with pytest.raises(ValueError, match="Invalid pinned Meeko version"):
+        runner.render_vina_notebook(
+            run_id="ezs-unsafe-version",
+            shard_filenames=["shard_000.smi"],
+            prep_cfg={"kaggle_meeko_version": "0.7.1'; import os; #"},
+        )
 
 
 def test_render_gnina_notebook_contract_is_valid_json(tmp_path: Path) -> None:

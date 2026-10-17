@@ -40,6 +40,8 @@ DEFAULTS: dict[str, Any] = {
         "max_rotatable_bonds": 20,
         "mmff_max_iters": 0,
         "force_field": "MMFF94",
+        "kaggle_rdkit_version": "2026.3.5",
+        "kaggle_meeko_version": "0.7.1",
         "prep_on_kaggle": True,
         "enumerate_enabled": False,
         "enumerate_protonation": True,
