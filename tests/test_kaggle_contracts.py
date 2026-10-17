@@ -52,6 +52,7 @@ def test_render_vina_notebook_contract_is_valid_json() -> None:
     assert "/kaggle/working/poses.sdf" in joined
     assert "/kaggle/working/failed_prep.csv" in joined
     assert "/kaggle/working/failed_docking.csv" in joined
+    assert "import json, os, pathlib, time, traceback" in joined
     assert "_REQUIRED_GRID_CAP = 2097152" in joined
     assert "capacity_only_change" in joined
     assert "cuda-nvcc-12-8" in joined
