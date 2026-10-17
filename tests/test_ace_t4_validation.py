@@ -39,6 +39,10 @@ def test_campaign_protocol_is_preregistered_and_vina_only():
     }
 
 
+@pytest.mark.skipif(
+    not any((CAMPAIGN / "notebooks").glob("ace_vina_t4_shard_*.ipynb")),
+    reason="rendered campaign notebooks are kept outside the repository",
+)
 def test_rendered_notebooks_have_preparation_hardware_and_provenance_gates():
     notebooks = sorted((CAMPAIGN / "notebooks").glob("ace_vina_t4_shard_*.ipynb"))
     assert len(notebooks) == 12

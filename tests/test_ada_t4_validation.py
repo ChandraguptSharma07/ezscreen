@@ -4,8 +4,18 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 CAMPAIGN = ROOT / "benchmarks/bench-20260801-ada-1ndw-vina-t4-validation"
+LOCAL_RENDER_INPUTS = (
+    ROOT / "benchmarks/bench-20260723-vinardo-dud28/source_manifest.json",
+    CAMPAIGN / "notebooks",
+)
+requires_local_render_inputs = pytest.mark.skipif(
+    not all(path.exists() for path in LOCAL_RENDER_INPUTS),
+    reason="campaign inputs and rendered notebooks are kept outside the repository",
+)
 
 
 def load_renderer():
@@ -55,6 +65,7 @@ def test_ada_box_and_protocol_are_target_specific_and_frozen() -> None:
     }
 
 
+@requires_local_render_inputs
 def test_renderer_places_hardware_gate_before_preparation() -> None:
     renderer = load_renderer()
     path = renderer.render_preparation()
@@ -105,6 +116,7 @@ def test_frozen_prepared_manifest_has_complete_t4_accounting() -> None:
     assert frozen["receptor_pdbqt_sha256"] == "e35617b87b8ecd15dc5b47fcc0427258e7ef7072e042b6993f471bcba3334078"
 
 
+@requires_local_render_inputs
 def test_all_docking_notebooks_compile_and_gate_hardware_first() -> None:
     renderer = load_renderer()
     paths = renderer.render_docking()

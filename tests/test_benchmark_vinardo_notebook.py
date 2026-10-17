@@ -2,12 +2,19 @@ import ast
 import json
 from pathlib import Path
 
+import pytest
+
 NOTEBOOK = (
     Path(__file__).parents[1]
     / 'benchmarks'
     / 'bench-20260723-vinardo-dud28'
     / 'notebooks'
     / 'vinardo_preflight.ipynb'
+)
+
+pytestmark = pytest.mark.skipif(
+    not NOTEBOOK.exists(),
+    reason='rendered preflight notebook is kept outside the repository',
 )
 
 
