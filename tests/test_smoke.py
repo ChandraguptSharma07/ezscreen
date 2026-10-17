@@ -164,6 +164,37 @@ class TestVersionCheck:
         assert "99.99.99" in b
         assert "pip install" in b
 
+    def test_banner_ignores_older_release(self, monkeypatch) -> None:
+        """banner() returns None when PyPI reports an older version than installed."""
+        from ezscreen import version_check
+
+        monkeypatch.setattr(version_check, "__version__", "1.17.0")
+        version_check._latest = "1.15.0"
+        version_check._done_evt.set()
+
+        assert version_check.banner() is None
+
+    def test_banner_compares_versions_numerically(self, monkeypatch) -> None:
+        """banner() treats 1.10.0 as newer than 1.9.0."""
+        from ezscreen import version_check
+
+        monkeypatch.setattr(version_check, "__version__", "1.9.0")
+        version_check._latest = "1.10.0"
+        version_check._done_evt.set()
+
+        b = version_check.banner()
+        assert b is not None
+        assert "1.10.0" in b
+
+    def test_banner_ignores_unparseable_version(self) -> None:
+        """banner() returns None when the reported version is not a release number."""
+        from ezscreen import version_check
+
+        version_check._latest = "unknown"
+        version_check._done_evt.set()
+
+        assert version_check.banner() is None
+
     def teardown_method(self, _method) -> None:
         """Reset module state between tests."""
         import threading

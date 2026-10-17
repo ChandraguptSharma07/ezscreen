@@ -61,6 +61,14 @@ def start() -> None:
     threading.Thread(target=_fetch, daemon=True).start()
 
 
+def _is_newer(latest: str, current: str) -> bool:
+    """Return True if latest is a later X.Y.Z release than current."""
+    try:
+        return tuple(map(int, latest.split("."))) > tuple(map(int, current.split(".")))
+    except ValueError:
+        return False
+
+
 def banner() -> str | None:
     """
     Return a Rich-formatted banner if a newer version is available.
@@ -68,7 +76,7 @@ def banner() -> str | None:
     """
     if not _done_evt.is_set():
         return None
-    if not _latest or _latest == __version__:
+    if not _latest or not _is_newer(_latest, __version__):
         return None
     return (
         f"[yellow bold]>> ezscreen {_latest} available[/yellow bold]  "
