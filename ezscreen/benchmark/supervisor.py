@@ -16,6 +16,7 @@ from typing import Any
 STATE_FILE = 'campaign_state.json'
 EVENT_FILE = 'execution_events.jsonl'
 QUOTA_FILE = 'quota_budget.json'
+QUOTA_POINTER_FILE = 'quota_epoch_active.json'
 TRANSIENT_ERRORS = {'preempted', 'gpu_oom', 'timeout', 'transient_network'}
 TERMINAL_STATES = {'complete', 'failed', 'blocked', 'cancelled', 'superseded'}
 
@@ -129,11 +130,31 @@ def _event(campaign_dir: Path, event: str, **details: object) -> None:
         handle.write(json.dumps(payload, sort_keys=True) + '\n')
 
 
+def _active_quota_path(campaign_dir: Path) -> Path:
+    pointer_path = campaign_dir / QUOTA_POINTER_FILE
+    if not pointer_path.exists():
+        return campaign_dir / QUOTA_FILE
+    pointer = _load_json(pointer_path, {})
+    quota_file = str(pointer.get('quota_file') or '').strip()
+    active_epoch = int(pointer.get('active_epoch_id') or 0)
+    if (
+        active_epoch <= 0
+        or not quota_file
+        or Path(quota_file).name != quota_file
+        or not quota_file.endswith('.json')
+    ):
+        raise ValueError('Invalid active quota epoch pointer')
+    quota_path = campaign_dir / quota_file
+    if not quota_path.is_file():
+        raise FileNotFoundError(f'Active quota epoch file is missing: {quota_file}')
+    return quota_path
+
+
 def initialize_campaign_state(campaign_dir: Path) -> dict[str, object]:
     campaign_dir = campaign_dir.expanduser().resolve()
     campaign_dir.mkdir(parents=True, exist_ok=True)
     state_path = campaign_dir / STATE_FILE
-    quota_path = campaign_dir / QUOTA_FILE
+    quota_path = _active_quota_path(campaign_dir)
     created = not state_path.exists()
     state = _load_json(
         state_path,
@@ -176,11 +197,23 @@ def initialize_campaign_state(campaign_dir: Path) -> dict[str, object]:
         int(quota.get('maximum_concurrent_notebooks_per_account') or 2),
     )
     quota.setdefault('maximum_concurrent_cpu_notebooks_per_account', 10)
+    quota.setdefault('quota_epoch_id', 1)
+    if int(quota['quota_epoch_id']) <= 0:
+        raise ValueError('quota_epoch_id must be positive')
+    if quota_path.name != QUOTA_FILE:
+        pointer = _load_json(campaign_dir / QUOTA_POINTER_FILE, {})
+        if int(pointer['active_epoch_id']) != int(quota['quota_epoch_id']):
+            raise ValueError('Active quota pointer and quota epoch file disagree')
     _persist(state_path, state)
     _persist(quota_path, quota)
     if created:
         _event(campaign_dir, 'supervisor_initialized')
-    return {'campaign_dir': campaign_dir, 'state': state, 'quota': quota}
+    return {
+        'campaign_dir': campaign_dir,
+        'state': state,
+        'quota': quota,
+        'quota_path': quota_path,
+    }
 
 
 @_locked_campaign_operation
@@ -190,6 +223,7 @@ def register_job(campaign_dir: Path, job: dict[str, Any]) -> dict[str, Any]:
     campaign_dir = initialized['campaign_dir']
     state = initialized['state']
     quota = initialized['quota']
+    quota_path = initialized['quota_path']
     if state.get('status') == 'blocked':
         raise RuntimeError(
             f"Campaign is blocked: {state.get('blocked_reason') or 'unspecified'}"
@@ -211,6 +245,11 @@ def register_job(campaign_dir: Path, job: dict[str, Any]) -> dict[str, Any]:
         raise ValueError('Registered CPU job must reserve zero planned_gpu_hours')
     candidate['compute_kind'] = compute_kind
     candidate['planned_gpu_hours'] = planned
+    active_epoch = int(quota.get('quota_epoch_id') or 1)
+    candidate_epoch = int(candidate.get('quota_epoch_id') or active_epoch)
+    if candidate_epoch != active_epoch:
+        raise ValueError('Registered job quota_epoch_id must match active quota epoch')
+    candidate['quota_epoch_id'] = candidate_epoch
     candidate.setdefault('status', 'preparing')
     candidate.setdefault('retry_count', 0)
     candidate.setdefault('started_epoch', time.time())
@@ -224,6 +263,11 @@ def register_job(campaign_dir: Path, job: dict[str, Any]) -> dict[str, Any]:
         (index for index, current in enumerate(jobs) if current.get('job_id') == job_id),
         None,
     )
+    if (
+        existing_index is not None
+        and int(jobs[existing_index].get('quota_epoch_id') or 1) != candidate_epoch
+    ):
+        raise ValueError('Existing job belongs to a different quota epoch')
     proposed_jobs = [dict(current) for current in jobs]
     if existing_index is None:
         proposed_jobs.append(candidate)
@@ -247,7 +291,7 @@ def register_job(campaign_dir: Path, job: dict[str, Any]) -> dict[str, Any]:
     state['status'] = 'running'
     state['updated_at'] = _now()
     _persist(campaign_dir / STATE_FILE, state)
-    _persist(campaign_dir / QUOTA_FILE, proposed_quota)
+    _persist(quota_path, proposed_quota)
     _event(
         campaign_dir,
         'job_registered',
@@ -269,6 +313,7 @@ def resume_blocked_campaign(campaign_dir: Path, *, reason: str) -> dict[str, obj
     campaign_dir = initialized['campaign_dir']
     state = initialized['state']
     quota = initialized['quota']
+    quota_path = initialized['quota_path']
     if state.get('status') != 'blocked':
         return {'state': state, 'quota': quota, 'changed': False}
     for job in state.get('jobs', []):
@@ -280,7 +325,7 @@ def resume_blocked_campaign(campaign_dir: Path, *, reason: str) -> dict[str, obj
     state['updated_at'] = _now()
     _update_quota(quota, state.get('jobs', []))
     _persist(campaign_dir / STATE_FILE, state)
-    _persist(campaign_dir / QUOTA_FILE, quota)
+    _persist(quota_path, quota)
     _event(campaign_dir, 'campaign_resumed', reason=reason)
     return {'state': state, 'quota': quota, 'changed': True}
 
@@ -296,6 +341,7 @@ def update_registered_job(
     campaign_dir = initialized['campaign_dir']
     state = initialized['state']
     quota = initialized['quota']
+    quota_path = initialized['quota_path']
     jobs = state.get('jobs')
     if not isinstance(jobs, list):
         raise ValueError('campaign_state jobs must be a list')
@@ -330,7 +376,7 @@ def update_registered_job(
         state['status'] = 'running'
     state['updated_at'] = _now()
     _persist(campaign_dir / STATE_FILE, state)
-    _persist(campaign_dir / QUOTA_FILE, quota)
+    _persist(quota_path, quota)
     _event(
         campaign_dir,
         'job_updated',
@@ -391,11 +437,15 @@ def _job_gpu_runtime_hours(job: dict, now_epoch: float) -> float:
 
 def _update_quota(quota: dict, jobs: list[dict]) -> list[str]:
     now_epoch = time.time()
+    active_epoch = int(quota.get('quota_epoch_id') or 1)
     account_usage: dict[str, dict[str, float | int]] = {}
     planned = observed = observed_cpu = 0.0
     cpu_jobs = 0
     for job in jobs:
         if str(job.get('status') or '').strip().lower() == 'superseded':
+            continue
+        job_epoch = int(job.get('quota_epoch_id') or 1)
+        if job_epoch != active_epoch:
             continue
         account = str(job.get('account') or 'unassigned')
         usage = account_usage.setdefault(
@@ -432,14 +482,25 @@ def _update_quota(quota: dict, jobs: list[dict]) -> list[str]:
             or 2
         ),
     }
-    for account in account_usage:
+    concurrency_accounts = {
+        str(job.get('account') or 'unassigned')
+        for job in jobs
+        if job.get('status') in {
+            'preparing', 'submitted', 'queued', 'running', 'polling',
+            'recovery_pending',
+        }
+    }
+    for account in concurrency_accounts:
         for compute_kind, limit in concurrency_limits.items():
             running = sum(
                 1
                 for job in jobs
                 if str(job.get('account') or 'unassigned') == account
                 and str(job.get('compute_kind') or 'gpu').strip().lower() == compute_kind
-                and job.get('status') in {'preparing', 'submitted', 'queued', 'running', 'polling'}
+                and job.get('status') in {
+                    'preparing', 'submitted', 'queued', 'running', 'polling',
+                    'recovery_pending',
+                }
             )
             if account != 'unassigned' and running > limit:
                 violations.append(
@@ -676,6 +737,7 @@ def supervise_once(campaign_dir: Path) -> dict[str, object]:
     campaign_dir = initialized['campaign_dir']
     state = initialized['state']
     quota = initialized['quota']
+    quota_path = initialized['quota_path']
     jobs = state.get('jobs')
     if not isinstance(jobs, list):
         raise ValueError('campaign_state jobs must be a list')
@@ -685,7 +747,7 @@ def supervise_once(campaign_dir: Path) -> dict[str, object]:
         state['blocked_reason'] = 'quota_guard'
         _event(campaign_dir, 'quota_guard_blocked', violations=violations)
         _persist(campaign_dir / STATE_FILE, state)
-        _persist(campaign_dir / QUOTA_FILE, quota)
+        _persist(quota_path, quota)
         return {'state': state, 'quota': quota, 'changed': True}
 
     changed = False
@@ -843,7 +905,7 @@ def supervise_once(campaign_dir: Path) -> dict[str, object]:
     state['deterministic_failure_counts'] = _recount_deterministic_failures(jobs)
     _update_quota(quota, jobs)
     _persist(campaign_dir / STATE_FILE, state)
-    _persist(campaign_dir / QUOTA_FILE, quota)
+    _persist(quota_path, quota)
     return {'state': state, 'quota': quota, 'changed': changed}
 
 

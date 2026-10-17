@@ -132,6 +132,112 @@ def test_register_job_reserves_quota_idempotently(tmp_path: Path) -> None:
     assert quota['planned_gpu_hours'] == 4.0
 
 
+def test_active_quota_epoch_preserves_epoch_one_history(tmp_path: Path) -> None:
+    campaign = tmp_path / 'campaign'
+    supervisor.register_job(
+        campaign,
+        {
+            'job_id': 'epoch-one',
+            'account': 'acct1',
+            'planned_gpu_hours': 4.0,
+            'status': 'complete',
+        },
+    )
+    epoch_one_path = campaign / 'quota_budget.json'
+    epoch_one_bytes = epoch_one_path.read_bytes()
+    epoch_two = json.loads(epoch_one_bytes)
+    epoch_two.update(
+        {
+            'quota_epoch_id': 2,
+            'planned_gpu_hours': 0.0,
+            'observed_gpu_hours': 0.0,
+            'accounts': {},
+        }
+    )
+    (campaign / 'quota_budget_epoch_02.json').write_text(json.dumps(epoch_two))
+    (campaign / 'quota_epoch_active.json').write_text(
+        json.dumps(
+            {
+                'schema_version': 1,
+                'active_epoch_id': 2,
+                'quota_file': 'quota_budget_epoch_02.json',
+            }
+        )
+    )
+
+    registered = supervisor.register_job(
+        campaign,
+        {
+            'job_id': 'epoch-two',
+            'account': 'acct2',
+            'planned_gpu_hours': 3.0,
+        },
+    )
+
+    active = json.loads((campaign / 'quota_budget_epoch_02.json').read_text())
+    assert registered['quota_epoch_id'] == 2
+    assert active['planned_gpu_hours'] == 3.0
+    assert epoch_one_path.read_bytes() == epoch_one_bytes
+
+
+def test_old_epoch_active_jobs_still_enforce_global_account_concurrency(
+    tmp_path: Path,
+) -> None:
+    campaign = tmp_path / 'campaign'
+    supervisor.initialize_campaign_state(campaign)
+    state_path = campaign / 'campaign_state.json'
+    state = json.loads(state_path.read_text())
+    state['jobs'] = [
+        {
+            'job_id': f'old-{index}',
+            'account': 'acct1',
+            'compute_kind': 'gpu',
+            'planned_gpu_hours': 1.0,
+            'quota_epoch_id': 1,
+            'status': 'running',
+        }
+        for index in range(2)
+    ]
+    state_path.write_text(json.dumps(state))
+    quota = json.loads((campaign / 'quota_budget.json').read_text())
+    quota['quota_epoch_id'] = 2
+    (campaign / 'quota_budget_epoch_02.json').write_text(json.dumps(quota))
+    (campaign / 'quota_epoch_active.json').write_text(
+        json.dumps(
+            {
+                'schema_version': 1,
+                'active_epoch_id': 2,
+                'quota_file': 'quota_budget_epoch_02.json',
+            }
+        )
+    )
+
+    with pytest.raises(RuntimeError, match='account_gpu_concurrency_exceeded:acct1'):
+        supervisor.register_job(
+            campaign,
+            {
+                'job_id': 'new',
+                'account': 'acct1',
+                'planned_gpu_hours': 1.0,
+            },
+        )
+
+
+def test_quota_epoch_pointer_rejects_path_escape(tmp_path: Path) -> None:
+    campaign = tmp_path / 'campaign'
+    campaign.mkdir()
+    (campaign / 'quota_epoch_active.json').write_text(
+        json.dumps(
+            {
+                'active_epoch_id': 2,
+                'quota_file': '../quota_budget_epoch_02.json',
+            }
+        )
+    )
+    with pytest.raises(ValueError, match='Invalid active quota epoch pointer'):
+        supervisor.initialize_campaign_state(campaign)
+
+
 def test_register_cpu_job_does_not_consume_gpu_quota(tmp_path: Path) -> None:
     campaign = tmp_path / 'campaign'
     supervisor.register_job(
