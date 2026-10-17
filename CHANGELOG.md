@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.17.0 — 2026-10-17
+
+> Theme: reproducible preparation and honest outputs. Pin the Kaggle ligand-prep toolchain, record what actually ran, report every missing docking output, and give experts control over receptor chemistry.
+
+### Added
+
+- **Manual residue protonation states** — in the run wizard's receptor-prep step, set states such as `A:25=ASH, B:25=ASP`. Each target must exist and the state must fit the residue; manual states cannot be combined with automatic protonation variants.
+- **Modified-residue policy (opt-in, experimental)** — keep selected modified internal peptide residues through receptor prep by supplying a reviewed JSON policy with linked Meeko templates (wizard step 2 or `prep_receptor(modified_residue_policy=...)`). Preparation stops instead of degrading silently when the explicit chemistry cannot be kept. See `docs/modified-residues.md`.
+- **Prepared receptor PDBQT input** — use an expert-prepared rigid receptor `.pdbqt` unchanged: ezscreen validates and hashes it, skips receptor prep and writes `prepared_receptor_provenance.json`. P2Rank pockets and DiffDock-L need a PDB structure and are not available with this option.
+- **Kaggle run provenance** — notebooks record the installed environment (`pip_freeze.txt`, `environment_manifest.json`) and ligand-prep settings with resolved package versions (`ligand_prep_manifest.json`). Uni-Dock runs also record executable and input hashes and every docking command with its exit code (`docking_command_ledger.json`), and `output.zip` carries a hash manifest of the returned files.
+
+### Changed
+
+- **Macrocycles stay rigid by default** during ligand prep, locally and on Kaggle. Set `rigid_macrocycles = false` under `[prep]` for the old flexible behaviour. The ligand index records the policy, a macrocycle flag and ring sizes.
+- Kaggle ligand prep installs pinned RDKit 2026.3.5 and Meeko 0.7.1 (`kaggle_rdkit_version` and `kaggle_meeko_version` under `[prep]`), so compared runs use the same toolchain.
+- Kaggle Uni-Dock runs started through the docking backend now pass exhaustiveness and the other Uni-Dock search settings (seed, modes, energy range, minimum RMSD, evaluation and step limits, CPU, GPU memory, verbosity) from the run configuration.
+- Kaggle ligand enumeration honours `fail_closed` like local prep, and enumerated variants are numbered in a stable order.
+- Prepared receptors keep the input's residue numbering, and the missing-residue warning now says gaps are detected but not rebuilt.
+
+### Fixed
+
+- **Receptor prep works with current Meeko releases.** Meeko 0.8 installs its receptor tool only as `mk_prepare_receptor.py`; earlier versions looked for `mk_prepare_receptor` and stopped with "mk_prepare_receptor not found" on fresh installs. ezscreen now finds either name, also in a virtual environment that is not activated, and uses Meeko's own PDB reader, so ProDy is not needed.
+- Heterogens kept in the wizard (waters, ions, cofactors) survive receptor prep with their original IDs, and prep stops if any of them is missing from the final PDBQT.
+- Ligands whose docking output never appeared are reported as failures (`missing_output_pdbqt`) instead of disappearing, and a Kaggle run with prepared ligands but no scores, or with no exportable poses, is marked failed.
+- The Open Babel fallback for exporting docked poses to SDF on Kaggle works again, and the top raw poses are kept in `poses_raw_pdbqt.zip`.
+- `ezscreen benchmark init` works from an installed package: its templates ship with ezscreen, and new campaigns default to `./benchmarks` in the current folder.
+
+### Internal
+
+- Kaggle notebooks can build a pinned Uni-Dock with a larger grid capacity for oversized boxes, with hash-checked patches, for benchmark campaigns.
+- Benchmark supervisor tracks quota epochs.
+- Early-enrichment benchmark protocol modules: protocol freeze, preparation and docking runtimes, bundles, aggregation and metrics.
+- `retain_all_finite_scores` keeps scores outside the plausibility window for benchmark analysis.
+
 ## v1.16.1 — 2026-10-17
 
 ### Fixed
