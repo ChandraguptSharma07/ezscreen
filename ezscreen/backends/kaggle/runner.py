@@ -415,11 +415,22 @@ def _write_results_meta(output_dir: Path, engine: str, score_col: str | None = N
         )
     )
 
-def _write_single_unscored_reasons(output_dir: Path) -> None:
+def _write_single_unscored_reasons(
+    output_dir: Path, *, engine: str = "unidock"
+) -> None:
     """Write unscored_reasons.csv for single-notebook outputs."""
     import csv
 
     reasons: list[dict[str, str]] = []
+    index = _load_index(output_dir)
+    reported_ligands: set[str] = set()
+
+    scores_path = output_dir / "scores.csv"
+    if scores_path.exists():
+        with scores_path.open(newline="") as f:
+            reported_ligands.update(
+                row.get("ligand", "") for row in csv.DictReader(f) if row.get("ligand")
+            )
 
     for filename, reason in (
         ("filtered_gpu_size.csv", "gpu_size_filter"),
@@ -441,11 +452,17 @@ def _write_single_unscored_reasons(output_dir: Path) -> None:
                 )
 
     failed_docking = output_dir / "failed_docking.csv"
+    failed_rows: list[dict[str, str]] = []
+    failed_fieldnames: list[str] = []
     if failed_docking.exists():
-        index = _load_index(output_dir)
         with failed_docking.open(newline="") as f:
-            for row in csv.DictReader(f):
+            reader = csv.DictReader(f)
+            failed_rows = list(reader)
+            failed_fieldnames = list(reader.fieldnames or [])
+            for row in failed_rows:
                 lig_id = row.get("ligand", "")
+                if lig_id:
+                    reported_ligands.add(lig_id)
                 info = index.get(lig_id, {})
                 reasons.append(
                     {
@@ -457,6 +474,41 @@ def _write_single_unscored_reasons(output_dir: Path) -> None:
                     }
                 )
 
+    # UniDock can exit non-zero after producing a partial batch. The notebook
+    # can only classify output files that exist, so reconcile every prepared
+    # index identity locally and make absent outputs explicit failures.
+    missing_reason = "missing_output_pdbqt" if engine == "unidock" else "missing_output_sdf"
+    missing_ligands = sorted(set(index) - reported_ligands)
+    if missing_ligands:
+        for lig_id in missing_ligands:
+            info = index[lig_id]
+            failed_rows.append(
+                {
+                    "ligand": lig_id,
+                    "raw_score": "",
+                    "reason": missing_reason,
+                    "receptor_variant": "default",
+                }
+            )
+            reasons.append(
+                {
+                    "ligand": lig_id,
+                    "name": info.get("name", ""),
+                    "smiles": info.get("smiles", ""),
+                    "reason": missing_reason,
+                    "raw_score": "",
+                }
+            )
+        required_fields = ["ligand", "raw_score", "reason", "receptor_variant"]
+        failed_fieldnames = [*failed_fieldnames]
+        for field in required_fields:
+            if field not in failed_fieldnames:
+                failed_fieldnames.append(field)
+        with failed_docking.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=failed_fieldnames, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(failed_rows)
+
     if not reasons:
         return
 
@@ -466,6 +518,41 @@ def _write_single_unscored_reasons(output_dir: Path) -> None:
         )
         w.writeheader()
         w.writerows(reasons)
+
+
+def _single_output_contract_error(output_dir: Path) -> str | None:
+    """Return a pipeline-level result contract error, preserving downloaded artifacts."""
+    import csv
+
+    scores_path = output_dir / "scores.csv"
+    if not scores_path.exists():
+        return None
+    with scores_path.open(newline="") as handle:
+        score_count = sum(1 for _ in csv.DictReader(handle))
+    if score_count == 0:
+        index_path = output_dir / "index.csv"
+        if index_path.exists():
+            with index_path.open(newline="") as handle:
+                if any(True for _ in csv.DictReader(handle)):
+                    return "no_scored_poses"
+        error_path = output_dir / "error.json"
+        if error_path.exists():
+            return "no_scored_poses"
+        return None
+
+    status_path = output_dir / "pose_export_status.json"
+    if status_path.exists():
+        try:
+            status = json.loads(status_path.read_text(encoding="utf-8"))
+            if int(status.get("requested", 0)) > 0 and int(status.get("written", 0)) <= 0:
+                return "pose_export_failed"
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return "pose_export_status_invalid"
+    else:
+        poses = output_dir / "poses.sdf"
+        if poses.exists() and poses.stat().st_size == 0:
+            return "pose_export_empty"
+    return None
 
 
 def _fetch_output_urls(kernel_ref: str) -> list:
@@ -579,7 +666,7 @@ def _download_output(
     _tag_scores_with_receptor_variant(out, receptor_variant)
     _tag_scores_with_engine(out, engine)
     _write_results_meta(out, engine)
-    _write_single_unscored_reasons(out)
+    _write_single_unscored_reasons(out, engine=engine)
     return out
 
 
@@ -676,6 +763,21 @@ def run_screening_job(
                 kj_path=str(kaggle_json_path) if kaggle_json_path is not None else None,
                 engine=engine,
             )
+            contract_error = _single_output_contract_error(output_dir)
+            if contract_error is not None:
+                observe(
+                    "failed",
+                    kernel_ref=kernel_ref,
+                    output_dir=str(output_dir),
+                    error_type=contract_error,
+                    ended_epoch=time.time(),
+                )
+                return {
+                    "status": "failed",
+                    "output_dir": output_dir,
+                    "error_type": contract_error,
+                    "kernel_ref": kernel_ref,
+                }
             observe(
                 "complete",
                 kernel_ref=kernel_ref,
@@ -712,6 +814,23 @@ def run_screening_job(
             engine=engine,
         )
         if recovered_output is not None:
+            contract_error = _single_output_contract_error(recovered_output)
+            if contract_error is not None:
+                observe(
+                    "failed",
+                    kernel_ref=kernel_ref,
+                    output_dir=str(recovered_output),
+                    error_type=contract_error,
+                    ended_epoch=time.time(),
+                    recovered_after_poll_failure=True,
+                )
+                return {
+                    "status": "failed",
+                    "output_dir": recovered_output,
+                    "error_type": contract_error,
+                    "recovered_after_poll_failure": True,
+                    "kernel_ref": kernel_ref,
+                }
             observe(
                 "complete",
                 kernel_ref=kernel_ref,

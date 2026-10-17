@@ -52,6 +52,11 @@ def test_render_vina_notebook_contract_is_valid_json() -> None:
     assert "/kaggle/working/poses.sdf" in joined
     assert "/kaggle/working/failed_prep.csv" in joined
     assert "/kaggle/working/failed_docking.csv" in joined
+    assert "missing_output_pdbqt" in joined
+    assert "poses_raw_pdbqt.zip" in joined
+    assert "pose_export_status.json" in joined
+    assert "['obabel', '-ipdbqt'" in joined
+    assert "Pose export contract failed" in joined
     assert "import json, os, pathlib, time, traceback" in joined
     assert "_REQUIRED_GRID_CAP = 2097152" in joined
     assert "capacity_only_change" in joined
@@ -163,7 +168,11 @@ def test_single_output_contract_writers_emit_results_meta_and_unscored_reasons(t
     _write_csv(
         output_dir / "index.csv",
         ["ligand", "name", "smiles"],
-        [{"ligand": "lig_fail", "name": "Mol Fail", "smiles": "CCN"}],
+        [
+            {"ligand": "lig_0001", "name": "Mol A", "smiles": "CCO"},
+            {"ligand": "lig_fail", "name": "Mol Fail", "smiles": "CCN"},
+            {"ligand": "lig_missing", "name": "Mol Missing", "smiles": "CCC"},
+        ],
     )
     _write_csv(
         output_dir / "filtered_gpu_size.csv",
@@ -190,7 +199,57 @@ def test_single_output_contract_writers_emit_results_meta_and_unscored_reasons(t
     assert meta["engine"] == "unidock"
     assert meta["score_col"] == "docking_score"
     assert meta["score_type"]
-    assert {row["reason"] for row in reasons} == {"gpu_size_filter", "bad_valence", "no_pose"}
+    assert {row["reason"] for row in reasons} == {
+        "gpu_size_filter",
+        "bad_valence",
+        "no_pose",
+        "missing_output_pdbqt",
+    }
     docking_row = next(row for row in reasons if row["ligand"] == "lig_fail")
     assert docking_row["name"] == "Mol Fail"
     assert docking_row["smiles"] == "CCN"
+    missing_row = next(row for row in reasons if row["ligand"] == "lig_missing")
+    assert missing_row["name"] == "Mol Missing"
+    failed = list(
+        csv.DictReader(
+            (output_dir / "failed_docking.csv").open(newline="", encoding="utf-8")
+        )
+    )
+    assert {(row["ligand"], row["reason"]) for row in failed} == {
+        ("lig_fail", "no_pose"),
+        ("lig_missing", "missing_output_pdbqt"),
+    }
+
+
+def test_single_output_contract_rejects_empty_pose_export(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_csv(
+        output_dir / "scores.csv",
+        ["ligand", "score"],
+        [{"ligand": "lig_0001", "score": "-8.2"}],
+    )
+    (output_dir / "poses.sdf").write_text("", encoding="utf-8")
+    (output_dir / "pose_export_status.json").write_text(
+        json.dumps({"requested": 1, "written": 0}), encoding="utf-8"
+    )
+
+    assert runner._single_output_contract_error(output_dir) == "pose_export_failed"
+
+    (output_dir / "pose_export_status.json").write_text(
+        json.dumps({"requested": 1, "written": 1}), encoding="utf-8"
+    )
+    assert runner._single_output_contract_error(output_dir) is None
+
+
+def test_single_output_contract_rejects_prepared_but_unscored_run(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    _write_csv(output_dir / "scores.csv", ["ligand", "score"], [])
+    _write_csv(
+        output_dir / "index.csv",
+        ["ligand", "name"],
+        [{"ligand": "lig_0001", "name": "Mol A"}],
+    )
+
+    assert runner._single_output_contract_error(output_dir) == "no_scored_poses"
