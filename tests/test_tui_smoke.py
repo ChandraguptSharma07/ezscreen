@@ -33,18 +33,19 @@ async def test_app_title() -> None:
         assert app.title == "ezscreen"
 
 
-async def test_app_starts_in_required_account_setup_when_onboarding_incomplete(monkeypatch) -> None:
+async def test_app_opens_home_without_github_sign_in(monkeypatch) -> None:
     from ezscreen import auth
 
     monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": False, "kaggle_ok": False, "complete": False})
     app = EzscreenApp()
     async with app.run_test() as pilot:
         await pilot.pause()
-        assert isinstance(app.screen, AuthScreen)
-        assert app.screen.query_one("#btn-team-signin", Button)
+        assert isinstance(app.screen, HomeScreen)
+        assert app.screen.query_one("#action-auth", ListItem).id == "action-auth"
+        assert app.screen.query_one("#action-team", ListItem).id == "action-team"
 
 
-async def test_home_screen_mounts_after_required_onboarding(monkeypatch) -> None:
+async def test_home_screen_mounts_when_signed_in(monkeypatch) -> None:
     from ezscreen import auth
 
     monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": True, "kaggle_ok": True, "complete": True})
@@ -67,7 +68,6 @@ async def test_home_screen_has_single_team_action(monkeypatch) -> None:
         assert not app.screen.query("#action-team-pause")
 
 async def test_required_account_screen_can_log_out_without_leaving_screen(monkeypatch, tmp_path) -> None:
-    from ezscreen import auth
     from ezscreen.team import client as team_client
 
     state_path = tmp_path / "team-client.json"
@@ -80,11 +80,11 @@ async def test_required_account_screen_can_log_out_without_leaving_screen(monkey
         "github_login": "octocat",
         "team_id": "team_1",
     })
-    monkeypatch.setattr(auth, "onboarding_status", lambda: {"github_ok": False, "kaggle_ok": False, "complete": False})
     monkeypatch.setattr(team_client.TeamClient, "logout", lambda self: {"ok": True})
 
     app = EzscreenApp()
     async with app.run_test() as pilot:
+        await app.push_screen(AuthScreen(required=True))
         await pilot.pause()
         assert isinstance(app.screen, AuthScreen)
         await pilot.click("#btn-team-signout")
