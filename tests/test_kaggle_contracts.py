@@ -30,6 +30,7 @@ def test_render_vina_notebook_contract_is_valid_json() -> None:
         prep_on_kaggle=True,
         engine="unidock",
         scoring="vina",
+        unidock_grid_point_cap=2097152,
         receptor_pdb_filename="receptor_fixed.pdb",
         receptor_variants=[
             {"name": "default", "filename": "receptor.pdbqt", "prepare_on_kaggle": False},
@@ -49,6 +50,11 @@ def test_render_vina_notebook_contract_is_valid_json() -> None:
     assert "/kaggle/working/poses.sdf" in joined
     assert "/kaggle/working/failed_prep.csv" in joined
     assert "/kaggle/working/failed_docking.csv" in joined
+    assert "_REQUIRED_GRID_CAP = 2097152" in joined
+    assert "capacity_only_change" in joined
+    assert "cuda-nvcc-12-8" in joined
+    assert "patched UniDock kernel.h hash mismatch" in joined
+    assert "source_build_manifest.json" in joined
     assert "/kaggle/working/error.json" in joined
     assert "filtered_gpu_size.csv" in joined
     assert "output.zip" in joined

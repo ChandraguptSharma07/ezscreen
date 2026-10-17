@@ -966,6 +966,8 @@ def render_vina_notebook(
     receptor_variants: list[dict[str, Any]] | None = None,
     receptor_pdb_filename: str = "receptor_fixed.pdb",
     ad4_maps_prefix: str | None = None,
+    unidock_grid_point_cap: int = 531441,
+    unidock_git_commit: str = "ebde3b4a22c8b2c7b26e523cc15109aab815be21",
 ) -> str:
     """Render the docking notebook to source text for a single kernel.
 
@@ -1049,6 +1051,8 @@ def render_vina_notebook(
         receptor_prepare_on_kaggle=any(v.get("prepare_on_kaggle") for v in _variant_specs),
         receptor_pdb_filename=receptor_pdb_filename,
         ad4_maps_prefix=ad4_maps_prefix or "",
+        unidock_grid_point_cap=int(unidock_grid_point_cap),
+        unidock_git_commit=str(unidock_git_commit),
         gpu_ids="0,1" if accelerator == "nvidiaTeslaT4" else "",
     )
 

@@ -159,7 +159,7 @@ def test_team_worker_notebook_uses_shard_prefix_for_ligand_ids():
     assert "_lig_id = f'{_lig_prefix}_lig_{_prep_passed:05d}'" in joined
 
 
-def test_team_worker_notebook_prefers_packaged_unidock_before_source_build():
+def test_team_worker_notebook_uses_packaged_unidock_for_stock_grid_cap():
     import json
 
     from ezscreen.backends.kaggle import runner
@@ -178,7 +178,8 @@ def test_team_worker_notebook_prefers_packaged_unidock_before_source_build():
     assert "_FALLBACK_URL = 'https://github.com/dptech-corp/Uni-Dock/releases/download/1.1.0/unidock-1.1.0-cuda120-linux-x86_64'" in joined
     assert "_nvcc_bin = _sh.which('nvcc')" in joined
     assert "if _pl.Path(_BIN).exists() and _os.path.getsize(_BIN) > 500_000:" in joined
-    assert "elif _nvcc_bin:" in joined
+    assert "elif _REQUIRED_GRID_CAP > _STOCK_GRID_CAP:" in joined
+    assert "elif _PACKAGED_BIN:" in joined
     assert "Downloading UniDock fallback binary" in joined
     assert "if _pl.Path(_BIN).exists() and _os.path.getsize(_BIN) > 500_000:" in joined
     assert "elif (not _PACKAGED_BIN) and _pl.Path(_FALLBACK_BIN).exists()" in joined
