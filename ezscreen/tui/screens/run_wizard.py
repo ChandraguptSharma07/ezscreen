@@ -132,15 +132,25 @@ class RunWizardScreen(Screen):
                 # ── Step 1: Receptor & Chains ─────────────────────────
                 with VerticalScroll(id="step-receptor", classes="wizard-step"):
                     yield Label(
-                        "PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file",
+                        "PDB ID, AF:UniProt, path to .pdb, or a prepared .pdbqt receptor",
                         classes="form-label",
                     )
                     with Horizontal(classes="form-row"):
                         yield Input(
-                            placeholder="7L11  or  AF:P00533  or  /path/to/receptor.pdb",
+                            placeholder="7L11  or  AF:P00533  or  /path/to/receptor.pdb[qt]",
                             id="rec-input",
                         )
                         yield Button("Validate", id="btn-rec-validate")
+                    yield Label(
+                        "Use this prepared PDBQT unchanged (skip receptor prep)",
+                        classes="form-label",
+                    )
+                    yield Switch(id="opt-prepared-receptor", value=False)
+                    yield Static(
+                        "[#6e7681]For expert-prepared rigid receptor PDBQT files. "
+                        "ezscreen validates and hashes the file but does not alter it.[/#6e7681]",
+                        id="prepared-receptor-note",
+                    )
                     yield Static("", id="rec-status", classes="form-status")
                     with Vertical(id="af-warning-box"):
                         yield Static("", id="af-warning")
@@ -150,6 +160,10 @@ class RunWizardScreen(Screen):
 
                 # ── Step 2: Receptor Prep ─────────────────────────────
                 with Vertical(id="step-recprep", classes="wizard-step"):
+                    yield Static(
+                        "These controls are disabled when a user-prepared PDBQT "
+                        "was selected in Step 1; its chemistry is preserved unchanged."
+                    )
                     yield Label(
                         "Heteroatoms (waters, ions, cofactors, ligands)",
                         classes="form-section",
@@ -586,7 +600,15 @@ class RunWizardScreen(Screen):
         team_section.display = False
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
-        if event.switch.id == "opt-receptor-isomers":
+        if event.switch.id == "opt-prepared-receptor":
+            self._ctx.pop("pdb_path", None)
+            self._ctx["use_prepared_receptor"] = event.value
+            self.query_one("#step-recprep").disabled = event.value
+            self.query_one("#rec-status", Static).update(
+                "[#e3b341]Validate the receptor again after changing this option.[/#e3b341]"
+            )
+            self.query_one("#chain-section").display = False
+        elif event.switch.id == "opt-receptor-isomers":
             self.query_one("#receptor-isomer-mode-box").display = event.value
         elif event.switch.id == "opt-local":
             local_on = event.value
@@ -893,6 +915,9 @@ class RunWizardScreen(Screen):
         self._cocrystal_ligands = []
         self.query_one("#cocrystal-select", Select).set_options([])
         self._pockets = []
+        self._ctx["use_prepared_receptor"] = self.query_one(
+            "#opt-prepared-receptor", Switch
+        ).value
         self.run_worker(lambda: self._do_rec_validate(raw), thread=True)
 
     def _do_rec_validate(self, raw: str) -> None:
@@ -921,25 +946,45 @@ class RunWizardScreen(Screen):
                 self._ctx["pdb_source"] = "local"
                 self._ctx["pdb_id"] = None
 
+            use_prepared = bool(self._ctx.get("use_prepared_receptor"))
+            if use_prepared:
+                rec_prep.validate_prepared_receptor(pdb_path)
+            elif pdb_path.suffix.lower() == ".pdbqt":
+                raise ValueError(
+                    "A .pdbqt receptor is already prepared. Enable "
+                    "'Use this prepared PDBQT unchanged' to continue."
+                )
+
             self._ctx["pdb_path"] = pdb_path
             self._ctx["receptor_raw"] = raw
 
             chains = rec_prep.get_chains(pdb_path)
-            is_af, af_ver = rec_prep.detect_alphafold(pdb_path)
+            is_af, af_ver = (
+                (False, None)
+                if use_prepared
+                else rec_prep.detect_alphafold(pdb_path)
+            )
             self._ctx["chains"] = chains
             self._ctx["is_alphafold"] = is_af
             self._ctx["af_version"] = af_ver
 
             from ezscreen.pocket import detect as pocket
 
-            cocrystal = [] if is_af else pocket.find_cocrystal_ligands(pdb_path)
+            cocrystal = (
+                []
+                if is_af or use_prepared
+                else pocket.find_cocrystal_ligands(pdb_path)
+            )
             self._cocrystal_ligands = cocrystal
             self._ctx["cocrystal_ligands"] = cocrystal
 
-            try:
-                self._hetero = rec_prep.heteroatom_inventory(pdb_path)
-            except Exception:
+            if use_prepared:
                 self._hetero = []
+            else:
+                try:
+                    self._hetero = rec_prep.heteroatom_inventory(pdb_path)
+                except Exception:
+                    self._hetero = []
 
             self.app.call_from_thread(
                 self._show_rec_result, chains, is_af, af_ver, cocrystal
@@ -956,8 +1001,11 @@ class RunWizardScreen(Screen):
     ) -> None:
         self._cocrystal_ligands = list(cocrystal)
         co_txt = f"  {len(cocrystal)} co-crystal ligand(s) found." if cocrystal else ""
+        prepared_note = " prepared PDBQT — prep will be skipped;" if self._ctx.get(
+            "use_prepared_receptor"
+        ) else " —"
         self.query_one("#rec-status", Static).update(
-            f"[#3fb950]Valid — {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
+            f"[#3fb950]Valid{prepared_note} {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
         )
         self.query_one("#btn-rec-validate").disabled = False
 
@@ -1250,6 +1298,22 @@ class RunWizardScreen(Screen):
             self._ctx["selected_chains"] = selected
 
         elif step == "step-recprep":
+            if self._ctx.get("use_prepared_receptor"):
+                self._ctx.update(
+                    {
+                        "keep_hetero": None,
+                        "receptor_isomers": "off",
+                        "residue_state_overrides": [],
+                        "modified_residue_policy": None,
+                        "modified_residue_policy_sha256": None,
+                        "ensemble_mode": "off",
+                        "ensemble_method": None,
+                        "ensemble_manual_paths": [],
+                        "ensemble_receptor_paths": [],
+                        "ensemble_max_conformers": _AUTO_ENSEMBLE_DEFAULT_MAX,
+                    }
+                )
+                return None
             self._ctx["keep_hetero"] = [
                 h for i, h in enumerate(self._hetero) if i in self._hetero_keep
             ]
@@ -1315,6 +1379,11 @@ class RunWizardScreen(Screen):
             if btn is None:
                 return "Select a binding site method."
             label = str(btn.label)
+            if self._ctx.get("use_prepared_receptor") and "P2Rank" in label:
+                return (
+                    "P2Rank requires an unprepared PDB structure. For prepared "
+                    "PDBQT input, define residues or box coordinates, or use blind docking."
+                )
             if "Co-crystal" in label and not self._cocrystal_ligands:
                 return "No co-crystal ligand found. Choose a different method."
             if "Co-crystal" in label and self._selected_cocrystal_ligand() is None:
@@ -1348,6 +1417,10 @@ class RunWizardScreen(Screen):
 
         elif step == "step-engine":
             self._ctx["engine"] = self._selected_engine()
+            if self._ctx.get("use_prepared_receptor") and self._ctx["engine"] == "diffdock":
+                return (
+                    "DiffDock-L requires a PDB structure, not a prepared PDBQT receptor."
+                )
             has_ensemble = self._ctx.get(
                 "ensemble_mode", "off"
             ) != "off" or self._ctx.get("ensemble_receptor_paths")
@@ -1564,6 +1637,11 @@ class RunWizardScreen(Screen):
         )
         scoring_label = ctx.get("scoring", "vina").capitalize()
         consensus_label = "on" if ctx.get("consensus_enabled") else "off"
+        receptor_prep_label = (
+            "skipped - user-prepared PDBQT (validated and hash-preserved)"
+            if ctx.get("use_prepared_receptor")
+            else "automatic"
+        )
         if ctx.get("run_locally"):
             exh = ctx.get("exhaustiveness") or "default (from settings)"
             backend = f"Local CPU (AutoDock Vina, exhaustiveness={exh})"
@@ -1581,6 +1659,7 @@ class RunWizardScreen(Screen):
             "\n".join(
                 [
                     f"[bold #6e7681]Receptor     [/bold #6e7681][#f0f6fc]{pdb}[/#f0f6fc]  chains {chains}",
+                    f"[bold #6e7681]Rec prep     [/bold #6e7681][#f0f6fc]{receptor_prep_label}[/#f0f6fc]",
                     f"[bold #6e7681]Binding site [/bold #6e7681][#f0f6fc]{site}[/#f0f6fc]",
                     f"[bold #6e7681]Rec isomers  [/bold #6e7681][#f0f6fc]{receptor_isomers}[/#f0f6fc]",
                     f"[bold #6e7681]Manual states [/bold #6e7681][#f0f6fc]{manual_states_label}[/#f0f6fc]",
@@ -1673,7 +1752,7 @@ class RunWizardScreen(Screen):
             except Exception:
                 kaggle_username = "user"
 
-            # Receptor prep
+            # Receptor prep or validated passthrough
             modified_policy_path = ctx.get("modified_residue_policy")
             if modified_policy_path:
                 import hashlib
@@ -1681,17 +1760,31 @@ class RunWizardScreen(Screen):
                 actual_hash = hashlib.sha256(Path(modified_policy_path).read_bytes()).hexdigest()
                 if actual_hash != ctx.get("modified_residue_policy_sha256"):
                     raise ValueError("Modified-residue policy changed after confirmation; review it again")
-            log("[#79c0ff]Prepping receptor...[/#79c0ff]")
-            rec_result = rec_prep.prep_receptor(
-                pdb_path=ctx["pdb_path"],
-                chains=ctx["selected_chains"],
-                output_dir=work_dir / "receptor",
-                ph=cfg["run"].get("default_ph", 7.4),
-                keep_hetero=ctx.get("keep_hetero"),
-                receptor_isomers=ctx.get("receptor_isomers", "off"),
-                residue_state_overrides=ctx.get("residue_state_overrides"),
-                modified_residue_policy=Path(modified_policy_path) if modified_policy_path else None,
-            )
+            if ctx.get("use_prepared_receptor"):
+                log(
+                    "[#79c0ff]Validating and staging user-prepared receptor "
+                    "without changing it...[/#79c0ff]"
+                )
+                rec_result = rec_prep.use_prepared_receptor(
+                    ctx["pdb_path"], work_dir / "receptor"
+                )
+                ctx["prepared_receptor_provenance"] = rec_result["report"]
+                log(
+                    "[#6e7681]Prepared receptor SHA256: "
+                    f"{rec_result['report']['source_sha256']}[/#6e7681]"
+                )
+            else:
+                log("[#79c0ff]Prepping receptor...[/#79c0ff]")
+                rec_result = rec_prep.prep_receptor(
+                    pdb_path=ctx["pdb_path"],
+                    chains=ctx["selected_chains"],
+                    output_dir=work_dir / "receptor",
+                    ph=cfg["run"].get("default_ph", 7.4),
+                    keep_hetero=ctx.get("keep_hetero"),
+                    receptor_isomers=ctx.get("receptor_isomers", "off"),
+                    residue_state_overrides=ctx.get("residue_state_overrides"),
+                    modified_residue_policy=Path(modified_policy_path) if modified_policy_path else None,
+                )
             receptor_pdbqt = rec_result["pdbqt_path"]
             receptor_pdb = rec_result.get("fixed_pdb_path") or rec_result.get(
                 "receptor_pdb_path"

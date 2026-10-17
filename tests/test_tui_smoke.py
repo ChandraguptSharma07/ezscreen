@@ -219,6 +219,31 @@ async def test_run_wizard_records_receptor_isomer_choice() -> None:
         assert screen._ctx["receptor_isomers"] == "variants"
 
 
+async def test_run_wizard_prepared_receptor_bypasses_prep_options() -> None:
+    app = EzscreenApp()
+    screen = RunWizardScreen()
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(screen)
+        await pilot.pause()
+
+        assert screen.query_one("#opt-prepared-receptor", Switch).value is False
+        screen.query_one("#opt-prepared-receptor", Switch).value = True
+        await pilot.pause()
+        assert screen.query_one("#step-recprep").disabled is True
+        screen._ctx["use_prepared_receptor"] = True
+        screen.query_one("#opt-receptor-isomers", Switch).value = True
+        screen.query_one("#rb-ensemble-auto", RadioButton).value = True
+        screen.query_one("#residue-state-overrides", Input).value = "A:25=ASH"
+        screen._step = 1
+
+        assert screen._validate_step() is None
+        assert screen._ctx["receptor_isomers"] == "off"
+        assert screen._ctx["residue_state_overrides"] == []
+        assert screen._ctx["ensemble_mode"] == "off"
+        assert screen._ctx["modified_residue_policy"] is None
+
+
 async def test_run_wizard_records_ensemble_receptors(tmp_path) -> None:
     conf = tmp_path / "conf_a.pdbqt"
     conf.write_text("RECEPTOR\n")

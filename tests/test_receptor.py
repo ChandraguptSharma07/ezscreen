@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from ezscreen.errors import InvalidReceptorError
 from ezscreen.prep.receptor import (
     _apply_hetero_selection,
     _apply_pqr_residue_names_to_pdb,
@@ -18,6 +19,8 @@ from ezscreen.prep.receptor import (
     metal_site_qc,
     ramachandran_angles,
     receptor_sanity_checks,
+    use_prepared_receptor,
+    validate_prepared_receptor,
 )
 
 
@@ -34,6 +37,50 @@ def _line(rec, serial, name, resn, chain, resseq, elem):
     L[46:54] = f"{0.0:8.3f}"
     L[76:78] = f"{elem:>2}"
     return "".join(L)
+
+
+def _pdbqt_atom(serial: int = 1, x: float = 1.0) -> str:
+    return (
+        f"ATOM  {serial:5d}  CA  ALA A   1    "
+        f"{x:8.3f}{2.0:8.3f}{3.0:8.3f}  1.00  0.00     0.100 C \n"
+    )
+
+
+def test_use_prepared_receptor_preserves_bytes_and_writes_provenance(tmp_path):
+    source = tmp_path / "expert_receptor.pdbqt"
+    source.write_text("REMARK expert protocol\n" + _pdbqt_atom(), encoding="utf-8")
+
+    result = use_prepared_receptor(source, tmp_path / "staged")
+
+    staged = result["pdbqt_path"]
+    assert staged.read_bytes() == source.read_bytes()
+    assert result["report"]["preparation_skipped"] is True
+    assert result["report"]["byte_identical"] is True
+    assert result["report"]["source_sha256"] == result["report"]["staged_sha256"]
+    assert result["report"]["validation"]["atom_count"] == 1
+    assert (tmp_path / "staged" / "prepared_receptor_provenance.json").is_file()
+
+
+@pytest.mark.parametrize(
+    ("filename", "contents", "message"),
+    [
+        ("receptor.pdb", _pdbqt_atom(), "requires a .pdbqt"),
+        ("receptor.pdbqt", "REMARK no atoms\n", "contains no ATOM"),
+        (
+            "receptor.pdbqt",
+            _pdbqt_atom().replace("   1.000", "     nan", 1),
+            "non-finite coordinates",
+        ),
+    ],
+)
+def test_validate_prepared_receptor_rejects_invalid_input(
+    tmp_path, filename, contents, message
+):
+    source = tmp_path / filename
+    source.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(InvalidReceptorError, match=message):
+        validate_prepared_receptor(source)
 
 
 def _sample_pdb(tmp_path):

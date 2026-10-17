@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import math
@@ -1462,6 +1463,131 @@ def _qc_warnings(qc: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return warnings
+
+
+# ---------------------------------------------------------------------------
+# Prepared receptor passthrough
+# ---------------------------------------------------------------------------
+
+
+def validate_prepared_receptor(pdbqt_path: Path) -> dict[str, Any]:
+    """Fail closed on malformed user-supplied rigid receptor PDBQT files."""
+    pdbqt_path = Path(pdbqt_path).expanduser()
+    if not pdbqt_path.is_file():
+        raise InvalidReceptorError(f"Prepared receptor not found: {pdbqt_path}")
+    if pdbqt_path.suffix.lower() != ".pdbqt":
+        raise InvalidReceptorError(
+            "Skipping receptor preparation requires a .pdbqt receptor file"
+        )
+
+    atom_count = 0
+    atom_types: set[str] = set()
+    partial_charges: list[float] = []
+    chains: set[str] = set()
+    malformed_lines: list[int] = []
+    nonfinite_lines: list[int] = []
+    for line_number, line in enumerate(
+        pdbqt_path.read_text(errors="replace").splitlines(), start=1
+    ):
+        if not line.startswith(("ATOM  ", "HETATM")):
+            continue
+        atom_count += 1
+        fields = line.split()
+        try:
+            xyz = tuple(
+                float(line[start:end])
+                for start, end in ((30, 38), (38, 46), (46, 54))
+            )
+        except (ValueError, IndexError):
+            malformed_lines.append(line_number)
+            continue
+        if not all(math.isfinite(value) for value in xyz):
+            nonfinite_lines.append(line_number)
+        if len(fields) < 12 or not fields[-1].strip():
+            malformed_lines.append(line_number)
+            continue
+        try:
+            partial_charge = float(fields[-2])
+        except ValueError:
+            malformed_lines.append(line_number)
+            continue
+        if not math.isfinite(partial_charge):
+            nonfinite_lines.append(line_number)
+        partial_charges.append(partial_charge)
+        atom_types.add(fields[-1])
+        chain = line[21:22].strip()
+        if chain:
+            chains.add(chain)
+
+    if atom_count == 0:
+        raise InvalidReceptorError(
+            "Prepared receptor PDBQT contains no ATOM or HETATM records"
+        )
+    if malformed_lines:
+        preview = ", ".join(str(line) for line in malformed_lines[:5])
+        raise InvalidReceptorError(
+            f"Prepared receptor has malformed PDBQT atom records at line(s): {preview}"
+        )
+    if nonfinite_lines:
+        preview = ", ".join(str(line) for line in nonfinite_lines[:5])
+        raise InvalidReceptorError(
+            f"Prepared receptor has non-finite coordinates at line(s): {preview}"
+        )
+
+    return {
+        "path": str(pdbqt_path.resolve()),
+        "sha256": hashlib.sha256(pdbqt_path.read_bytes()).hexdigest(),
+        "size_bytes": pdbqt_path.stat().st_size,
+        "atom_count": atom_count,
+        "atom_types": sorted(atom_types),
+        "partial_charge_range": [min(partial_charges), max(partial_charges)],
+        "chains": sorted(chains) or [" "],
+    }
+
+
+def use_prepared_receptor(pdbqt_path: Path, output_dir: Path) -> dict[str, Any]:
+    """Stage a validated prepared receptor without changing its scientific bytes."""
+    source = Path(pdbqt_path).expanduser().resolve()
+    validation = validate_prepared_receptor(source)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    staged = output_dir / "receptor.pdbqt"
+    shutil.copyfile(source, staged)
+    staged_sha256 = hashlib.sha256(staged.read_bytes()).hexdigest()
+    if staged_sha256 != validation["sha256"]:
+        raise ReceptorPrepError(
+            "Prepared receptor changed while being staged; refusing to continue"
+        )
+
+    report = {
+        "preparation_skipped": True,
+        "source": "user_prepared_pdbqt",
+        "source_path": str(source),
+        "source_sha256": validation["sha256"],
+        "staged_sha256": staged_sha256,
+        "byte_identical": True,
+        "validation": validation,
+        "warnings": [
+            {
+                "severity": "medium",
+                "category": "user_prepared_receptor",
+                "affected_count": validation["atom_count"],
+                "message": "Receptor preparation was skipped at the user's request",
+                "action": "retain the preparation protocol and source file with the run provenance",
+            }
+        ],
+    }
+    (output_dir / "prepared_receptor_provenance.json").write_text(
+        json.dumps(report, indent=2) + "\n", encoding="utf-8"
+    )
+    return {
+        "pdbqt_path": staged,
+        "variant_pdbqt_paths": [staged],
+        "receptor_variant_modes": ["default"],
+        "receptor_pdb_path": None,
+        "fixed_pdb_path": None,
+        "report": report,
+    }
 
 
 # ---------------------------------------------------------------------------
