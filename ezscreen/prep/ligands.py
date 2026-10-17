@@ -240,13 +240,15 @@ def _embed_3d(mol, mmff_max_iters: int = 0, force_field: str = "MMFF94"):
     return mol_h
 
 
-def _to_pdbqt(mol) -> str | None:
+def _to_pdbqt(mol, *, rigid_macrocycles: bool = False) -> str | None:
     # Import outside the try so a broken/missing meeko install raises loudly
     # instead of being charged to every ligand as an "unsupported atoms" failure.
     from meeko import MoleculePreparation, PDBQTWriterLegacy
 
     try:
-        setups = MoleculePreparation().prepare(mol)
+        setups = MoleculePreparation(
+            rigid_macrocycles=rigid_macrocycles
+        ).prepare(mol)
         pdbqt, ok, _ = PDBQTWriterLegacy.write_string(setups[0])
         return pdbqt if ok else None
     except Exception:
@@ -328,6 +330,7 @@ def _prep_one(
     gpu_filter: dict | None = None,
     mmff_max_iters: int = 0,
     force_field: str = "MMFF94",
+    rigid_macrocycles: bool = False,
 ) -> tuple[str | None, str | None, str | None]:
     try:
         from rdkit.Chem import SanitizeMol
@@ -368,7 +371,7 @@ def _prep_one(
 
     qc = _conformer_qc(mol_3d)
 
-    pdbqt = _to_pdbqt(mol_3d)
+    pdbqt = _to_pdbqt(mol_3d, rigid_macrocycles=rigid_macrocycles)
     if pdbqt is None:
         return None, "unsupported_atoms", None
 
@@ -461,6 +464,7 @@ def prep_ligands(
     force_field: str | None = None,
     enumerate_opts: dict | None = None,
     normalization_profile: str | None = None,
+    rigid_macrocycles: bool | None = None,
 ) -> dict[str, Any]:
     from rdkit.Chem import SDWriter
 
@@ -491,16 +495,20 @@ def prep_ligands(
         mmff_max_iters: int = int(_pc.get("mmff_max_iters", 0))
         _cfg_force_field = str(_pc.get("force_field", "MMFF94"))
         _cfg_normalization_profile = str(_pc.get("normalization_profile", "legacy"))
+        _cfg_rigid_macrocycles = bool(_pc.get("rigid_macrocycles", True))
     except Exception:
         gpu_filter = {"max_heavy_atoms": 70, "max_mw": 700.0, "max_rotatable_bonds": 20}
         mmff_max_iters = 0
         _cfg_force_field = "MMFF94"
         _cfg_normalization_profile = "legacy"
+        _cfg_rigid_macrocycles = True
         _pc = {}
 
     # explicit per-run override wins over the config default
     force_field = force_field or _cfg_force_field
     normalization_profile = normalization_profile or _cfg_normalization_profile
+    if rigid_macrocycles is None:
+        rigid_macrocycles = _cfg_rigid_macrocycles
     if normalization_profile not in _NORMALIZATION_PROFILES:
         raise LigandPrepError(
             f"Unknown ligand normalization profile: {normalization_profile}"
@@ -669,6 +677,7 @@ def prep_ligands(
                     gpu_filter,
                     mmff_max_iters,
                     force_field,
+                    rigid_macrocycles,
                 ): i
                 for i, mol in enumerate(all_mols)
             }
@@ -821,6 +830,8 @@ def prep_ligands(
             "normalization_rejected": len(normalization_rejections),
             "normalization_rejections": normalization_rejections,
             "force_field": force_field,
+            "macrocycle_policy": "rigid" if rigid_macrocycles else "flexible",
+            "rigid_macrocycles": rigid_macrocycles,
             "tools": {"scrubber": sv, "rdkit": rv, "meeko": mv},
             "warnings": warnings,
         },

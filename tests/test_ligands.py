@@ -145,6 +145,47 @@ def test_generalized_normalization_rejection_stays_in_denominator(
     assert "[Na+]" in index
 
 
+def test_rigid_macrocycle_pdbqt_omits_glue_atom_types():
+    molecule = _embed_3d(
+        Chem.MolFromSmiles("C1CCCCCC1"),
+        mmff_max_iters=50,
+        force_field="MMFF94",
+    )
+
+    flexible = ligand_prep._to_pdbqt(molecule, rigid_macrocycles=False)
+    rigid = ligand_prep._to_pdbqt(molecule, rigid_macrocycles=True)
+
+    assert flexible is not None
+    assert rigid is not None
+    flexible_types = {
+        line.split()[-1]
+        for line in flexible.splitlines()
+        if line.startswith(("ATOM", "HETATM"))
+    }
+    rigid_types = {
+        line.split()[-1]
+        for line in rigid.splitlines()
+        if line.startswith(("ATOM", "HETATM"))
+    }
+    assert flexible_types & {"CG0", "G0"}
+    assert not any(atom_type.startswith(("CG", "G")) for atom_type in rigid_types)
+
+
+def test_prep_ligands_records_rigid_macrocycle_policy(tmp_path):
+    smi = tmp_path / "in.smi"
+    smi.write_text("C1CCCCCC1\tcycloheptane\n")
+
+    result = ligand_prep.prep_ligands(
+        input_path=smi,
+        output_dir=tmp_path / "shards",
+        enumerate_opts={"enabled": False},
+        rigid_macrocycles=True,
+    )
+
+    assert result["report"]["rigid_macrocycles"] is True
+    assert result["report"]["macrocycle_policy"] == "rigid"
+
+
 def test_conformer_qc_passes_clean_molecule():
     mol = _embed_3d(Chem.MolFromSmiles(IBUPROFEN), force_field="MMFF94")
     assert _conformer_qc(mol) is None

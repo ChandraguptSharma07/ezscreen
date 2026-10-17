@@ -1046,6 +1046,7 @@ def render_vina_notebook(
         mmff_max_iters=int(prep_cfg.get("mmff_max_iters", 0)),
         force_field=force_field or str(prep_cfg.get("force_field", "MMFF94")),
         normalization_profile=str(prep_cfg.get("normalization_profile", "legacy")),
+        rigid_macrocycles=bool(prep_cfg.get("rigid_macrocycles", True)),
         rdkit_version=_validated_package_version(
             prep_cfg.get("kaggle_rdkit_version", "2026.3.5"), package="RDKit"
         ),

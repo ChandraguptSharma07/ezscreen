@@ -84,6 +84,7 @@ def test_deep_merge_nested_dict_merged_not_replaced(monkeypatch, tmp_path):
     assert loaded["prep"]["force_field"] == "UFF"
     assert loaded["prep"]["max_heavy_atoms"] == 70           # from DEFAULTS
     assert loaded["prep"]["enumerate_enabled"] is False      # from DEFAULTS
+    assert loaded["prep"]["rigid_macrocycles"] is True       # generalized default
 
 
 # ---------------------------------------------------------------------------

@@ -78,6 +78,31 @@ def test_render_vina_notebook_uses_generalized_fragment_contract() -> None:
     assert "_largest_fragment_mol" not in joined
 
 
+def test_render_vina_notebook_pins_prep_and_controls_macrocycles() -> None:
+    rendered = runner.render_vina_notebook(
+        run_id="ezs-rigid-rings",
+        shard_filenames=["shard_000.smi"],
+        prep_on_kaggle=True,
+        prep_cfg={
+            "normalization_profile": "generalized_v1",
+            "rigid_macrocycles": True,
+            "kaggle_rdkit_version": "2026.3.5",
+            "kaggle_meeko_version": "0.7.1",
+        },
+    )
+
+    joined = _joined_notebook_source(rendered)
+
+    assert "rdkit==2026.3.5 meeko==0.7.1" in joined
+    assert "MoleculePreparation(rigid_macrocycles=True)" in joined
+    assert "macrocycle_candidate" in joined
+    assert "macrocycle_policy" in joined
+    assert "ligand_prep_manifest.json" in joined
+    assert "pdbqt_with_glue_pseudoatoms" in joined
+    assert "'rdkit': '2026.3.5'" in joined
+    assert "'meeko': '0.7.1'" in joined
+
+
 def test_render_vina_notebook_rejects_unsafe_prep_version() -> None:
     with pytest.raises(ValueError, match="Invalid pinned Meeko version"):
         runner.render_vina_notebook(
