@@ -10,7 +10,7 @@ from ezscreen import version_check
 
 app = typer.Typer(
     name="ezscreen",
-    help="GPU-accelerated virtual screening â€” powered by Kaggle GPUs.",
+    help="GPU-accelerated virtual screening — powered by Kaggle GPUs.",
     no_args_is_help=False,
     rich_markup_mode="rich",
 )
@@ -126,14 +126,14 @@ def resume(
 
     if run["status"] == "failed":
         console.print(
-            f"[red]Run {run_id} failed â€” start a fresh run with: ezscreen[/red]"
+            f"[red]Run {run_id} failed — start a fresh run with: ezscreen[/red]"
         )
         raise typer.Exit(1)
 
     incomplete = checkpoint.get_incomplete_shards(run_id)
     if not incomplete:
         console.print(
-            f"[dim]Run {run_id} has no incomplete shards â€” already done.[/dim]"
+            f"[dim]Run {run_id} has no incomplete shards — already done.[/dim]"
         )
         return
 
@@ -146,7 +146,7 @@ def resume(
     )
     console.print("[dim]Re-submit uses the same run.py flow with resume context.[/dim]")
     console.print(
-        "[yellow]Full resume is planned for v1.1 â€” launch ezscreen to start fresh.[/yellow]"  # noqa: E501
+        "[yellow]Full resume is planned for v1.1 — launch ezscreen to start fresh.[/yellow]"  # noqa: E501
     )
 
 
@@ -171,14 +171,14 @@ def download(
         else None
     )
     if not username:
-        console.print("[red]Kaggle credentials not found â€” run: ezscreen auth[/red]")
+        console.print("[red]Kaggle credentials not found — run: ezscreen auth[/red]")
         raise typer.Exit(1)
     kernel_ref = f"{username}/{run_id}"
     work_dir = Path.home() / ".ezscreen" / "runs" / run_id
 
     console.print(f"  [dim]Downloading results for {kernel_ref}...[/dim]")
     output_dir = kaggle_runner._download_output(kernel_ref, work_dir)
-    console.print(f"  [green]âœ“ Results â†’ {output_dir}[/green]")
+    console.print(f"  [green]✓ Results → {output_dir}[/green]")
     _view.invoke(results_dir=output_dir)
 
 
@@ -202,7 +202,7 @@ def clean(
         return
 
     kaggle_runner.clean_run(run_id, username)
-    console.print(f"  [green]âœ“ Cleaned {run_id}[/green]")
+    console.print(f"  [green]✓ Cleaned {run_id}[/green]")
 
 
 @benchmark_app.command("init")

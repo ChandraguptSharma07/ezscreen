@@ -18,7 +18,7 @@ _STATUS_STYLE: dict[str, str] = {
 
 
 class HomeScreen(Screen):
-    """Dashboard â€” recent runs table, quick actions, auth status."""
+    """Dashboard — recent runs table, quick actions, auth status."""
 
     BINDINGS = [
         Binding("n", "new_run", "New Run"),
@@ -71,7 +71,7 @@ class HomeScreen(Screen):
         table.add_columns("Run ID", "Status", "Compounds", "Created")
 
         if not runs:
-            table.add_row("â€”", "â€”", "â€”", "no runs yet")
+            table.add_row("—", "—", "—", "no runs yet")
             return
 
         for run in runs[:30]:
@@ -140,7 +140,7 @@ class HomeScreen(Screen):
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         run_id = str(event.row_key.value) if event.row_key else None
-        if run_id and run_id != "â€”":
+        if run_id and run_id != "—":
             self.app.nav.selected_run_id = run_id
             from ezscreen.tui.screens.results_viewer import ResultsScreen
             self.app.push_screen(ResultsScreen(run_id))

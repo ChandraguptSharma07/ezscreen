@@ -29,9 +29,9 @@ from ezscreen.backends import engines
 from ezscreen.tui.widgets.breadcrumb import Breadcrumb
 
 _FORCE_FIELD_OPTIONS: list[tuple[str, str]] = [
-    ("MMFF94 â€” general purpose", "MMFF94"),
-    ("MMFF94s â€” planar amides/aromatics", "MMFF94s"),
-    ("UFF â€” broad element coverage", "UFF"),
+    ("MMFF94 — general purpose", "MMFF94"),
+    ("MMFF94s — planar amides/aromatics", "MMFF94s"),
+    ("UFF — broad element coverage", "UFF"),
 ]
 _RECEPTOR_ISOMER_MODES = {"off", "single", "variants"}
 _ENSEMBLE_MODES = {"off", "manual", "auto"}
@@ -63,14 +63,14 @@ _STEPS = [
 ]
 
 _STEP_LABELS = [
-    "Step 1 of 8 â€” Receptor & Chains",
-    "Step 2 of 8 â€” Receptor Prep",
-    "Step 3 of 8 â€” Binding Site",
-    "Step 4 of 8 â€” Ligand Library",
-    "Step 5 of 8 â€” Ligand Prep",
-    "Step 6 of 8 â€” Engine & Scoring",
-    "Step 7 of 8 â€” Compute",
-    "Step 8 of 8 â€” Confirm & Submit",
+    "Step 1 of 8 — Receptor & Chains",
+    "Step 2 of 8 — Receptor Prep",
+    "Step 3 of 8 — Binding Site",
+    "Step 4 of 8 — Ligand Library",
+    "Step 5 of 8 — Ligand Prep",
+    "Step 6 of 8 — Engine & Scoring",
+    "Step 7 of 8 — Compute",
+    "Step 8 of 8 — Confirm & Submit",
 ]
 
 
@@ -102,7 +102,7 @@ class RunWizardScreen(Screen):
         with Vertical(id="wizard-body"):
             yield Static("", id="step-indicator")
             with ContentSwitcher(initial="step-receptor", id="wizard-switcher"):
-                # â”€â”€ Step 1: Receptor & Chains â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Step 1: Receptor & Chains ─────────────────────────
                 with VerticalScroll(id="step-receptor", classes="wizard-step"):
                     yield Label(
                         "PDB ID (e.g. 7L11), AF:UniProt (e.g. AF:P00533), or path to a .pdb file",
@@ -121,7 +121,7 @@ class RunWizardScreen(Screen):
                         yield Label("Select chains to include", classes="form-label")
                         yield Vertical(id="chain-list")
 
-                # â”€â”€ Step 2: Receptor Prep â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Step 2: Receptor Prep ─────────────────────────────
                 with Vertical(id="step-recprep", classes="wizard-step"):
                     yield Label(
                         "Heteroatoms (waters, ions, cofactors, ligands)",
@@ -191,7 +191,7 @@ class RunWizardScreen(Screen):
                             id="ensemble-max-conformers",
                         )
                     yield Static("", id="ensemble-status", classes="form-status")
-                # â”€â”€ Step 3: Binding Site â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Step 3: Binding Site ──────────────────────────────
                 with VerticalScroll(id="step-site", classes="wizard-step"):
                     yield Label("Binding site method", classes="form-label")
                     with RadioSet(id="site-method"):
@@ -220,23 +220,23 @@ class RunWizardScreen(Screen):
                         yield Vertical(id="p2rank-picks")
                     with Vertical(id="sub-blind", classes="site-sub"):
                         yield Static(
-                            "[\u26a0] Blind docking scans the entire protein â€” "
+                            "[\u26a0] Blind docking scans the entire protein — "
                             "slow and noisy. Only use if no binding pocket is known.",
                             id="blind-warning",
                         )
                     with Vertical(id="sub-manual", classes="site-sub"):
-                        yield Label("Box center (Ã…)", classes="form-label")
+                        yield Label("Box center (Å)", classes="form-label")
                         with Horizontal(classes="form-row"):
                             yield Input(placeholder="X", id="manual-cx")
                             yield Input(placeholder="Y", id="manual-cy")
                             yield Input(placeholder="Z", id="manual-cz")
-                        yield Label("Box size (Ã…)", classes="form-label")
+                        yield Label("Box size (Å)", classes="form-label")
                         with Horizontal(classes="form-row"):
                             yield Input(placeholder="X", id="manual-sx")
                             yield Input(placeholder="Y", id="manual-sy")
                             yield Input(placeholder="Z", id="manual-sz")
 
-                # â”€â”€ Step 3: Ligand Library â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── Step 3: Ligand Library ────────────────────────────
                 with Vertical(id="step-ligands", classes="wizard-step"):
                     yield Label(
                         "Ligand library  (.sdf, .smi, .smiles, or .ism file)",
@@ -315,7 +315,7 @@ class RunWizardScreen(Screen):
                 with VerticalScroll(id="step-compute", classes="wizard-step"):
                     yield Label("Compute backend", classes="form-section")
                     yield Static(
-                        "[#6e7681]Run locally on CPU (AutoDock Vina) â€” no Kaggle account needed."
+                        "[#6e7681]Run locally on CPU (AutoDock Vina) — no Kaggle account needed."
                         " Slower than GPU for large libraries.[/#6e7681]"
                     )
                     yield Switch(id="opt-local", value=False)
@@ -337,12 +337,12 @@ class RunWizardScreen(Screen):
                     yield Label("Kaggle GPU", id="lbl-gpu", classes="form-section")
                     with RadioSet(id="opt-gpu-type"):
                         yield RadioButton(
-                            "P100 (16 GB) â˜… â€” standard, widest availability",
+                            "P100 (16 GB) ★ — standard, widest availability",
                             id="rb-p100",
                             value=True,
                         )
                         yield RadioButton(
-                            "T4 Ã— 2 (32 GB) â€” more memory, uses both GPUs",
+                            "T4 × 2 (32 GB) — more memory, uses both GPUs",
                             id="rb-t4x2",
                         )
                     with Vertical(id="compute-assignment-sections"):
@@ -821,7 +821,7 @@ class RunWizardScreen(Screen):
             select.value = options[0][1]
 
     # ------------------------------------------------------------------
-    # Step 1 â€” Receptor validation
+    # Step 1 — Receptor validation
     # ------------------------------------------------------------------
 
     def _start_rec_validate(self) -> None:
@@ -903,7 +903,7 @@ class RunWizardScreen(Screen):
         self._cocrystal_ligands = list(cocrystal)
         co_txt = f"  {len(cocrystal)} co-crystal ligand(s) found." if cocrystal else ""
         self.query_one("#rec-status", Static).update(
-            f"[#3fb950]Valid â€” {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
+            f"[#3fb950]Valid — {len(chains)} chain(s) found.{co_txt}[/#3fb950]"
         )
         self.query_one("#btn-rec-validate").disabled = False
 
@@ -922,7 +922,7 @@ class RunWizardScreen(Screen):
                 af_ver or "", "AlphaFold"
             )
             self.query_one("#af-warning", Static).update(
-                f"[#e3b341]\u26a0  {ver_label} structure detected â€” "
+                f"[#e3b341]\u26a0  {ver_label} structure detected — "
                 "P2Rank will use AF profile. Pocket reliability is lower.[/#e3b341]"
             )
             self.query_one("#af-warning-box").display = True
@@ -1132,13 +1132,13 @@ class RunWizardScreen(Screen):
     def _show_p2rank_results(self, pockets: list[dict]) -> None:
         if not pockets:
             self.query_one("#p2rank-status", Static).update(
-                "[#e3b341]P2Rank found no pockets for this structure â€” "
+                "[#e3b341]P2Rank found no pockets for this structure — "
                 "try Active site residues or Blind docking.[/#e3b341]"
             )
             return
 
         self.query_one("#p2rank-status", Static).update(
-            f"[#3fb950]{len(pockets)} pocket(s) found â€” select one below.[/#3fb950]"
+            f"[#3fb950]{len(pockets)} pocket(s) found — select one below.[/#3fb950]"
         )
         picks = self.query_one("#p2rank-picks", Vertical)
         picks.remove_children()
@@ -1428,17 +1428,17 @@ class RunWizardScreen(Screen):
         return {"type": "blind"}
 
     # ------------------------------------------------------------------
-    # Step 5 â€” Confirm summary
+    # Step 5 — Confirm summary
     # ------------------------------------------------------------------
 
     def _populate_confirm(self) -> None:
         ctx = self._ctx
         pdb = ctx.get("pdb_id") or (
-            ctx["pdb_path"].name if ctx.get("pdb_path") else "â€”"
+            ctx["pdb_path"].name if ctx.get("pdb_path") else "—"
         )
         chains = ", ".join(ctx.get("selected_chains", []))
-        site = ctx.get("site_method", "â€”")
-        lig = ctx["ligand_path"].name if ctx.get("ligand_path") else "â€”"
+        site = ctx.get("site_method", "—")
+        lig = ctx["ligand_path"].name if ctx.get("ligand_path") else "—"
         admet = "yes" if ctx.get("admet_pre_filter") else "no"
         depth = ctx.get("search_label", "Balanced")
         force_field = ctx.get("force_field", "MMFF94")
@@ -1481,7 +1481,7 @@ class RunWizardScreen(Screen):
             gpu_label = "T4 x 2" if ctx.get("gpu_type") == "nvidiaTeslaT4" else "P100"
             backend = "Team runners" if ctx.get("use_team_runners") else f"Kaggle GPU ({gpu_label})"
         af_note = (
-            "\n[#e3b341]\u26a0  AlphaFold structure â€” P2Rank AF profile active[/#e3b341]"
+            "\n[#e3b341]\u26a0  AlphaFold structure — P2Rank AF profile active[/#e3b341]"
             if ctx.get("is_alphafold")
             else ""
         )
@@ -2309,7 +2309,7 @@ class RunWizardScreen(Screen):
                 else:
                     checkpoint.mark_run_partial(run_id)
                     log(
-                        f"[#e3b341]\u26a0 Partial results â€” some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
+                        f"[#e3b341]\u26a0 Partial results — some notebooks failed. Results \u2192 {result['output_dir']}[/#e3b341]"
                     )
                 try:
                     from ezscreen.results.methods import (
