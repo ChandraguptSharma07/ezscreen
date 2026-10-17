@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import gzip
 import hashlib
 import io
 import json
-from pathlib import Path
 import tarfile
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
-
 
 MOL2_MARKER = b"@<TRIPOS>MOLECULE"
 

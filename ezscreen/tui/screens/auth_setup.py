@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import webbrowser
+from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.binding import Binding

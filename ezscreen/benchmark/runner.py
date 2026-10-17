@@ -7,10 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
-from ezscreen.benchmark.metrics import BenchmarkResult, compute_metrics
 from ezscreen.benchmark.aggregation import aggregate_source_compounds
+from ezscreen.benchmark.metrics import BenchmarkResult, compute_metrics
 from ezscreen.results.variants import source_name
-
 
 BIAS_CORRECTED_SCORE_COL = "bias_corrected_score"
 BIAS_CORRECTION_FORMULA = "score + 8.0 * abs_formal_charge + 0.1 * heavy_atoms - 0.03 * tpsa"

@@ -253,8 +253,13 @@ class TeamRunsScreen(Screen):
             self._set_status("[#f85149]Enter a GitHub setup token or set GITHUB_TOKEN for this session.[/#f85149]")
             return
         try:
-            from ezscreen.team.github import configure_worker_repo, provision_managed_worker_repo
-            from ezscreen.team.local_credentials import resolve_worker_kaggle_credentials
+            from ezscreen.team.github import (
+                configure_worker_repo,
+                provision_managed_worker_repo,
+            )
+            from ezscreen.team.local_credentials import (
+                resolve_worker_kaggle_credentials,
+            )
 
             team_account_name = self.query_one("#team-kaggle-account", Input).value.strip()
             worker_kaggle_username = self.query_one("#team-kaggle-username", Input).value.strip()

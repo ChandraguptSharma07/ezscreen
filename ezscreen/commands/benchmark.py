@@ -1,21 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import csv
 import hashlib
 import json
 import platform
 import secrets
 import shutil
-from pathlib import Path
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 from ezscreen.benchmark.rescoring import compare_rescore_columns
 from ezscreen.benchmark.runner import (
     BIAS_CORRECTED_SCORE_COL,
-    BIAS_CORRECTION_FORMULA,
     pose_retention_diagnostics,
     run_benchmark,
     write_bias_corrected_scores,

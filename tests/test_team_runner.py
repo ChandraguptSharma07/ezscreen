@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from ezscreen.team.kaggle_upload_ticket import mint_upload_ticket, upload_file_to_signed_url
+from ezscreen.team.kaggle_upload_ticket import (
+    mint_upload_ticket,
+    upload_file_to_signed_url,
+)
 from ezscreen.team.state import TeamStateError, TeamStore, extract_result_zip
 
 
@@ -148,7 +151,7 @@ def test_init_releases_stale_pre_run_jobs_even_if_not_active_slot(tmp_path):
 
 def test_init_releases_stale_pre_run_worker_slots(tmp_path):
     store = TeamStore(tmp_path / "team.db")
-    connected = store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
+    store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
     store.connect_worker("u1", github_repo="alice/worker")
     job = store.create_team_job(
         user_id="u1",
@@ -235,7 +238,7 @@ def test_team_jobs_ignore_members_without_connected_worker_repo(tmp_path):
         user_id="u2",
         github_repo="bob/worker",
     )
-    carol = store.join_team(
+    store.join_team(
         invite_code=team["invite_code"],
         user_name="carol",
         user_id="u3",
@@ -712,7 +715,6 @@ def test_kaggle_dataset_title_stays_within_kaggle_limit():
 
 def test_run_kaggle_uses_sanitized_dataset_slug(monkeypatch):
     import argparse
-    import os
 
     from ezscreen.team import worker as worker_mod
 
@@ -771,7 +773,6 @@ def test_run_kaggle_uses_sanitized_dataset_slug(monkeypatch):
 
 def test_run_kaggle_passes_worker_accelerator_to_push_kernel(monkeypatch):
     import argparse
-    import os
 
     from ezscreen.team import worker as worker_mod
 
@@ -835,7 +836,7 @@ def test_pyproject_includes_runtime_package_data_contract():
 
 def test_acknowledge_upload_queues_run_once_when_worker_uploads_complete(tmp_path):
     store = TeamStore(tmp_path / "team.db")
-    team = store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
+    store.create_team(owner_name="alice", owner_user_id="u1", team_name="Lab")
     connected = store.connect_worker("u1", github_repo="alice/worker")
     job = store.create_team_job(
         user_id="u1",
@@ -897,7 +898,6 @@ def test_team_http_server_control_plane_flow(tmp_path):
     import urllib.request
 
     from ezscreen.team.client import TeamClient
-    import ezscreen.team.server as team_server_mod
     from ezscreen.team.server import build_server
 
 
@@ -1033,10 +1033,10 @@ def test_merge_team_result_zips_namespaces_colliding_worker_ids(tmp_path):
 def test_team_join_cli_uses_local_kaggle_for_worker_secrets(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
+    import ezscreen.team.github as github_mod
     from ezscreen import auth
     from ezscreen.cli import app
     from ezscreen.team.client import TeamClient
-    import ezscreen.team.github as github_mod
 
     kaggle_json = tmp_path / "kaggle.json"
     _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
@@ -1096,10 +1096,10 @@ def test_team_join_cli_uses_local_kaggle_for_worker_secrets(monkeypatch, tmp_pat
 def test_team_connect_worker_cli_updates_repo_and_secrets(monkeypatch, tmp_path):
     from typer.testing import CliRunner
 
+    import ezscreen.team.github as github_mod
     from ezscreen import auth
     from ezscreen.cli import app
     from ezscreen.team.client import TeamClient
-    import ezscreen.team.github as github_mod
 
     kaggle_json = tmp_path / "kaggle.json"
     _write_kaggle_json(kaggle_json, '{"username": "local_user", "key": "local_key"}')
@@ -1257,6 +1257,7 @@ def test_provision_managed_worker_repo_rejects_explicit_nonmanaged_repo(monkeypa
 
 def test_worker_auto_processes_pending_statuses(monkeypatch):
     import argparse
+
     from ezscreen.team import worker as worker_mod
 
     calls = []

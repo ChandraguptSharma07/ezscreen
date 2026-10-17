@@ -2,7 +2,6 @@ import ast
 import json
 from pathlib import Path
 
-
 NOTEBOOK = (
     Path(__file__).parents[1]
     / 'benchmarks'

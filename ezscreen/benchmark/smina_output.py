@@ -7,7 +7,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 MODE_PATTERN = re.compile(
     r"(?m)^\s*(\d+)\s+(-?\d+(?:\.\d+)?)\s+"
     r"(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s*$"

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import shutil
+from pathlib import Path
 
 _DEFAULT_METRICS_SUMMARY = {
     "metric_contract_version": 2,

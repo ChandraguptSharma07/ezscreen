@@ -2,15 +2,19 @@
 
 import json
 import os
+import urllib.parse
+import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-import urllib.parse
-import urllib.request
 from urllib.parse import parse_qs, urlparse
 
-from ezscreen.team.github import GitHubError, dispatch_worker_workflow_via_app, get_repo_installation
+from ezscreen.team.github import (
+    GitHubError,
+    dispatch_worker_workflow_via_app,
+    get_repo_installation,
+)
 from ezscreen.team.state import TeamStateError, TeamStore
 
 GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code"
