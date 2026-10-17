@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.17.1 — 2026-10-18
+
+### Fixed
+
+- The update notice appears only when PyPI has a newer release than the installed one. After an upgrade it could announce an older release for up to 24 hours, for example "ezscreen 1.15.0 available (you have 1.17.0)".
+
 ## v1.17.0 — 2026-10-17
 
 > Theme: reproducible preparation and honest outputs. Pin the Kaggle ligand-prep toolchain, record what actually ran, report every missing docking output, and give experts control over receptor chemistry.
